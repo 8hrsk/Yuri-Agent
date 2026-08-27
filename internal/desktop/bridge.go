@@ -13,6 +13,7 @@ import (
 
 	"github.com/OrdoAI/yuri-agent/internal/config"
 	"github.com/OrdoAI/yuri-agent/internal/observability"
+	"github.com/OrdoAI/yuri-agent/internal/plugins"
 	"github.com/OrdoAI/yuri-agent/internal/providers/codexapp"
 	securitykeyring "github.com/OrdoAI/yuri-agent/internal/security/keyring"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
@@ -20,22 +21,23 @@ import (
 
 // Bridge is the deliberately small API exposed to the Stage 0 frontend.
 type Bridge struct {
-	mu               sync.RWMutex
-	logger           *slog.Logger
-	database         *sql.DB
-	repositories     *storage.Repositories
-	paths            config.Paths
-	config           config.Config
-	keyring          *securitykeyring.Store
-	appCtx           context.Context
-	codex            *codexapp.Client
-	activeRuns       map[string]context.CancelFunc
-	approvals        map[string]chan bool
-	backgroundCtx    context.Context
-	backgroundCancel context.CancelFunc
-	background       sync.WaitGroup
-	modelTurns       chan struct{}
-	shuttingDown     bool
+	mu                sync.RWMutex
+	logger            *slog.Logger
+	database          *sql.DB
+	repositories      *storage.Repositories
+	paths             config.Paths
+	config            config.Config
+	keyring           *securitykeyring.Store
+	appCtx            context.Context
+	codex             *codexapp.Client
+	activeRuns        map[string]context.CancelFunc
+	approvals         map[string]chan bool
+	backgroundCtx     context.Context
+	backgroundCancel  context.CancelFunc
+	background        sync.WaitGroup
+	modelTurns        chan struct{}
+	shuttingDown      bool
+	pluginSupervisors map[string]*plugins.Supervisor
 }
 
 // Status is safe to expose to the local frontend and contains no secrets.
@@ -57,7 +59,7 @@ func NewBridge(ctx context.Context) (*Bridge, error) {
 		return nil, err
 	}
 	paths = paths.WithDataDirectory(value.DataDirectory)
-	for _, directory := range []string{paths.DataDirectory, paths.BlobDirectory, paths.LogDirectory} {
+	for _, directory := range []string{paths.DataDirectory, paths.BlobDirectory, paths.LogDirectory, paths.PluginDirectory} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return nil, fmt.Errorf("create runtime directory: %w", err)
 		}
@@ -85,7 +87,7 @@ func NewBridge(ctx context.Context) (*Bridge, error) {
 		logger: logger, database: database, repositories: repositories, paths: paths,
 		config: value, keyring: securitykeyring.New(), activeRuns: make(map[string]context.CancelFunc),
 		approvals: make(map[string]chan bool), backgroundCtx: backgroundCtx, backgroundCancel: backgroundCancel,
-		modelTurns: make(chan struct{}, 1),
+		modelTurns: make(chan struct{}, 1), pluginSupervisors: make(map[string]*plugins.Supervisor),
 	}, nil
 }
 
@@ -95,6 +97,7 @@ func (b *Bridge) Startup(ctx context.Context) {
 	b.appCtx = ctx
 	b.mu.Unlock()
 	b.logger.InfoContext(ctx, "desktop runtime started", "platform", runtime.GOOS)
+	b.restoreEnabledPlugins()
 }
 
 // Shutdown releases durable resources after background work has stopped.
@@ -104,6 +107,11 @@ func (b *Bridge) Shutdown(ctx context.Context) {
 	b.codex = nil
 	b.shuttingDown = true
 	backgroundCancel := b.backgroundCancel
+	supervisors := make([]*plugins.Supervisor, 0, len(b.pluginSupervisors))
+	for _, supervisor := range b.pluginSupervisors {
+		supervisors = append(supervisors, supervisor)
+	}
+	b.pluginSupervisors = make(map[string]*plugins.Supervisor)
 	for _, cancel := range b.activeRuns {
 		cancel()
 	}
@@ -111,6 +119,11 @@ func (b *Bridge) Shutdown(ctx context.Context) {
 	b.mu.Unlock()
 	if backgroundCancel != nil {
 		backgroundCancel()
+	}
+	for _, supervisor := range supervisors {
+		stopCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		_ = supervisor.Stop(stopCtx)
+		cancel()
 	}
 	b.background.Wait()
 	if client != nil {
@@ -125,7 +138,7 @@ func (b *Bridge) Shutdown(ctx context.Context) {
 
 // Health is the Stage 0 bridge smoke endpoint.
 func (b *Bridge) Health() Status {
-	return Status{State: "ready", Version: "0.3.0-stage2", Platform: runtime.GOOS + "/" + runtime.GOARCH}
+	return Status{State: "ready", Version: "0.4.0-stage3", Platform: runtime.GOOS + "/" + runtime.GOARCH}
 }
 
 func (b *Bridge) context() (context.Context, context.CancelFunc) {

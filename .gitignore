@@ -1,5 +1,6 @@
 # Go
 /bin/
+/plugins/reference/bin/
 /build/
 *.test
 coverage.out

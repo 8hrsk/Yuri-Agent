@@ -189,6 +189,8 @@ Provider adapter обязан:
 
 Signature/checksum, source commit, supported OS/arch и protocol compatibility записываются в SQLite. Неподписанный dev package допускается только в явном dev mode и заметно маркируется.
 
+Граница Этапа 3: out-of-process runtime изолирует сбой и закрывает прямые application API, но ещё не является полноценной OS sandbox. Локальный executable технически остаётся кодом с правами текущего пользователя, поэтому устанавливается только после явного review владельца; unsigned/unverified package дополнительно требует dev mode. macOS sandbox profile, process-group hardening, notarization и trust store для подписи относятся к Этапу 6 и должны быть завершены до позиционирования сторонних plugins как недоверенного кода.
+
 ## 9. Side-effect pipeline
 
 ```text

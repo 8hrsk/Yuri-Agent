@@ -2,7 +2,7 @@
 
 Yuri — локальный desktop-first AI-агент для одного владельца. Первый публичный релиз ориентирован на macOS; архитектура остаётся переносимой на Windows и Linux.
 
-Engineering foundation, conversational vertical slice и веха storage/memory реализованы. Основные решения и границы находятся в следующих документах:
+Engineering foundation, conversational vertical slice, storage/memory и plugin runtime реализованы. Основные решения и границы находятся в следующих документах:
 
 - [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — техническое задание и roadmap;
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — компоненты, context assembly, storage и trust boundaries;
@@ -26,8 +26,14 @@ Engineering foundation, conversational vertical slice и веха storage/memory
 - append-only версии памяти, редактирование, pin, soft delete и lifecycle `active → dormant → active`;
 - bounded core snapshot, hybrid lexical/vector-ready retrieval и межсессионная сборка контекста;
 - Wails UI для просмотра памяти и целенаправленного поиска по прошлым сессиям.
+- versioned `yuri.plugin.v1` JSON Lines protocol и out-of-process supervisor с handshake, health, bounded messages, cancellation, restart и process-group termination;
+- JSON Schema manifest/RPC contracts, dependency-free Go Plugin SDK и реально исполняемый reference echo plugin;
+- локальная проверка и атомарная установка plugin package, checksum/platform/core compatibility, explicit dev mode и установка в выключенном состоянии;
+- durable plugin metadata/capability grants в SQLite, deny-by-default tool mediation, runtime status/audit и UI управления lifecycle.
 
-CI проверяет Go-код, frontend и отдельный macOS smoke-путь. Plugin runtime, scheduler/proactivity и reflection/persona evolution добавляются по следующим отдельным вехам roadmap.
+CI проверяет core, Plugin SDK/reference plugin, frontend и отдельный macOS smoke-путь. Scheduler/proactivity и reflection/persona evolution добавляются по следующим отдельным вехам roadmap.
+
+Важно: Этап 3 изолирует сбой плагина отдельным процессом, но ещё не превращает сторонний executable в полностью недоверенный код. До OS sandbox/notarization/trust-store hardening устанавливать следует только проверенные пакеты; unsigned package требует явного dev mode.
 
 ## Локальная проверка
 

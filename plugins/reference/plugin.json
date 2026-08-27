@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "id": "yuri.reference-echo",
+  "name": "Yuri Reference Echo",
+  "version": "0.1.0",
+  "publisher": "OrdoAI",
+  "description": "A minimal out-of-process plugin that echoes a message.",
+  "executable": "bin/yuri-reference",
+  "supported_os": ["darwin", "windows", "linux"],
+  "supported_arch": ["amd64", "arm64"],
+  "protocol_version": "1.0",
+  "min_core_version": "0.1.0",
+  "max_core_version": "0.4.0",
+  "tools": [
+    {
+      "id": "echo",
+      "name": "Echo",
+      "description": "Returns the supplied message without performing a side effect.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": {
+          "message": {"type": "string", "maxLength": 4096}
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": {
+          "message": {"type": "string"}
+        }
+      },
+      "risk": "low"
+    }
+  ],
+  "event_sources": [],
+  "permissions": []
+}

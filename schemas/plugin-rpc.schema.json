@@ -1,0 +1,347 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yuri-agent.dev/schemas/plugin-rpc.schema.json",
+  "title": "Yuri Plugin JSON Lines RPC",
+  "description": "Versioned, bounded JSON-lines messages exchanged over plugin stdin/stdout.",
+  "oneOf": [
+    { "$ref": "#/$defs/handshake" },
+    { "$ref": "#/$defs/handshakeResult" },
+    { "$ref": "#/$defs/health" },
+    { "$ref": "#/$defs/healthResult" },
+    { "$ref": "#/$defs/toolInvoke" },
+    { "$ref": "#/$defs/toolResult" },
+    { "$ref": "#/$defs/event" },
+    { "$ref": "#/$defs/shutdown" },
+    { "$ref": "#/$defs/shutdownResult" },
+    { "$ref": "#/$defs/error" }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "protocol": {
+      "const": "yuri.plugin.v1"
+    },
+    "messageType": {
+      "enum": [
+        "handshake",
+        "handshake_result",
+        "health",
+        "health_result",
+        "tool_invoke",
+        "tool_result",
+        "event",
+        "shutdown",
+        "shutdown_result",
+        "error"
+      ]
+    },
+    "payload": {
+      "type": "object",
+      "maxProperties": 256
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "type", "id"],
+      "properties": {
+        "protocol": {
+          "$ref": "#/$defs/protocol"
+        },
+        "type": {
+          "$ref": "#/$defs/messageType"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "reply_to": {
+          "$ref": "#/$defs/id"
+        },
+        "payload": {
+          "$ref": "#/$defs/payload"
+        },
+        "error": {
+          "$ref": "#/$defs/rpcError"
+        }
+      }
+    },
+    "rpcError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability"],
+      "properties": {
+        "capability": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{1,127}$"
+        },
+        "scope": {
+          "type": "object",
+          "maxProperties": 64
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "handshakePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["core_version", "protocol_version"],
+      "properties": {
+        "core_version": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "protocol_version": {
+          "const": "1.0"
+        },
+        "plugin_id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "grants": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/grant"
+          }
+        }
+      }
+    },
+    "handshake": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "handshake" },
+            "payload": { "$ref": "#/$defs/handshakePayload" }
+          },
+          "required": ["payload"]
+        }
+      ]
+    },
+    "handshakeResultPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "protocol_version", "plugin_id", "plugin_version"],
+      "properties": {
+        "accepted": { "type": "boolean" },
+        "protocol_version": { "const": "1.0" },
+        "plugin_id": { "type": "string", "maxLength": 128 },
+        "plugin_version": { "type": "string", "maxLength": 128 },
+        "granted": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/grant" }
+        },
+        "reason": { "type": "string", "maxLength": 4096 }
+      }
+    },
+    "handshakeResult": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "handshake_result" },
+            "reply_to": { "$ref": "#/$defs/id" },
+            "payload": { "$ref": "#/$defs/handshakeResultPayload" }
+          },
+          "required": ["reply_to", "payload"]
+        }
+      ]
+    },
+    "health": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "health" }
+          }
+        }
+      ]
+    },
+    "healthResultPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "plugin_id", "plugin_version", "protocol_version", "checked_at"],
+      "properties": {
+        "status": { "const": "ok" },
+        "plugin_id": { "type": "string", "maxLength": 128 },
+        "plugin_version": { "type": "string", "maxLength": 128 },
+        "protocol_version": { "const": "1.0" },
+        "checked_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "healthResult": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "health_result" },
+            "reply_to": { "$ref": "#/$defs/id" },
+            "payload": { "$ref": "#/$defs/healthResultPayload" }
+          },
+          "required": ["reply_to", "payload"]
+        }
+      ]
+    },
+    "toolInvokePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_id", "arguments"],
+      "properties": {
+        "tool_id": { "type": "string", "maxLength": 128 },
+        "arguments": { "type": "object", "maxProperties": 256 },
+        "deadline": { "type": "string", "format": "date-time" }
+      }
+    },
+    "toolInvoke": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "tool_invoke" },
+            "payload": { "$ref": "#/$defs/toolInvokePayload" }
+          },
+          "required": ["payload"]
+        }
+      ]
+    },
+    "toolResultPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "output": { "type": "object", "maxProperties": 256 },
+        "error": { "$ref": "#/$defs/rpcError" },
+        "metadata": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": { "type": "string", "maxLength": 1024 }
+        }
+      }
+    },
+    "toolResult": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "tool_result" },
+            "reply_to": { "$ref": "#/$defs/id" },
+            "payload": { "$ref": "#/$defs/toolResultPayload" }
+          },
+          "required": ["reply_to", "payload"]
+        }
+      ]
+    },
+    "eventPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "event_type", "payload", "occurred_at"],
+      "properties": {
+        "source": { "type": "string", "maxLength": 128 },
+        "event_type": { "type": "string", "maxLength": 128 },
+        "payload": { "type": "object", "maxProperties": 256 },
+        "occurred_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "event": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "event" },
+            "payload": { "$ref": "#/$defs/eventPayload" }
+          },
+          "required": ["payload"]
+        }
+      ]
+    },
+    "shutdownPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reason": { "type": "string", "maxLength": 1024 }
+      }
+    },
+    "shutdown": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "shutdown" },
+            "payload": { "$ref": "#/$defs/shutdownPayload" }
+          }
+        }
+      ]
+    },
+    "shutdownResultPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted"],
+      "properties": {
+        "accepted": { "type": "boolean" }
+      }
+    },
+    "shutdownResult": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "shutdown_result" },
+            "reply_to": { "$ref": "#/$defs/id" },
+            "payload": { "$ref": "#/$defs/shutdownResultPayload" }
+          },
+          "required": ["reply_to", "payload"]
+        }
+      ]
+    },
+    "error": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "error" },
+            "reply_to": { "$ref": "#/$defs/id" },
+            "error": { "$ref": "#/$defs/rpcError" }
+          },
+          "required": ["reply_to", "error"]
+        }
+      ]
+    }
+  }
+}

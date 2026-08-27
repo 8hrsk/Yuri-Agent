@@ -44,7 +44,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          formatted="$(gofmt -l cmd internal)"
+          formatted="$(gofmt -l cmd internal sdk plugins)"
           if [ -n "$formatted" ]; then
             echo "The following Go files are not gofmt-clean:"
             echo "$formatted"
@@ -52,10 +52,10 @@ jobs:
           fi
 
       - name: Vet
-        run: go vet ./cmd/... ./internal/...
+        run: go vet ./cmd/... ./internal/... ./sdk/... ./plugins/...
 
       - name: Test
-        run: go test ./cmd/... ./internal/...
+        run: go test ./cmd/... ./internal/... ./sdk/... ./plugins/...
 
   frontend:
     name: Frontend foundation
@@ -106,7 +106,7 @@ jobs:
         run: go mod download
 
       - name: Test Go on target platform
-        run: go test ./cmd/... ./internal/...
+        run: go test ./cmd/... ./internal/... ./sdk/... ./plugins/...
 
       - name: Set up Node
         uses: actions/setup-node@v4

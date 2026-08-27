@@ -1,16 +1,16 @@
 .PHONY: fmt fmt-check vet test build frontend-install frontend-check frontend-build check
 
 fmt:
-	gofmt -w $$(find cmd internal -name '*.go' -type f)
+	gofmt -w $$(find cmd internal sdk plugins -name '*.go' -type f)
 
 fmt-check:
-	@test -z "$$(gofmt -l cmd internal)" || (gofmt -l cmd internal && exit 1)
+	@test -z "$$(gofmt -l cmd internal sdk plugins)" || (gofmt -l cmd internal sdk plugins && exit 1)
 
 vet:
-	go vet ./cmd/... ./internal/...
+	go vet ./cmd/... ./internal/... ./sdk/... ./plugins/...
 
 test:
-	go test ./cmd/... ./internal/...
+	go test ./cmd/... ./internal/... ./sdk/... ./plugins/...
 
 build:
 	go build -o bin/yuri ./cmd/yuri

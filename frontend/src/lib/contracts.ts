@@ -109,6 +109,69 @@ export interface MemoryUpdate {
   pinned?: boolean
 }
 
+export type PluginStatus = 'installed' | 'enabled' | 'running' | 'stopped' | 'crashed' | 'error' | 'disabled' | 'unknown'
+
+export type PluginSignatureStatus = 'signed' | 'unsigned' | 'invalid' | 'dev' | 'unknown'
+
+export interface PluginPermission {
+  capability: string
+  scope?: string
+  description?: string
+  risk?: ToolRisk
+  granted: boolean
+  grantExpiresAt?: string
+}
+
+export interface PluginTool {
+  id: string
+  name: string
+  description?: string
+  risk: ToolRisk
+}
+
+export interface PluginRecord {
+  id: string
+  name: string
+  version: string
+  publisher?: string
+  description?: string
+  protocolVersion?: string
+  coreVersionRange?: string
+  enabled: boolean
+  running: boolean
+  status: PluginStatus
+  installPath?: string
+  signatureStatus: PluginSignatureStatus
+  checksum?: string
+  repositoryUrl?: string
+  releaseTag?: string
+  sourceCommit?: string
+  permissions: PluginPermission[]
+  tools: PluginTool[]
+  eventSources: string[]
+  lastError?: string
+  installedAt?: string
+  updatedAt?: string
+}
+
+export interface PluginPackageInspection {
+  path: string
+  valid: boolean
+  compatible: boolean
+  manifest?: PluginRecord
+  signatureStatus: PluginSignatureStatus
+  checksum?: string
+  warnings: string[]
+  errors: string[]
+  installable?: boolean
+  requiresDevMode?: boolean
+}
+
+export interface PluginInstallRequest {
+  path: string
+  devMode?: boolean
+}
+
 export interface ArchiveSearchRequest {
   query: string
   includeDormant?: boolean
@@ -212,4 +275,12 @@ export interface YuriClient {
   updateMemory(memoryId: string, update: MemoryUpdate): Promise<MemoryRecord | undefined>
   setMemoryLifecycle(memoryId: string, state: MemoryLifecycleState): Promise<MemoryRecord | undefined>
   deleteMemory(memoryId: string): Promise<void>
+  listPlugins(): Promise<PluginRecord[]>
+  inspectPluginPackage(path: string, devMode?: boolean): Promise<PluginPackageInspection>
+  installPlugin(request: PluginInstallRequest): Promise<PluginRecord | undefined>
+  enablePlugin(pluginId: string): Promise<PluginRecord | undefined>
+  disablePlugin(pluginId: string): Promise<PluginRecord | undefined>
+  uninstallPlugin(pluginId: string): Promise<void>
+  startPlugin(pluginId: string): Promise<PluginRecord | undefined>
+  stopPlugin(pluginId: string): Promise<PluginRecord | undefined>
 }

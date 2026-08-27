@@ -1,0 +1,338 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yuri-agent.dev/schemas/plugin-manifest.schema.json",
+  "title": "Yuri Plugin Manifest",
+  "description": "A signed, capability-declaring manifest for an out-of-process Yuri plugin.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "version",
+    "publisher",
+    "executable",
+    "supported_os",
+    "supported_arch",
+    "protocol_version",
+    "min_core_version",
+    "max_core_version",
+    "tools",
+    "event_sources",
+    "permissions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "version": {
+      "$ref": "#/$defs/semver"
+    },
+    "publisher": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "executable": {
+      "$ref": "#/$defs/relativePath"
+    },
+    "supported_os": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["darwin", "macos", "windows", "linux"]
+      }
+    },
+    "supported_arch": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["amd64", "arm64", "386", "arm"]
+      }
+    },
+    "platforms": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/platform"
+      }
+    },
+    "protocol_version": {
+      "const": "1.0"
+    },
+    "min_core_version": {
+      "$ref": "#/$defs/semver"
+    },
+    "max_core_version": {
+      "$ref": "#/$defs/semver"
+    },
+    "tools": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/tool"
+      }
+    },
+    "event_sources": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/eventSource"
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/permission"
+      }
+    },
+    "repository": {
+      "$ref": "#/$defs/repository"
+    },
+    "release_assets": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/releaseAsset"
+      }
+    },
+    "checksum": {
+      "$ref": "#/$defs/checksum"
+    },
+    "signature": {
+      "$ref": "#/$defs/signature"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^v?[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?!/)(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$)).+$"
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "arch"],
+      "properties": {
+        "os": {
+          "enum": ["darwin", "macos", "windows", "linux"]
+        },
+        "arch": {
+          "enum": ["amd64", "arm64", "386", "arm"]
+        },
+        "executable": {
+          "$ref": "#/$defs/relativePath"
+        }
+      }
+    },
+    "jsonSchema": {
+      "type": "object",
+      "maxProperties": 256
+    },
+    "capability": {
+      "enum": [
+        "filesystem.read",
+        "filesystem.write",
+        "filesystem.delete",
+        "network.http",
+        "secrets.use",
+        "notifications.send",
+        "scheduler.manage",
+        "memory.read",
+        "memory.write",
+        "memory.delete",
+        "external.send"
+      ]
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "input_schema", "output_schema", "risk"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "input_schema": {
+          "$ref": "#/$defs/jsonSchema"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/jsonSchema"
+        },
+        "risk": {
+          "enum": ["low", "medium", "high", "critical"]
+        },
+        "permissions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/capability"
+          }
+        }
+      }
+    },
+    "eventSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "schema"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "schema": {
+          "$ref": "#/$defs/jsonSchema"
+        },
+        "permissions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/capability"
+          }
+        }
+      }
+    },
+    "permission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability", "reason"],
+      "properties": {
+        "capability": {
+          "$ref": "#/$defs/capability"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "scope": {
+          "type": "object",
+          "maxProperties": 64
+        }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^(https://[^/]+/|http://(localhost|127\\.0\\.0\\.1)(?::[0-9]+)?/)"
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "commit": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "release_tag": {
+          "type": "string",
+          "maxLength": 256
+        }
+      }
+    },
+    "releaseAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "arch", "url", "filename"],
+      "properties": {
+        "os": {
+          "enum": ["darwin", "macos", "windows", "linux"]
+        },
+        "arch": {
+          "enum": ["amd64", "arm64", "386", "arm"]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^(https://[^/]+/|http://(localhost|127\\.0\\.0\\.1)(?::[0-9]+)?/)"
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^/\\\\]+$"
+        },
+        "checksum": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        }
+      }
+    },
+    "checksum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "value"],
+      "properties": {
+        "algorithm": {
+          "const": "sha256"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "key_id", "value"],
+      "properties": {
+        "algorithm": {
+          "const": "ed25519"
+        },
+        "key_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

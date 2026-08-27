@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { ChatView } from './components/ChatView'
 import { Icon } from './components/Icon'
 import { MemoryView } from './components/MemoryView'
+import { PluginView } from './components/PluginView'
 import { PlaceholderView } from './components/PlaceholderView'
 import { ProviderSettingsView } from './components/ProviderSettingsView'
 import { Sidebar } from './components/Sidebar'
@@ -30,6 +31,8 @@ function App() {
             <ChatView backend={backend} onOpenSettings={() => setActiveId('settings')} />
           ) : activeId === 'memory' ? (
             <MemoryView />
+          ) : activeId === 'plugins' ? (
+            <PluginView />
           ) : activeId === 'settings' ? (
             <ProviderSettingsView onBackToChat={() => setActiveId('chat')} />
           ) : (

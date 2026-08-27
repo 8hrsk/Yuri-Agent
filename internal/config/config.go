@@ -29,6 +29,7 @@ type Config struct {
 	AllowedDirectories []string         `json:"allowed_directories,omitempty"`
 	Providers          []ProviderConfig `json:"providers,omitempty"`
 	Voice              VoiceConfig      `json:"voice,omitempty"`
+	PluginDevMode      bool             `json:"plugin_dev_mode,omitempty"`
 }
 
 type ProviderKind string
@@ -69,6 +70,7 @@ type Paths struct {
 	PebbleDirectory string
 	BlobDirectory   string
 	LogDirectory    string
+	PluginDirectory string
 }
 
 // WithDataDirectory returns paths whose durable stores live under directory.
@@ -78,6 +80,7 @@ func (p Paths) WithDataDirectory(directory string) Paths {
 	p.PebbleDirectory = filepath.Join(directory, "pebble")
 	p.BlobDirectory = filepath.Join(directory, "blobs")
 	p.LogDirectory = filepath.Join(directory, "logs")
+	p.PluginDirectory = filepath.Join(directory, "plugins")
 	return p
 }
 
@@ -103,6 +106,7 @@ func DefaultPaths() (Paths, error) {
 		PebbleDirectory: filepath.Join(dataDirectory, "pebble"),
 		BlobDirectory:   filepath.Join(dataDirectory, "blobs"),
 		LogDirectory:    filepath.Join(dataDirectory, "logs"),
+		PluginDirectory: filepath.Join(dataDirectory, "plugins"),
 	}, nil
 }
 

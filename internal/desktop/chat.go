@@ -17,6 +17,7 @@ import (
 	contextbuilder "github.com/OrdoAI/yuri-agent/internal/context"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 	"github.com/OrdoAI/yuri-agent/internal/memory"
+	"github.com/OrdoAI/yuri-agent/internal/plugins"
 	"github.com/OrdoAI/yuri-agent/internal/providers/codexapp"
 	openaiadapter "github.com/OrdoAI/yuri-agent/internal/providers/openai"
 	"github.com/OrdoAI/yuri-agent/internal/security"
@@ -244,7 +245,9 @@ func (b *Bridge) SendMessage(request ChatRequest) (ChatRunResult, error) {
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
-	runtime.Authorizer = agent.AllowAllAuthorizer{}
+	runtime.Authorizer = desktopToolAuthorizer{}
+	runtime.Approvals = desktopApprovalHandler{bridge: b}
+	emitter.tools = registry
 	memoryEngine, err := b.newMemoryEngine(backend, model)
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
@@ -428,27 +431,42 @@ func (b *Bridge) chatTools(now time.Time) (*agent.ToolRegistry, error) {
 	registry := agent.NewToolRegistry()
 	b.mu.RLock()
 	roots := append([]string(nil), b.config.AllowedDirectories...)
+	supervisors := make(map[string]*plugins.Supervisor, len(b.pluginSupervisors))
+	for id, supervisor := range b.pluginSupervisors {
+		supervisors[id] = supervisor
+	}
 	b.mu.RUnlock()
-	if len(roots) == 0 {
-		return registry, nil
+	if len(roots) > 0 {
+		subjectID := domain.ID("yuri-core-agent")
+		grantID, err := domain.NewID("grant")
+		if err != nil {
+			return nil, err
+		}
+		policy := security.NewPolicyEvaluator(security.WithPolicyGrant(domain.PermissionGrant{
+			ID: grantID, SubjectID: subjectID, Capability: domain.CapabilityFilesystemRead,
+			Scope: domain.CapabilityScope{Kind: domain.ScopeFilesystem, Values: roots}, GrantedAt: now,
+		}))
+		filesystem, err := builtintools.NewReadOnlyFilesystem(builtintools.ReadOnlyFilesystemConfig{
+			Roots: roots, Policy: policy, SubjectID: subjectID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := registry.Register(filesystemAgentTool{tool: filesystem}); err != nil {
+			return nil, err
+		}
 	}
-	subjectID := domain.ID("yuri-core-agent")
-	grantID, err := domain.NewID("grant")
-	if err != nil {
-		return nil, err
-	}
-	policy := security.NewPolicyEvaluator(security.WithPolicyGrant(domain.PermissionGrant{
-		ID: grantID, SubjectID: subjectID, Capability: domain.CapabilityFilesystemRead,
-		Scope: domain.CapabilityScope{Kind: domain.ScopeFilesystem, Values: roots}, GrantedAt: now,
-	}))
-	filesystem, err := builtintools.NewReadOnlyFilesystem(builtintools.ReadOnlyFilesystemConfig{
-		Roots: roots, Policy: policy, SubjectID: subjectID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if err := registry.Register(filesystemAgentTool{tool: filesystem}); err != nil {
-		return nil, err
+	for pluginID, supervisor := range supervisors {
+		state, _ := supervisor.State()
+		if state != plugins.StateRunning {
+			continue
+		}
+		manifest := supervisor.Manifest()
+		for _, declaration := range manifest.Tools {
+			if err := registry.Register(pluginAgentTool{pluginID: pluginID, declaration: declaration, supervisor: supervisor}); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return registry, nil
 }
@@ -490,6 +508,7 @@ type chatEmitter struct {
 	mu             sync.Mutex
 	events         []ChatEvent
 	toolRecords    map[string]storage.ToolCall
+	tools          *agent.ToolRegistry
 }
 
 func newChatEmitter(b *Bridge, conversationID, runID, messageID string) *chatEmitter {
@@ -506,6 +525,7 @@ func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
 	case agent.EventToolStarted:
 		view.Type = "tool.started"
 		view.ToolCall = toolCallView(event.ToolCall, "running", "", time.Now().UTC())
+		emitter.applyToolRisk(view.ToolCall)
 		if err := emitter.createToolRecord(ctx, event); err != nil {
 			return err
 		}
@@ -520,11 +540,16 @@ func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
 			}
 		}
 		view.ToolCall = toolCallView(event.ToolCall, status, truncateRunes(result, 512), time.Now().UTC())
+		emitter.applyToolRisk(view.ToolCall)
 		if err := emitter.finishToolRecord(ctx, event, status); err != nil {
 			return err
 		}
 	case agent.EventToolApprovalNeeded:
-		view.Type = "run.status"
+		approval, err := emitter.createApproval(ctx, event)
+		if err != nil {
+			return err
+		}
+		view.Type, view.Approval = "approval.required", approval
 		view.Status, view.Label = "waiting_approval", "Ожидается разрешение пользователя"
 	case agent.EventRunCompleted:
 		view.Type, view.MessageID = "assistant.completed", emitter.messageID
@@ -535,6 +560,106 @@ func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
 	}
 	emitter.emit(view)
 	return nil
+}
+
+type desktopToolAuthorizer struct{}
+
+func (desktopToolAuthorizer) Authorize(_ context.Context, request agent.ToolAuthorizationRequest) (agent.ToolAuthorizationResult, error) {
+	switch request.Tool.Risk {
+	case domain.RiskLow:
+		return agent.ToolAuthorizationResult{Decision: domain.PermissionAllow, Reason: "low-risk tool"}, nil
+	case domain.RiskMedium, domain.RiskHigh:
+		return agent.ToolAuthorizationResult{Decision: domain.PermissionNeedsApproval, Reason: "операция требует явного подтверждения"}, nil
+	case domain.RiskCritical:
+		return agent.ToolAuthorizationResult{Decision: domain.PermissionDeny, Reason: "critical operations are unavailable in MVP"}, nil
+	default:
+		return agent.ToolAuthorizationResult{Decision: domain.PermissionDeny, Reason: "unknown tool risk"}, nil
+	}
+}
+
+type desktopApprovalHandler struct{ bridge *Bridge }
+
+func (handler desktopApprovalHandler) Approve(ctx context.Context, request agent.ApprovalRequest) (bool, error) {
+	if handler.bridge == nil {
+		return false, errors.New("approval bridge is unavailable")
+	}
+	id := approvalIDFor(request.RunID, request.Call.ID)
+	handler.bridge.mu.RLock()
+	decision := handler.bridge.approvals[string(id)]
+	handler.bridge.mu.RUnlock()
+	if decision == nil {
+		return false, errors.New("approval request was not registered")
+	}
+	select {
+	case approved, ok := <-decision:
+		if !ok {
+			return false, errors.New("approval request was closed")
+		}
+		stored, err := handler.bridge.repositories.Approvals.Get(context.Background(), id)
+		if err == nil {
+			now := time.Now().UTC()
+			if approved {
+				err = stored.Approve(domain.ActorUser, "confirmed in desktop UI", now)
+			} else {
+				err = stored.Deny(domain.ActorUser, "denied in desktop UI", now)
+			}
+			if err == nil {
+				err = handler.bridge.repositories.Approvals.Save(context.Background(), stored)
+			}
+		}
+		return approved, err
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+}
+
+func (emitter *chatEmitter) createApproval(ctx context.Context, event agent.Event) (*ApprovalView, error) {
+	if event.ToolCall == nil {
+		return nil, errors.New("approval event is missing tool call")
+	}
+	risk := domain.RiskHigh
+	capabilities := []string{"plugin tool"}
+	if emitter.tools != nil {
+		if tool, ok := emitter.tools.Get(event.ToolCall.Name); ok {
+			descriptor := tool.Descriptor()
+			risk = descriptor.Risk
+			capabilities = capabilities[:0]
+			for _, capability := range descriptor.Capabilities {
+				capabilities = append(capabilities, string(capability))
+			}
+		}
+	}
+	if len(capabilities) == 0 {
+		capabilities = []string{"no external capability"}
+	}
+	id := approvalIDFor(domain.ID(emitter.runID), event.ToolCall.ID)
+	hash := sha256.Sum256(event.ToolCall.Arguments)
+	now := time.Now().UTC()
+	record, err := domain.NewApproval(
+		id, domain.ID(emitter.runID), hex.EncodeToString(hash[:]), "execute tool "+event.ToolCall.Name,
+		risk, domain.CapabilityScope{Kind: domain.ScopeResource, Values: []string{event.ToolCall.Name}}, now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	record.ToolID = event.ToolCall.Name
+	record.ExpiresAt = now.Add(5 * time.Minute)
+	if err := emitter.b.repositories.Approvals.Create(ctx, record); err != nil {
+		return nil, err
+	}
+	emitter.b.mu.Lock()
+	emitter.b.approvals[string(id)] = make(chan bool, 1)
+	emitter.b.mu.Unlock()
+	return &ApprovalView{
+		ID: string(id), ToolCallID: event.ToolCall.ID, Title: "Разрешить действие Yuri?",
+		Explanation: event.Error, Risk: string(risk), Scope: strings.Join(capabilities, ", "),
+		ExpiresAt: record.ExpiresAt.Format(time.RFC3339Nano),
+	}, nil
+}
+
+func approvalIDFor(runID domain.ID, callID string) domain.ID {
+	digest := sha256.Sum256([]byte(string(runID) + "\x00" + callID))
+	return domain.ID("approval_" + hex.EncodeToString(digest[:16]))
 }
 
 func (emitter *chatEmitter) emit(event ChatEvent) {
@@ -564,9 +689,15 @@ func (emitter *chatEmitter) createToolRecord(ctx context.Context, event agent.Ev
 		return err
 	}
 	now := time.Now().UTC()
+	risk := domain.RiskLow
+	if emitter.tools != nil {
+		if tool, ok := emitter.tools.Get(event.ToolCall.Name); ok {
+			risk = tool.Descriptor().Risk
+		}
+	}
 	record := storage.ToolCall{
 		ID: id, RunID: domain.ID(emitter.runID), ToolID: event.ToolCall.Name,
-		ArgsRedacted: boundedJSONObject(event.ToolCall.Arguments, 4096), Risk: domain.RiskLow,
+		ArgsRedacted: boundedJSONObject(event.ToolCall.Arguments, 4096), Risk: risk,
 		Status: storage.ToolCallRunning, IdempotencyKey: event.ToolCall.ID,
 		Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -583,6 +714,15 @@ func (emitter *chatEmitter) createToolRecord(ctx context.Context, event agent.Ev
 		Actor: domain.ActorAgent, Action: "tool.execute", Target: event.ToolCall.Name,
 		Decision: domain.PermissionAllow, PayloadRedacted: record.ArgsRedacted, CreatedAt: now,
 	})
+}
+
+func (emitter *chatEmitter) applyToolRisk(view *ToolCallView) {
+	if view == nil || emitter.tools == nil {
+		return
+	}
+	if tool, ok := emitter.tools.Get(view.Name); ok {
+		view.Risk = string(tool.Descriptor().Risk)
+	}
 }
 
 func (emitter *chatEmitter) finishToolRecord(ctx context.Context, event agent.Event, status string) error {
