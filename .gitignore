@@ -1,0 +1,33 @@
+# Go
+/bin/
+/build/
+*.test
+coverage.out
+
+# Frontend
+/frontend/node_modules/
+/frontend/dist/
+/frontend/package.json.md5
+/cmd/yuri/frontend/dist/*
+!/cmd/yuri/frontend/dist/.gitkeep
+/frontend/coverage/
+/frontend/wailsjs/
+
+# Wails
+/build/bin/
+/cmd/yuri/build/bin/
+
+# Local runtime data and secrets
+/.yuri/
+*.db
+*.db-shm
+*.db-wal
+*.pebble/
+.env
+.env.*
+!.env.example
+
+# Editors and macOS
+.DS_Store
+.idea/
+.vscode/
