@@ -103,6 +103,38 @@ func TestPolicyEvaluatorChecksScopeAndExpiry(t *testing.T) {
 	}
 }
 
+func TestPolicyEvaluatorAuthorizesMissingWriteLeafOnlyWithWriteGrant(t *testing.T) {
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	target := filepath.Join(root, "new.txt")
+	evaluator := NewPolicyEvaluator(
+		WithPolicyClock(domain.FixedClock{At: now}),
+		WithPolicyGrant(domain.PermissionGrant{
+			ID: "read-only", SubjectID: "agent", Capability: domain.CapabilityFilesystemRead,
+			Scope: domain.CapabilityScope{Kind: domain.ScopeFilesystem, Values: []string{root}}, GrantedAt: now,
+		}),
+	)
+	request := domain.PermissionRequest{
+		SubjectID: "agent", Capability: domain.CapabilityFilesystemWrite,
+		Scope:  domain.CapabilityScope{Kind: domain.ScopeFilesystem, Values: []string{target}},
+		Action: "filesystem.create " + target, Risk: domain.RiskMedium,
+	}
+	decision, err := evaluator.Evaluate(request)
+	if err != nil || decision.Decision != domain.PermissionDeny {
+		t.Fatalf("read grant covered write = %#v, %v", decision, err)
+	}
+	if err := evaluator.AddGrant(domain.PermissionGrant{
+		ID: "write", SubjectID: "agent", Capability: domain.CapabilityFilesystemWrite,
+		Scope: domain.CapabilityScope{Kind: domain.ScopeFilesystem, Values: []string{root}}, GrantedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	decision, err = evaluator.Evaluate(request)
+	if err != nil || decision.Decision != domain.PermissionNeedsApproval {
+		t.Fatalf("missing-leaf write decision = %#v, %v", decision, err)
+	}
+}
+
 func TestPathAllowlistRejectsSymlinkEscape(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

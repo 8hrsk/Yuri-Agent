@@ -430,7 +430,7 @@ MVP принимается, если:
 
 ### Этап 1. Conversational agent vertical slice
 
-Текстовый диалог, OpenAI-compatible adapter, официальный Codex App Server adapter, streaming, базовые STT/TTS, agent loop, встроенный read-only filesystem tool, approvals UI и audit.
+Текстовый диалог, OpenAI-compatible adapter, официальный Codex App Server adapter, streaming, базовые STT/TTS, agent loop, встроенные filesystem tools для чтения и bounded `create`/`replace` с exact-path approval, approvals UI и audit.
 
 ### Этап 2. Storage and memory
 

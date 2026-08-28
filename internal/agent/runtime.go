@@ -332,6 +332,7 @@ func (r *Runtime) executeTool(ctx context.Context, input RunRequest, call ToolCa
 			return ToolResult{}, err
 		}
 	}
+	approvalGranted := false
 	switch authorization.Decision {
 	case domain.PermissionDeny:
 		return ToolResult{Content: authorization.Reason, IsError: true}, nil
@@ -349,6 +350,7 @@ func (r *Runtime) executeTool(ctx context.Context, input RunRequest, call ToolCa
 		if !approved {
 			return ToolResult{Content: "tool execution denied by user", IsError: true}, nil
 		}
+		approvalGranted = true
 	case domain.PermissionAllow:
 	default:
 		return ToolResult{}, fmt.Errorf("%w: unknown authorization decision %q", ErrInvalidRequest, authorization.Decision)
@@ -358,8 +360,22 @@ func (r *Runtime) executeTool(ctx context.Context, input RunRequest, call ToolCa
 		return ToolResult{}, err
 	}
 	toolCtx := ctx
-	result, err := tool.Execute(toolCtx, call)
+	var result ToolResult
+	var err error
+	if approvalGranted {
+		if approvalAware, ok := tool.(ApprovalAwareTool); ok {
+			result, err = approvalAware.ExecuteApproved(toolCtx, call)
+		} else {
+			result, err = tool.Execute(toolCtx, call)
+		}
+	} else {
+		result, err = tool.Execute(toolCtx, call)
+	}
 	if err != nil {
+		failed := ToolResult{Content: redactRuntimeError(err), IsError: true}
+		if emitErr := emit(ctx, input.Sink, Event{Type: EventToolCompleted, RunID: input.RunID, Step: step, ToolCall: &call, ToolResult: &failed}); emitErr != nil {
+			return ToolResult{}, emitErr
+		}
 		return ToolResult{}, err
 	}
 	if maxBytes > 0 && int64(len(result.Content)) > maxBytes {

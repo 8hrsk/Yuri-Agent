@@ -54,6 +54,29 @@ type echoTool struct {
 	calls int
 }
 
+type approvalAwareTestTool struct {
+	directCalls   int
+	approvedCalls int
+}
+
+func (t *approvalAwareTestTool) Descriptor() ToolDescriptor {
+	return ToolDescriptor{
+		Name: "approval-aware", Risk: domain.RiskMedium,
+		InputSchema:  json.RawMessage(`{"type":"object"}`),
+		Capabilities: domain.CapabilitySet{domain.CapabilityFilesystemWrite},
+	}
+}
+
+func (t *approvalAwareTestTool) Execute(context.Context, ToolCall) (ToolResult, error) {
+	t.directCalls++
+	return ToolResult{Content: "direct"}, nil
+}
+
+func (t *approvalAwareTestTool) ExecuteApproved(context.Context, ToolCall) (ToolResult, error) {
+	t.approvedCalls++
+	return ToolResult{Content: "approved"}, nil
+}
+
 func (t *echoTool) Descriptor() ToolDescriptor {
 	return ToolDescriptor{
 		Name: "echo", Description: "echo input", Risk: domain.RiskLow,
@@ -148,6 +171,39 @@ func TestRuntimeAppliesAuthorizationAndApprovalBeforeExecute(t *testing.T) {
 	}
 	if !errors.Is(err, ErrBudgetExceeded) || echo.calls != 1 {
 		t.Fatalf("unexpected error/calls: %v/%d", err, echo.calls)
+	}
+}
+
+func TestRuntimeUsesApprovalAwareExecutionOnlyAfterApproval(t *testing.T) {
+	backend := &scriptedBackend{streams: [][]ModelEvent{
+		{
+			{Type: ModelEventToolCallStarted, ToolCallID: "call_1", ToolName: "approval-aware", Arguments: `{}`},
+			{Type: ModelEventCompleted},
+		},
+		{{Type: ModelEventTextDelta, Delta: "done"}, {Type: ModelEventCompleted}},
+	}}
+	registry := NewToolRegistry()
+	tool := &approvalAwareTestTool{}
+	if err := registry.Register(tool); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := NewRuntime(backend, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.Authorizer = authorizerFunc(func(context.Context, ToolAuthorizationRequest) (ToolAuthorizationResult, error) {
+		return ToolAuthorizationResult{Decision: domain.PermissionNeedsApproval, Reason: "write"}, nil
+	})
+	runtime.Approvals = approvalFunc(func(context.Context, ApprovalRequest) (bool, error) { return true, nil })
+	if _, err := runtime.Run(context.Background(), RunRequest{
+		RunID:        "run-approved",
+		ModelRequest: ModelRequest{Model: "test-model", Messages: []Message{{Role: RoleUser, Content: "write"}}},
+		Budget:       domain.RunBudget{MaxSteps: 2, MaxTokens: 100, MaxToolCalls: 1, MaxToolOutputBytes: 1000, MaxDurationSeconds: 2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if tool.directCalls != 0 || tool.approvedCalls != 1 {
+		t.Fatalf("direct/approved calls = %d/%d, want 0/1", tool.directCalls, tool.approvedCalls)
 	}
 }
 

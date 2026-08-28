@@ -181,7 +181,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
             )}
             <div className="settings-form settings-form--permissions">
               <label>
-                <span>Read-only директории <small>· один абсолютный путь на строку</small></span>
+                <span>Разрешённые директории <small>· один абсолютный путь на строку</small></span>
                 <textarea
                   onChange={(event) => setAllowedDirectories(event.target.value)}
                   placeholder={'/Users/you/Documents\n/Users/you/Projects'}
@@ -190,7 +190,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
                   value={allowedDirectories}
                 />
               </label>
-              <p className="settings-footnote"><Icon name="lock" width={13} height={13} /> Эти корни дают только capability <code>filesystem.read</code>. Запись, удаление и symlink escape запрещены.</p>
+              <p className="settings-footnote"><Icon name="lock" width={13} height={13} /> В этих корнях Yuri может читать файлы. Каждая операция <code>filesystem.write</code> показывает точный путь и требует отдельного подтверждения; удаление и symlink escape запрещены.</p>
             </div>
             <div className="settings-card__actions"><button className="button button--quiet" disabled={testing} onClick={() => void handleTest()} type="button">{testing ? 'Проверяю…' : 'Проверить соединение'}</button><button className="button button--accent" disabled={saving} onClick={() => void handleSave()} type="button">{saving ? 'Сохраняю…' : 'Сохранить'}</button></div>
           </section>

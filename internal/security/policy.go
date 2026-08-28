@@ -2,8 +2,10 @@ package security
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -224,7 +226,22 @@ func canonicalForScope(value string) (string, error) {
 	if !filepath.IsAbs(value) {
 		return "", fmt.Errorf("relative filesystem scope")
 	}
-	return filepath.EvalSymlinks(filepath.Clean(value))
+	cleaned := filepath.Clean(value)
+	resolved, err := filepath.EvalSymlinks(cleaned)
+	if err == nil {
+		return resolved, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	// A create request legitimately names a missing leaf. Canonicalize its
+	// existing parent so scope checks still reject symlink escapes without
+	// requiring the target file to exist before authorization.
+	parent, parentErr := filepath.EvalSymlinks(filepath.Dir(cleaned))
+	if parentErr != nil {
+		return "", err
+	}
+	return filepath.Join(parent, filepath.Base(cleaned)), nil
 }
 
 func networkScopeCovers(granted, requested string) bool {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -490,13 +491,23 @@ func (b *Bridge) chatTools(now time.Time) (*agent.ToolRegistry, error) {
 	b.mu.RUnlock()
 	if len(roots) > 0 {
 		subjectID := domain.ID("yuri-core-agent")
-		grantID, err := domain.NewID("grant")
+		readGrantID, err := domain.NewID("grant")
 		if err != nil {
 			return nil, err
 		}
-		policy := security.NewPolicyEvaluator(security.WithPolicyGrant(domain.PermissionGrant{
-			ID: grantID, SubjectID: subjectID, Capability: domain.CapabilityFilesystemRead,
-			Scope: domain.CapabilityScope{Kind: domain.ScopeFilesystem, Values: roots}, GrantedAt: now,
+		writeGrantID, err := domain.NewID("grant")
+		if err != nil {
+			return nil, err
+		}
+		policy := security.NewPolicyEvaluator(security.WithPolicyGrants([]domain.PermissionGrant{
+			{
+				ID: readGrantID, SubjectID: subjectID, Capability: domain.CapabilityFilesystemRead,
+				Scope: domain.CapabilityScope{Kind: domain.ScopeFilesystem, Values: roots}, GrantedAt: now,
+			},
+			{
+				ID: writeGrantID, SubjectID: subjectID, Capability: domain.CapabilityFilesystemWrite,
+				Scope: domain.CapabilityScope{Kind: domain.ScopeFilesystem, Values: roots}, GrantedAt: now,
+			},
 		}))
 		filesystem, err := builtintools.NewReadOnlyFilesystem(builtintools.ReadOnlyFilesystemConfig{
 			Roots: roots, Policy: policy, SubjectID: subjectID,
@@ -505,6 +516,15 @@ func (b *Bridge) chatTools(now time.Time) (*agent.ToolRegistry, error) {
 			return nil, err
 		}
 		if err := registry.Register(filesystemAgentTool{tool: filesystem}); err != nil {
+			return nil, err
+		}
+		writer, err := builtintools.NewWriteFilesystem(builtintools.WriteFilesystemConfig{
+			Roots: roots, Policy: policy, SubjectID: subjectID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := registry.Register(filesystemWriteAgentTool{tool: writer}); err != nil {
 			return nil, err
 		}
 	}
@@ -530,6 +550,49 @@ func (b *Bridge) chatTools(now time.Time) (*agent.ToolRegistry, error) {
 
 type filesystemAgentTool struct {
 	tool *builtintools.ReadOnlyFilesystemTool
+}
+
+type filesystemWriteAgentTool struct {
+	tool *builtintools.WriteFilesystemTool
+}
+
+func (adapter filesystemWriteAgentTool) Descriptor() agent.ToolDescriptor {
+	definition := adapter.tool.Definition()
+	schema, _ := json.Marshal(definition.InputSchema)
+	return agent.ToolDescriptor{
+		Name: definition.ID, Description: definition.Description, InputSchema: schema,
+		Risk: definition.Risk, Capabilities: domain.CapabilitySet(definition.Capabilities),
+	}
+}
+
+func (adapter filesystemWriteAgentTool) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
+	return adapter.execute(ctx, call, false)
+}
+
+func (adapter filesystemWriteAgentTool) ExecuteApproved(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
+	return adapter.execute(ctx, call, true)
+}
+
+func (adapter filesystemWriteAgentTool) execute(ctx context.Context, call agent.ToolCall, approved bool) (agent.ToolResult, error) {
+	var request builtintools.WriteRequest
+	if err := json.Unmarshal(call.Arguments, &request); err != nil {
+		return agent.ToolResult{}, fmt.Errorf("decode filesystem write request: %w", err)
+	}
+	var result builtintools.WriteResult
+	var err error
+	if approved {
+		result, err = adapter.tool.ExecuteApproved(ctx, request)
+	} else {
+		result, err = adapter.tool.Execute(ctx, request)
+	}
+	if err != nil {
+		return agent.ToolResult{}, err
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return agent.ToolResult{}, fmt.Errorf("encode filesystem write result: %w", err)
+	}
+	return agent.ToolResult{Content: string(encoded)}, nil
 }
 
 func (adapter filesystemAgentTool) Descriptor() agent.ToolDescriptor {
@@ -558,18 +621,22 @@ func (adapter filesystemAgentTool) Execute(ctx context.Context, call agent.ToolC
 }
 
 type chatEmitter struct {
-	b              *Bridge
-	conversationID string
-	runID          string
-	messageID      string
-	mu             sync.Mutex
-	events         []ChatEvent
-	toolRecords    map[string]storage.ToolCall
-	tools          *agent.ToolRegistry
+	b               *Bridge
+	conversationID  string
+	runID           string
+	messageID       string
+	mu              sync.Mutex
+	events          []ChatEvent
+	toolRecords     map[string]storage.ToolCall
+	approvalRecords map[string]domain.ID
+	tools           *agent.ToolRegistry
 }
 
 func newChatEmitter(b *Bridge, conversationID, runID, messageID string) *chatEmitter {
-	return &chatEmitter{b: b, conversationID: conversationID, runID: runID, messageID: messageID, toolRecords: make(map[string]storage.ToolCall)}
+	return &chatEmitter{
+		b: b, conversationID: conversationID, runID: runID, messageID: messageID,
+		toolRecords: make(map[string]storage.ToolCall), approvalRecords: make(map[string]domain.ID),
+	}
 }
 
 func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
@@ -671,13 +738,25 @@ func (handler desktopApprovalHandler) Approve(ctx context.Context, request agent
 		stored, err := handler.bridge.repositories.Approvals.Get(context.Background(), id)
 		if err == nil {
 			now := time.Now().UTC()
-			if approved {
+			auditActor := domain.ActorUser
+			if approved && !stored.ExpiresAt.IsZero() && !now.Before(stored.ExpiresAt) {
+				approved = false
+				auditActor = domain.ActorSystem
+				err = stored.Expire(now)
+			} else if approved {
 				err = stored.Approve(domain.ActorUser, "confirmed in desktop UI", now)
 			} else {
 				err = stored.Deny(domain.ActorUser, "denied in desktop UI", now)
 			}
 			if err == nil {
 				err = handler.bridge.repositories.Approvals.Save(context.Background(), stored)
+			}
+			if err == nil {
+				decision := domain.PermissionDeny
+				if approved {
+					decision = domain.PermissionAllow
+				}
+				err = handler.bridge.appendApprovalAudit(context.Background(), stored, "approval.resolved", decision, auditActor)
 			}
 		}
 		return approved, err
@@ -706,28 +785,80 @@ func (emitter *chatEmitter) createApproval(ctx context.Context, event agent.Even
 		capabilities = []string{"no external capability"}
 	}
 	id := approvalIDFor(domain.ID(emitter.runID), event.ToolCall.ID)
-	hash := sha256.Sum256(event.ToolCall.Arguments)
+	fingerprint := append([]byte(event.ToolCall.Name+"\x00"), event.ToolCall.Arguments...)
+	hash := sha256.Sum256(fingerprint)
 	now := time.Now().UTC()
+	scope := domain.CapabilityScope{Kind: domain.ScopeResource, Values: []string{event.ToolCall.Name}}
+	approvalScope := strings.Join(capabilities, ", ")
+	action := "execute tool " + event.ToolCall.Name
+	if event.ToolCall.Name == builtintools.FilesystemWriteToolID {
+		var request builtintools.WriteRequest
+		if err := json.Unmarshal(event.ToolCall.Arguments, &request); err != nil {
+			return nil, fmt.Errorf("decode filesystem write approval: %w", err)
+		}
+		path := filepath.Clean(strings.TrimSpace(request.Path))
+		if !filepath.IsAbs(path) {
+			return nil, errors.New("filesystem write approval requires an absolute path")
+		}
+		if emitter.tools != nil {
+			if registered, ok := emitter.tools.Get(event.ToolCall.Name); ok {
+				if writer, ok := registered.(filesystemWriteAgentTool); ok {
+					resolvedPath, resolveErr := writer.tool.ResolvePath(path)
+					if resolveErr != nil {
+						return nil, resolveErr
+					}
+					path = resolvedPath
+				}
+			}
+		}
+		scope = domain.CapabilityScope{Kind: domain.ScopeFilesystem, Values: []string{path}}
+		contentHash := sha256.Sum256([]byte(request.Content))
+		approvalScope = fmt.Sprintf("%s · %s · %d bytes · SHA-256 %s…", request.Operation, path, len(request.Content), hex.EncodeToString(contentHash[:6]))
+		action = fmt.Sprintf("filesystem.%s %s", request.Operation, path)
+	}
 	record, err := domain.NewApproval(
 		id, domain.ID(emitter.runID), hex.EncodeToString(hash[:]), "execute tool "+event.ToolCall.Name,
-		risk, domain.CapabilityScope{Kind: domain.ScopeResource, Values: []string{event.ToolCall.Name}}, now,
+		risk, scope, now,
 	)
 	if err != nil {
 		return nil, err
 	}
 	record.ToolID = event.ToolCall.Name
+	record.Action = action
 	record.ExpiresAt = now.Add(5 * time.Minute)
 	if err := emitter.b.repositories.Approvals.Create(ctx, record); err != nil {
+		return nil, err
+	}
+	if err := emitter.b.appendApprovalAudit(ctx, record, "approval.requested", domain.PermissionNeedsApproval, domain.ActorAgent); err != nil {
 		return nil, err
 	}
 	emitter.b.mu.Lock()
 	emitter.b.approvals[string(id)] = make(chan bool, 1)
 	emitter.b.mu.Unlock()
+	emitter.approvalRecords[event.ToolCall.ID] = id
 	return &ApprovalView{
 		ID: string(id), ToolCallID: event.ToolCall.ID, Title: "Разрешить действие Yuri?",
-		Explanation: event.Error, Risk: string(risk), Scope: strings.Join(capabilities, ", "),
+		Explanation: event.Error, Risk: string(risk), Scope: approvalScope,
 		ExpiresAt: record.ExpiresAt.Format(time.RFC3339Nano),
 	}, nil
+}
+
+func (b *Bridge) appendApprovalAudit(ctx context.Context, approval domain.Approval, action string, decision domain.PermissionDecision, actor domain.Actor) error {
+	id, err := domain.NewID("audit")
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]any{
+		"tool": approval.ToolID, "risk": approval.Risk, "scope": approval.Scope,
+	})
+	if err != nil {
+		return err
+	}
+	return b.repositories.Audit.Append(ctx, storage.AuditEvent{
+		ID: id, RunID: approval.RunID, ApprovalID: approval.ID, Actor: actor,
+		Action: action, Target: approval.ToolID, Decision: decision,
+		PayloadRedacted: string(payload), CreatedAt: time.Now().UTC(),
+	})
 }
 
 func approvalIDFor(runID domain.ID, callID string) domain.ID {
@@ -770,10 +901,11 @@ func (emitter *chatEmitter) createToolRecord(ctx context.Context, event agent.Ev
 	}
 	record := storage.ToolCall{
 		ID: id, RunID: domain.ID(emitter.runID), ToolID: event.ToolCall.Name,
-		ArgsRedacted: boundedJSONObject(event.ToolCall.Arguments, 4096), Risk: risk,
+		ArgsRedacted: redactedToolArguments(event.ToolCall.Name, event.ToolCall.Arguments, 4096), Risk: risk,
 		Status: storage.ToolCallRunning, IdempotencyKey: event.ToolCall.ID,
 		Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
+	record.ApprovalID = emitter.approvalRecords[event.ToolCall.ID]
 	if err := emitter.b.repositories.ToolCalls.Create(ctx, record); err != nil {
 		return err
 	}
@@ -787,6 +919,26 @@ func (emitter *chatEmitter) createToolRecord(ctx context.Context, event agent.Ev
 		Actor: domain.ActorAgent, Action: "tool.execute", Target: event.ToolCall.Name,
 		Decision: domain.PermissionAllow, PayloadRedacted: record.ArgsRedacted, CreatedAt: now,
 	})
+}
+
+func redactedToolArguments(toolID string, arguments json.RawMessage, maxBytes int) string {
+	if toolID != builtintools.FilesystemWriteToolID {
+		return boundedJSONObject(arguments, maxBytes)
+	}
+	var value map[string]any
+	if json.Unmarshal(arguments, &value) != nil || value == nil {
+		return "{}"
+	}
+	if content, ok := value["content"].(string); ok {
+		digest := sha256.Sum256([]byte(content))
+		value["content"] = fmt.Sprintf("[redacted %d bytes]", len(content))
+		value["content_sha256"] = hex.EncodeToString(digest[:])
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "{}"
+	}
+	return boundedJSONObject(encoded, maxBytes)
 }
 
 func (emitter *chatEmitter) applyToolRisk(view *ToolCallView) {
@@ -812,7 +964,23 @@ func (emitter *chatEmitter) finishToolRecord(ctx context.Context, event agent.Ev
 	}
 	record.Version++
 	record.UpdatedAt = time.Now().UTC()
-	return emitter.b.repositories.ToolCalls.Save(ctx, record)
+	if err := emitter.b.repositories.ToolCalls.Save(ctx, record); err != nil {
+		return err
+	}
+	auditID, err := domain.NewID("audit")
+	if err != nil {
+		return err
+	}
+	decision := domain.PermissionAllow
+	if status == "failed" {
+		decision = domain.PermissionDeny
+	}
+	payload, _ := json.Marshal(map[string]string{"status": record.Status})
+	return emitter.b.repositories.Audit.Append(ctx, storage.AuditEvent{
+		ID: auditID, RunID: record.RunID, ToolCallID: record.ID, ApprovalID: record.ApprovalID,
+		Actor: domain.ActorSystem, Action: "tool.completed", Target: record.ToolID,
+		Decision: decision, PayloadRedacted: string(payload), CreatedAt: record.UpdatedAt,
+	})
 }
 
 func toolCallView(call *agent.ToolCall, status, result string, now time.Time) *ToolCallView {
@@ -820,7 +988,7 @@ func toolCallView(call *agent.ToolCall, status, result string, now time.Time) *T
 		return nil
 	}
 	args := make(map[string]any)
-	_ = json.Unmarshal(call.Arguments, &args)
+	_ = json.Unmarshal([]byte(redactedToolArguments(call.Name, call.Arguments, 4096)), &args)
 	view := &ToolCallView{ID: call.ID, Name: call.Name, Label: call.Name, Risk: string(domain.RiskLow), Status: status, Args: args, Result: result}
 	if status == "running" {
 		view.StartedAt = now.Format(time.RFC3339Nano)

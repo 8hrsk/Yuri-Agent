@@ -7,7 +7,7 @@
 | 1 | Чистая установка, onboarding, тест провайдера | Partial | Clean-profile first-run gate, typed `CompleteOnboarding` Save→Probe, fake provider success/failure, restart persistence и Wails `OnDomReady` smoke на изолированном profile root | WebKit DOM interaction остаётся ручной до появления стабильного UI harness |
 | 2 | Streaming, cancel, понятная provider error | Partial | Agent/provider contract tests, frontend mock streaming | Реальный Wails bridge smoke с cancel/error |
 | 3 | Read-only файл внутри root, отказ снаружи | Automated | `internal/tools/filesystem_read_test.go` | Включить в общий MVP smoke |
-| 4 | Изменение файла через approval и audit | Missing | Risk/approval policy существует | Bounded filesystem write tool и сквозной approval/audit test |
+| 4 | Изменение файла через approval и audit | Automated | Bounded `filesystem.write` (`create`/`replace`) и сквозной `internal/desktop/filesystem_write_test.go`: exact-path approval, deny без mutation, action-linked tool record и redacted audit | Включить сценарий в общий MVP smoke |
 | 5 | Plugin install/permission/call/crash/restart | Partial | Offline lifecycle smoke проверяет реальный process handshake/invoke/stop; отдельно есть supervisor/reference integration и desktop install tests | Расширить smoke до package install, grants и crash/restart |
 | 6 | Автономная память и recall в другом диалоге | Automated | Offline lifecycle smoke проверяет SQLite memory/provenance/recall; desktop tests покрывают cross-session retrieval | Добавить полный agent-loop сценарий между диалогами |
 | 7 | Durable CRON, restart, no-overlap, history | Automated | Offline lifecycle smoke проверяет one-shot/history; scheduler и SQLite integration tests покрывают restart/no-overlap | Добавить desktop bridge reopen в smoke |
@@ -26,9 +26,8 @@
 
 1. Расширить существующий offline MVP lifecycle smoke единым leak scan.
 2. Поддерживать Wails `OnDomReady` launch smoke для реализованного first-run onboarding на временном profile root; UI WebKit interaction остаётся отдельным manual/harness-dependent слоем.
-3. Bounded filesystem write через существующий approval/policy boundary.
-4. Явный unsupported Antigravity contract и Codex logout UI.
-5. Fake-provider voice/chat smoke без сети и повторный acceptance audit.
+3. Явный unsupported Antigravity contract и Codex logout UI.
+4. Fake-provider voice/chat smoke без сети и повторный acceptance audit.
 
 Реальные OAuth credentials, платные provider calls, Developer ID, notarization и публикация артефактов не являются условиями локального OSS smoke-набора.
 

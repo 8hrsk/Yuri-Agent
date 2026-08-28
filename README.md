@@ -20,7 +20,7 @@ Engineering foundation, conversational vertical slice, storage/memory, plugin ru
 - потоковый текстовый chat через OpenAI-compatible Responses/Chat Completions;
 - официальный Codex App Server adapter с ChatGPT OAuth и чтением work/rate limits без доступа Yuri к OAuth-токенам;
 - agent loop с cancellation, budgets, structured tool calls и idempotency;
-- read-only filesystem tool только внутри явно разрешённых директорий, deny-by-default policy и redacted audit;
+- filesystem tools только внутри явно разрешённых директорий: low-risk чтение и bounded `create`/`replace` с точечным approval, атомарным commit, проверкой текущего SHA-256 и redacted audit;
 - push-to-talk с OpenAI-compatible STT и прерываемое системное TTS;
 - Wails UI для диалогов, состояний запуска, approvals и provider settings;
 - общий неизменяемый архив всех диалогов с SQLite FTS5 и provenance;

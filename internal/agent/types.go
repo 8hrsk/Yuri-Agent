@@ -92,6 +92,15 @@ type Tool interface {
 	Execute(context.Context, ToolCall) (ToolResult, error)
 }
 
+// ApprovalAwareTool keeps the durable approval decision attached to the
+// execution path without exposing it as model-controlled JSON. Runtime calls
+// ExecuteApproved only after ApprovalHandler returned true; direct Execute
+// remains fail-closed for tools that enforce approval internally.
+type ApprovalAwareTool interface {
+	Tool
+	ExecuteApproved(context.Context, ToolCall) (ToolResult, error)
+}
+
 // ToolResult is the safe, model-visible result of a tool invocation.
 type ToolResult struct {
 	Content  string         `json:"content"`

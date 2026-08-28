@@ -92,6 +92,55 @@ func (a *PathAllowlist) Resolve(path string) (string, error) {
 	return "", fmt.Errorf("%w: %s", ErrPathNotAllowed, path)
 }
 
+// ResolveForWrite canonicalizes a file target whose parent already exists.
+// Unlike Resolve, the target itself may be absent, which is required for a
+// bounded create operation. The canonical parent is checked against the
+// allowlist so a symlinked directory cannot redirect the write outside a
+// granted root. Existing symlink targets are rejected rather than followed.
+func (a *PathAllowlist) ResolveForWrite(path string) (string, error) {
+	if a == nil || len(a.roots) == 0 {
+		return "", fmt.Errorf("%w: allowlist is empty", ErrPathNotAllowed)
+	}
+	if strings.TrimSpace(path) == "" || !filepath.IsAbs(path) {
+		return "", fmt.Errorf("%w: path must be absolute", ErrPathNotAllowed)
+	}
+	cleaned := filepath.Clean(path)
+	base := filepath.Base(cleaned)
+	if base == "." || base == string(filepath.Separator) || base == "" {
+		return "", fmt.Errorf("%w: target must name a file", ErrPathNotAllowed)
+	}
+	parent, err := canonicalExistingPath(filepath.Dir(cleaned))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("%w: parent of %s", ErrPathNotFound, path)
+		}
+		return "", fmt.Errorf("%w: parent of %s: %v", ErrPathNotAllowed, path, err)
+	}
+	info, err := os.Stat(parent)
+	if err != nil || !info.IsDir() {
+		return "", fmt.Errorf("%w: parent is not a directory: %s", ErrPathNotAllowed, path)
+	}
+	allowed := false
+	for _, root := range a.roots {
+		if within(root, parent) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return "", fmt.Errorf("%w: %s", ErrPathNotAllowed, path)
+	}
+	target := filepath.Join(parent, base)
+	if targetInfo, err := os.Lstat(target); err == nil {
+		if targetInfo.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("%w: symlink write target: %s", ErrPathNotAllowed, path)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("%w: inspect target %s: %v", ErrPathNotAllowed, path, err)
+	}
+	return target, nil
+}
+
 // Contains reports whether an existing path is in the allowlist. It is a
 // convenience wrapper for callers that do not need the canonical path.
 func (a *PathAllowlist) Contains(path string) bool {
