@@ -10,6 +10,7 @@ import type {
   ChatEvent,
   ChatRequest,
   CodexAccount,
+  CodexLogoutResult,
   Conversation,
   EncryptedBackupInfo,
   EncryptedBackupInput,
@@ -1270,6 +1271,16 @@ class MockYuriClient implements YuriClient {
     return { ...this.provider.codex, limits: { ...defaultLimits } }
   }
 
+  async logoutCodex(): Promise<CodexLogoutResult> {
+    await sleep(220)
+    this.provider = {
+      ...this.provider,
+      codex: { connected: false },
+    }
+    this.onboarding = { completed: false, providerTested: false }
+    return { disconnected: true, onboarding: { ...this.onboarding } }
+  }
+
   async refreshCodexLimits(): Promise<UsageLimits | undefined> {
     if (!this.provider.codex.connected) return undefined
     await sleep(220)
@@ -1893,6 +1904,22 @@ class WailsYuriClient implements YuriClient {
       }
     }
     return login ? normalizeCodexAccount(login) : { connected: false }
+  }
+
+  async logoutCodex(): Promise<CodexLogoutResult> {
+    const method = findBridgeMethod(['CodexLogout', 'LogoutCodex', 'DisconnectCodexAccount'])
+    if (!method) throw new Error('Backend не поддерживает выход из Codex App Server.')
+    const value = await method()
+    if (!value || typeof value !== 'object') {
+      throw new Error('Backend не подтвердил выход из Codex App Server.')
+    }
+    const result = value as UnknownRecord
+    const disconnected = normalizeBoolean(result.disconnected ?? result.loggedOut ?? result.logged_out, false)
+    if (!disconnected) throw new Error('Codex App Server не подтвердил выход.')
+    return {
+      disconnected: true,
+      onboarding: normalizeOnboardingState(result.onboarding ?? result.state),
+    }
   }
 
   async refreshCodexLimits(): Promise<UsageLimits | undefined> {

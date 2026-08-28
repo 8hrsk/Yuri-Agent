@@ -48,6 +48,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [loggingIn, setLoggingIn] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
   const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; text: string }>()
 
   useEffect(() => {
@@ -134,6 +135,22 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
     }
   }
 
+  const handleLogout = async () => {
+    setLoggingOut(true)
+    setFeedback(undefined)
+    try {
+      const result = await client.logoutCodex()
+      if (!result.disconnected) throw new Error('Codex App Server не подтвердил выход.')
+      setCodex({ connected: false })
+      setLimits(undefined)
+      setFeedback({ kind: 'success', text: 'Вы вышли из ChatGPT. Для Codex потребуется новый OAuth-вход.' })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось выйти из Codex App Server.' })
+    } finally {
+      setLoggingOut(false)
+    }
+  }
+
   return (
     <div className="settings-view">
       <div className="settings-view__topline">
@@ -178,7 +195,8 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
             ) : settings.kind === 'codex-app-server' ? (
               <div className="codex-account">
                 <div className="codex-account__row"><div className="codex-account__avatar">{codex.connected ? '✓' : 'C'}</div><div><strong>{codex.connected ? codex.email : 'Аккаунт ChatGPT не подключён'}</strong><small>{codex.connected ? `${codex.plan ?? 'ChatGPT'} · авторизован ${codex.authenticatedAt ? new Date(codex.authenticatedAt).toLocaleDateString('ru-RU') : ''}` : 'Для Codex App Server нужен официальный OAuth-поток.'}</small></div></div>
-                <button className="button button--accent button--wide" disabled={loggingIn} onClick={() => void handleLogin()} type="button"><Icon name="command" width={15} height={15} />{loggingIn ? 'Открываю OAuth…' : codex.connected ? 'Переподключить через OAuth' : 'Войти через ChatGPT'}</button>
+                <button className="button button--accent button--wide" disabled={loggingIn || loggingOut} onClick={() => void handleLogin()} type="button"><Icon name="command" width={15} height={15} />{loggingIn ? 'Открываю OAuth…' : codex.connected ? 'Переподключить через OAuth' : 'Войти через ChatGPT'}</button>
+                {codex.connected && <button className="button button--quiet button--wide" disabled={loggingIn || loggingOut} onClick={() => void handleLogout()} type="button"><Icon name="lock" width={14} height={14} />{loggingOut ? 'Завершаю сессию…' : 'Выйти из ChatGPT'}</button>}
                 <p className="settings-footnote"><Icon name="lock" width={13} height={13} /> Yuri использует только официальный Codex App Server интерфейс. Токен не показывается модели и не сохраняется в SQLite.</p>
               </div>
             ) : (

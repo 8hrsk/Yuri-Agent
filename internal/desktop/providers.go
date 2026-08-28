@@ -70,6 +70,11 @@ type LoginView struct {
 	UserCode        string `json:"userCode,omitempty"`
 }
 
+type CodexLogoutView struct {
+	Disconnected bool           `json:"disconnected"`
+	Onboarding   OnboardingView `json:"onboarding"`
+}
+
 type ProviderSettingsInput struct {
 	ProviderID       string              `json:"providerId,omitempty"`
 	Kind             config.ProviderKind `json:"kind"`
@@ -495,14 +500,42 @@ func (b *Bridge) CodexRateLimits() (codexapp.RateLimitsResult, error) {
 	return client.ReadRateLimits(ctx)
 }
 
-func (b *Bridge) CodexLogout() error {
+func (b *Bridge) CodexLogout() (CodexLogoutView, error) {
 	ctx, cancel := b.context()
 	defer cancel()
 	client, err := b.ensureCodex(ctx)
 	if err != nil {
+		return CodexLogoutView{}, err
+	}
+	// Persist the fail-closed state before the external logout. If the app
+	// server request fails, a restart still cannot treat the old OAuth probe as
+	// current; the owner can retry login/logout explicitly.
+	if err := b.markProviderUntested(); err != nil {
+		return CodexLogoutView{}, err
+	}
+	if err := client.Logout(ctx); err != nil {
+		return CodexLogoutView{}, err
+	}
+	b.mu.Lock()
+	if b.codex == client {
+		b.codex = nil
+	}
+	b.mu.Unlock()
+	_ = client.Close()
+	return CodexLogoutView{Disconnected: true, Onboarding: b.GetOnboardingState()}, nil
+}
+
+func (b *Bridge) markProviderUntested() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	candidate := b.config
+	candidate.Onboarding.Completed = false
+	candidate.Onboarding.ProviderTested = false
+	if err := config.Save(b.paths, candidate); err != nil {
 		return err
 	}
-	return client.Logout(ctx)
+	b.config = candidate
+	return nil
 }
 
 func (b *Bridge) ensureCodex(ctx context.Context) (*codexapp.Client, error) {

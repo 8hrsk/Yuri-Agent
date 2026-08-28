@@ -61,6 +61,46 @@ describe('Yuri client contract', () => {
     expect(await client.getOnboardingState()).toEqual({ completed: false, providerTested: false })
   })
 
+  it('logs the mock Codex account out and closes the provider gate', async () => {
+    const client = createYuriClient()
+    await client.loginCodex()
+    const settings = { ...(await client.getProviderSnapshot()).settings, kind: 'codex-app-server' as const }
+    await client.testProvider(settings)
+
+    await expect(client.logoutCodex()).resolves.toEqual({
+      disconnected: true,
+      onboarding: { completed: false, providerTested: false },
+    })
+    expect((await client.getProviderSnapshot()).codex.connected).toBe(false)
+    expect(await client.getOnboardingState()).toEqual({ completed: false, providerTested: false })
+  })
+
+  it('forwards Codex logout and requires an explicit backend confirmation', async () => {
+    const calls: string[] = []
+    const bridge = {
+      ListConversations: () => [],
+      CodexLogout: () => {
+        calls.push('CodexLogout')
+        return { disconnected: true, onboarding: { completed: false, provider_tested: false } }
+      },
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      await expect(createYuriClient().logoutCodex()).resolves.toEqual({
+        disconnected: true,
+        onboarding: { completed: false, providerTested: false },
+      })
+      expect(calls).toEqual(['CodexLogout'])
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
   it('forwards typed first-run state and atomic completion through Wails', async () => {
     const calls: Array<{ name: string; args: unknown[] }> = []
     const bridge = {

@@ -121,6 +121,31 @@ func TestAntigravityCannotStartChatBackend(t *testing.T) {
 	}
 }
 
+func TestMarkProviderUntestedPersistsLogoutGate(t *testing.T) {
+	paths := providerTestPaths(t)
+	value := config.Default(paths)
+	value.Onboarding.Completed = true
+	value.Onboarding.ProviderTested = true
+	if err := config.Save(paths, value); err != nil {
+		t.Fatal(err)
+	}
+	bridge := &Bridge{paths: paths, config: value}
+	if err := bridge.markProviderUntested(); err != nil {
+		t.Fatal(err)
+	}
+	state := bridge.GetOnboardingState()
+	if state.Completed || state.ProviderTested || state.State != OnboardingStatePending {
+		t.Fatalf("logout onboarding state = %#v", state)
+	}
+	loaded, err := config.Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Onboarding.Completed || loaded.Onboarding.ProviderTested {
+		t.Fatalf("persisted logout gate = %#v", loaded.Onboarding)
+	}
+}
+
 func TestOnboardingRequiresSuccessfulProbeAndSurvivesReload(t *testing.T) {
 	const secret = "sk-local-onboarding-secret"
 	var requests atomic.Int32

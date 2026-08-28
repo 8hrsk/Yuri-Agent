@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -21,6 +22,7 @@ func TestInitializeAndAccountFlow(t *testing.T) {
 	})
 
 	serverDone := make(chan error, 1)
+	var logoutSeen atomic.Bool
 	go func() {
 		scanner := bufio.NewScanner(serverInput)
 		for scanner.Scan() {
@@ -45,6 +47,8 @@ func TestInitializeAndAccountFlow(t *testing.T) {
 				result = map[string]any{"rateLimits": map[string]any{
 					"limitId": "codex", "primary": map[string]any{"usedPercent": 25, "windowDurationMins": 300, "resetsAt": 2000000000},
 				}}
+			case "account/logout":
+				logoutSeen.Store(true)
 			}
 			encoded, _ := json.Marshal(map[string]any{"id": id, "result": result})
 			if _, err := serverOutput.Write(append(encoded, '\n')); err != nil {
@@ -73,6 +77,12 @@ func TestInitializeAndAccountFlow(t *testing.T) {
 	}
 	if limits.RateLimits == nil || limits.RateLimits.Primary == nil || limits.RateLimits.Primary.UsedPercent != 25 {
 		t.Fatalf("unexpected limits: %#v", limits)
+	}
+	if err := client.Logout(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !logoutSeen.Load() {
+		t.Fatal("account/logout was not sent")
 	}
 }
 

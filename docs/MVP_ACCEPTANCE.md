@@ -18,7 +18,7 @@
 | 12 | Reflection не блокирует chat и не имеет tools | Automated | Coordinator/gate/model reflection tests | Включить в общий MVP smoke |
 | 13 | Persona/relationship/mood эволюция и rollback | Automated | Offline lifecycle smoke проверяет versioned persona/relationship/affect; reflection + desktop tests покрывают bounded evolution/rollback | Добавить multi-turn Bridge sequence |
 | 14 | Dormant исключён из recall, deliberate search находит эпизод | Automated | Memory engine и desktop archive tests | Включить в общий MVP smoke |
-| 15 | Codex login/logout, plan/rate limits, no token persistence | Partial | Codex app-server protocol/account tests и backend logout | UI logout и Wails bridge smoke с fake app-server |
+| 15 | Codex login/logout, plan/rate limits, no token persistence | Partial | Codex app-server account/logout/rate-limit protocol tests, Settings logout UI, Wails client forwarding и durable onboarding-gate reset | Добавить единый Bridge → fake app-server smoke для login/logout/rate limits |
 | 16 | Antigravity безопасно сообщает unsupported | Automated | Fail-closed `internal/providers/antigravity` adapter, typed `unsupported_auth_mode`, bridge/onboarding tests без config/keyring mutation и явное unavailable-состояние UI | Пересматривать только после появления официального разрешённого vendor contract |
 | 17 | Обязательные macOS E2E smoke проходят | Partial | Universal app build/validation и Wails `OnDomReady`/clean-shutdown smoke выполняются в CI | Автоматизированный WebKit UI interaction, если появится стабильный macOS harness |
 
@@ -26,8 +26,7 @@
 
 1. Расширить существующий offline MVP lifecycle smoke единым leak scan.
 2. Поддерживать Wails `OnDomReady` launch smoke для реализованного first-run onboarding на временном profile root; UI WebKit interaction остаётся отдельным manual/harness-dependent слоем.
-3. Codex logout UI; unsupported Antigravity contract уже закрыт fail-closed adapter-ом.
-4. Fake-provider voice/chat smoke без сети и повторный acceptance audit.
+3. Fake-provider voice/chat smoke без сети и повторный acceptance audit. Codex logout UI и unsupported Antigravity contract уже закрыты отдельными fail-closed срезами.
 
 Реальные OAuth credentials, платные provider calls, Developer ID, notarization и публикация артефактов не являются условиями локального OSS smoke-набора.
 
