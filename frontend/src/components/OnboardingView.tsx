@@ -188,6 +188,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
                     <div aria-label="Выбор провайдера" className="onboarding-provider-tabs" role="tablist">
                       <button aria-selected={settings.kind === 'openai-compatible'} className={settings.kind === 'openai-compatible' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => updateSettings('kind', 'openai-compatible')} role="tab" type="button"><span className="provider-tab__logo">O</span><span><strong>OpenAI-compatible</strong><small>API key · streaming</small></span></button>
                       <button aria-selected={settings.kind === 'codex-app-server'} className={settings.kind === 'codex-app-server' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => updateSettings('kind', 'codex-app-server')} role="tab" type="button"><span className="provider-tab__logo provider-tab__logo--codex">C</span><span><strong>Codex App Server</strong><small>ChatGPT OAuth</small></span></button>
+                      <button aria-selected={settings.kind === 'antigravity'} className={settings.kind === 'antigravity' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => updateSettings('kind', 'antigravity')} role="tab" type="button"><span className="provider-tab__logo">A</span><span><strong>Antigravity</strong><small>OAuth unavailable</small></span></button>
                     </div>
                     {settings.kind === 'openai-compatible' ? (
                       <>
@@ -199,12 +200,19 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
                           <div className="onboarding-form__actions"><button className="button button--quiet" onClick={() => { setFeedback(undefined); setStep('welcome') }} type="button">Назад</button><button className="button button--accent" disabled={busy === 'testing' || busy === 'oauth'} type="submit">{busy === 'testing' ? 'Сохраняю и проверяю…' : 'Сохранить и проверить'} <Icon name="arrow-up" width={14} height={14} /></button></div>
                         </form>
                       </>
-                    ) : (
+                    ) : settings.kind === 'codex-app-server' ? (
                       <div className="onboarding-codex">
                         <div className="codex-account__row"><div className="codex-account__avatar">{codex.connected ? '✓' : 'C'}</div><div><strong>{codex.connected ? codex.email : 'Аккаунт ChatGPT не подключён'}</strong><small>{codex.connected ? `${codex.plan ?? 'ChatGPT'} · готов к проверке` : 'Для Codex App Server нужен официальный OAuth-поток.'}</small></div></div>
                         <p className="onboarding-panel__hint">OAuth остаётся явным действием пользователя. Yuri не получает и не показывает токен, а backend сам выполняет probe после подключения.</p>
                         {!codex.connected && <button className="button button--quiet button--wide" disabled={busy === 'oauth' || busy === 'testing'} onClick={() => void handleLogin()} type="button"><Icon name="command" width={15} height={15} />{busy === 'oauth' ? 'Открываю OAuth…' : 'Войти через ChatGPT'}</button>}
                         <div className="onboarding-form__actions"><button className="button button--quiet" onClick={() => { setFeedback(undefined); setStep('welcome') }} type="button">Назад</button><button className="button button--accent" disabled={!codex.connected || busy === 'testing' || busy === 'oauth'} onClick={() => void handleProbe()} type="button">{busy === 'testing' ? 'Проверяю…' : 'Проверить Codex'} <Icon name="arrow-up" width={14} height={14} /></button></div>
+                      </div>
+                    ) : (
+                      <div className="onboarding-codex">
+                        <div className="codex-account__row"><div className="codex-account__avatar">A</div><div><strong>Antigravity OAuth недоступен</strong><small>unsupported_auth_mode · конфигурация не будет сохранена</small></div></div>
+                        <p className="onboarding-panel__hint">Yuri не импортирует токены Gemini CLI, browser cookies и token cache и не имитирует официальный клиент. Интеграция появится только после публикации разрешённого vendor contract.</p>
+                        <button className="button button--quiet button--wide" onClick={() => updateSettings('kind', 'openai-compatible')} type="button">Использовать API key через совместимый endpoint</button>
+                        <div className="onboarding-form__actions"><button className="button button--quiet" onClick={() => { setFeedback(undefined); setStep('welcome') }} type="button">Назад</button></div>
                       </div>
                     )}
                     {renderFeedback}

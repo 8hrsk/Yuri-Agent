@@ -19,6 +19,7 @@ import (
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 	"github.com/OrdoAI/yuri-agent/internal/memory"
 	"github.com/OrdoAI/yuri-agent/internal/plugins"
+	"github.com/OrdoAI/yuri-agent/internal/providers/antigravity"
 	"github.com/OrdoAI/yuri-agent/internal/providers/codexapp"
 	openaiadapter "github.com/OrdoAI/yuri-agent/internal/providers/openai"
 	"github.com/OrdoAI/yuri-agent/internal/security"
@@ -475,6 +476,8 @@ func (b *Bridge) chatBackend(ctx context.Context) (agent.ModelBackend, string, e
 			return nil, "", err
 		}
 		return gatedBackend{backend: backend, turns: b.modelTurns}, model, nil
+	case config.ProviderAntigravity:
+		return nil, "", antigravity.NewUnsupportedAuthModeError()
 	default:
 		return nil, "", fmt.Errorf("unsupported provider kind %q", selected.Kind)
 	}

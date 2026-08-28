@@ -484,7 +484,7 @@ export interface UsageLimits {
 }
 
 export interface ProviderSettings {
-  kind: 'openai-compatible' | 'codex-app-server'
+  kind: 'openai-compatible' | 'codex-app-server' | 'antigravity'
   baseUrl: string
   model: string
   apiKeyConfigured: boolean
@@ -522,7 +522,16 @@ export interface OnboardingState {
 export interface OnboardingResult {
   ok: boolean
   message: string
+  errorCode?: string
+  alternative?: string
   state: OnboardingState
+}
+
+export interface ProviderTestResult {
+  ok: boolean
+  message: string
+  errorCode?: string
+  alternative?: string
 }
 
 export interface EncryptedBackupInput {
@@ -577,7 +586,7 @@ export interface YuriClient {
   retryLast(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult>
   getProviderSnapshot(): Promise<ProviderSnapshot>
   saveProviderSettings(settings: ProviderSettings, apiKey?: string): Promise<void>
-  testProvider(settings: ProviderSettings): Promise<{ ok: boolean; message: string }>
+  testProvider(settings: ProviderSettings): Promise<ProviderTestResult>
   getOnboardingState(): Promise<OnboardingState>
   completeOnboarding(settings: ProviderSettings, apiKey?: string): Promise<OnboardingResult>
   loginCodex(): Promise<CodexAccount>

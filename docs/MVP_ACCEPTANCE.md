@@ -19,14 +19,14 @@
 | 13 | Persona/relationship/mood эволюция и rollback | Automated | Offline lifecycle smoke проверяет versioned persona/relationship/affect; reflection + desktop tests покрывают bounded evolution/rollback | Добавить multi-turn Bridge sequence |
 | 14 | Dormant исключён из recall, deliberate search находит эпизод | Automated | Memory engine и desktop archive tests | Включить в общий MVP smoke |
 | 15 | Codex login/logout, plan/rate limits, no token persistence | Partial | Codex app-server protocol/account tests и backend logout | UI logout и Wails bridge smoke с fake app-server |
-| 16 | Antigravity безопасно сообщает unsupported | Missing | Только documented policy boundary | Явный disabled adapter/error contract без OAuth piggyback |
+| 16 | Antigravity безопасно сообщает unsupported | Automated | Fail-closed `internal/providers/antigravity` adapter, typed `unsupported_auth_mode`, bridge/onboarding tests без config/keyring mutation и явное unavailable-состояние UI | Пересматривать только после появления официального разрешённого vendor contract |
 | 17 | Обязательные macOS E2E smoke проходят | Partial | Universal app build/validation и Wails `OnDomReady`/clean-shutdown smoke выполняются в CI | Автоматизированный WebKit UI interaction, если появится стабильный macOS harness |
 
 ## Порядок закрытия Stage 7
 
 1. Расширить существующий offline MVP lifecycle smoke единым leak scan.
 2. Поддерживать Wails `OnDomReady` launch smoke для реализованного first-run onboarding на временном profile root; UI WebKit interaction остаётся отдельным manual/harness-dependent слоем.
-3. Явный unsupported Antigravity contract и Codex logout UI.
+3. Codex logout UI; unsupported Antigravity contract уже закрыт fail-closed adapter-ом.
 4. Fake-provider voice/chat smoke без сети и повторный acceptance audit.
 
 Реальные OAuth credentials, платные provider calls, Developer ID, notarization и публикация артефактов не являются условиями локального OSS smoke-набора.

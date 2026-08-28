@@ -230,6 +230,17 @@ func TestProviderConfigRejectsInsecureRemoteURLAndCodexCredential(t *testing.T) 
 	}
 }
 
+func TestConfigRefusesPersistedAntigravityProvider(t *testing.T) {
+	paths := testPaths(t)
+	value := Default(paths)
+	value.Providers = []ProviderConfig{{
+		ID: "antigravity", Kind: ProviderAntigravity, DisplayName: "Antigravity", Enabled: true,
+	}}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "official integration contract") {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func TestProactivityConfigValidation(t *testing.T) {
 	paths := testPaths(t)
 	value := Default(paths)

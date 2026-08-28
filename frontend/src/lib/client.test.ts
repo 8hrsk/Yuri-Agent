@@ -47,6 +47,20 @@ describe('Yuri client contract', () => {
     expect(await client.getOnboardingState()).toMatchObject({ completed: true, providerTested: true })
   })
 
+  it('reports Antigravity as unsupported without completing onboarding', async () => {
+    const client = createYuriClient()
+    const current = (await client.getProviderSnapshot()).settings
+    const result = await client.completeOnboarding({ ...current, kind: 'antigravity' }, 'must-not-be-stored')
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'unsupported_auth_mode',
+      alternative: 'openai-compatible-api-key',
+      state: { completed: false, providerTested: false },
+    })
+    expect(await client.getOnboardingState()).toEqual({ completed: false, providerTested: false })
+  })
+
   it('forwards typed first-run state and atomic completion through Wails', async () => {
     const calls: Array<{ name: string; args: unknown[] }> = []
     const bridge = {

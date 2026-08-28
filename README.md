@@ -19,6 +19,7 @@ Engineering foundation, conversational vertical slice, storage/memory, plugin ru
 - immutable security policy отдельно от mutable persona и affect;
 - потоковый текстовый chat через OpenAI-compatible Responses/Chat Completions;
 - официальный Codex App Server adapter с ChatGPT OAuth и чтением work/rate limits без доступа Yuri к OAuth-токенам;
+- Antigravity явно остаётся недоступным с typed `unsupported_auth_mode`: Yuri не импортирует чужой OAuth/token cache и предлагает API-key fallback до появления официального integration contract;
 - agent loop с cancellation, budgets, structured tool calls и idempotency;
 - filesystem tools только внутри явно разрешённых директорий: low-risk чтение и bounded `create`/`replace` с точечным approval, атомарным commit, проверкой текущего SHA-256 и redacted audit;
 - push-to-talk с OpenAI-compatible STT и прерываемое системное TTS;

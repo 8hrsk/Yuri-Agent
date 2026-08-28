@@ -61,6 +61,7 @@ type ProviderKind string
 const (
 	ProviderOpenAICompatible ProviderKind = "openai-compatible"
 	ProviderCodexAppServer   ProviderKind = "codex-app-server"
+	ProviderAntigravity      ProviderKind = "antigravity"
 )
 
 // ProviderConfig contains only non-secret metadata. CredentialRef addresses
@@ -338,6 +339,8 @@ func (c Config) Validate() error {
 			if provider.CredentialRef != "" {
 				return fmt.Errorf("provider %q must not configure a credential_ref", provider.ID)
 			}
+		case ProviderAntigravity:
+			return fmt.Errorf("provider %q cannot be persisted: Antigravity OAuth is unavailable without an official integration contract", provider.ID)
 		default:
 			return fmt.Errorf("provider %q has unsupported kind %q", provider.ID, provider.Kind)
 		}

@@ -17,6 +17,9 @@ export function onboardingStepIndex(step: OnboardingStep): number {
 }
 
 export function validateOnboardingProvider(settings: ProviderSettings, codex?: CodexAccount): string | undefined {
+  if (settings.kind === 'antigravity') {
+    return 'Antigravity OAuth пока недоступен: официальный integration contract для стороннего приложения отсутствует.'
+  }
   if (settings.kind === 'codex-app-server') {
     return codex?.connected ? undefined : 'Завершите OAuth-вход в Codex App Server.'
   }

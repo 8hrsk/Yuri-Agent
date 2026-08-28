@@ -10,6 +10,7 @@ import (
 
 	"github.com/OrdoAI/yuri-agent/internal/agent"
 	"github.com/OrdoAI/yuri-agent/internal/config"
+	"github.com/OrdoAI/yuri-agent/internal/providers/antigravity"
 	"github.com/OrdoAI/yuri-agent/internal/providers/codexapp"
 	openaiadapter "github.com/OrdoAI/yuri-agent/internal/providers/openai"
 )
@@ -80,10 +81,12 @@ type ProviderSettingsInput struct {
 }
 
 type ProviderTestResult struct {
-	OK         bool           `json:"ok"`
-	Message    string         `json:"message"`
-	ProviderID string         `json:"providerId,omitempty"`
-	Onboarding OnboardingView `json:"onboarding"`
+	OK          bool           `json:"ok"`
+	Message     string         `json:"message"`
+	ErrorCode   string         `json:"errorCode,omitempty"`
+	Alternative string         `json:"alternative,omitempty"`
+	ProviderID  string         `json:"providerId,omitempty"`
+	Onboarding  OnboardingView `json:"onboarding"`
 }
 
 // ProviderProbeInput is the typed bridge contract for a provider probe. It is
@@ -105,9 +108,11 @@ type CompleteOnboardingInput struct {
 // OnboardingResult reports the result of the save-and-probe operation and the
 // resulting durable state. It intentionally contains no provider payload.
 type OnboardingResult struct {
-	OK      bool           `json:"ok"`
-	Message string         `json:"message"`
-	State   OnboardingView `json:"state"`
+	OK          bool           `json:"ok"`
+	Message     string         `json:"message"`
+	ErrorCode   string         `json:"errorCode,omitempty"`
+	Alternative string         `json:"alternative,omitempty"`
+	State       OnboardingView `json:"state"`
 }
 
 // GetOnboardingState returns durable first-run state without consulting or
@@ -285,17 +290,34 @@ func (b *Bridge) CompleteOnboarding(input CompleteOnboardingInput) OnboardingRes
 		}); err != nil {
 			return OnboardingResult{Message: safeError(err.Error()), State: b.GetOnboardingState()}
 		}
+	case config.ProviderAntigravity:
+		status := antigravity.Status()
+		return OnboardingResult{
+			Message: status.Message, ErrorCode: status.ErrorCode,
+			Alternative: status.Alternative, State: b.GetOnboardingState(),
+		}
 	default:
 		return OnboardingResult{Message: fmt.Sprintf("unsupported provider kind %q", settings.Kind), State: b.GetOnboardingState()}
 	}
 
 	probe := b.ProbeProvider(settings)
-	return OnboardingResult{OK: probe.OK, Message: probe.Message, State: probe.Onboarding}
+	return OnboardingResult{
+		OK: probe.OK, Message: probe.Message, ErrorCode: probe.ErrorCode,
+		Alternative: probe.Alternative, State: probe.Onboarding,
+	}
 }
 
 func (b *Bridge) probeProvider(input ProviderSettingsInput) ProviderTestResult {
 	ctx, cancel := b.context()
 	defer cancel()
+	if input.Kind == config.ProviderAntigravity {
+		status := antigravity.Status()
+		return ProviderTestResult{
+			Message: status.Message, ErrorCode: status.ErrorCode,
+			Alternative: status.Alternative, ProviderID: antigravity.ProviderID,
+			Onboarding: b.GetOnboardingState(),
+		}
+	}
 	if input.Kind == config.ProviderCodexAppServer {
 		account, err := b.CodexAccount()
 		if err != nil {

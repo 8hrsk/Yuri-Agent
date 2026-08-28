@@ -153,14 +153,17 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
         <button aria-selected={settings.kind === 'codex-app-server'} className={settings.kind === 'codex-app-server' ? 'provider-tab provider-tab--active' : 'provider-tab'} onClick={() => updateSettings('kind', 'codex-app-server')} role="tab" type="button">
           <span className="provider-tab__logo provider-tab__logo--codex">C</span><span><strong>Codex App Server</strong><small>ChatGPT OAuth · work limits</small></span>
         </button>
+        <button aria-selected={settings.kind === 'antigravity'} className={settings.kind === 'antigravity' ? 'provider-tab provider-tab--active' : 'provider-tab'} onClick={() => updateSettings('kind', 'antigravity')} role="tab" type="button">
+          <span className="provider-tab__logo">A</span><span><strong>Antigravity</strong><small>OAuth unavailable</small></span>
+        </button>
       </div>
 
       {loading ? <div className="settings-loading" role="status">Загружаю конфигурацию…</div> : (
         <div className="settings-grid">
           <section aria-labelledby="provider-form-title" className="settings-card">
             <div className="settings-card__heading">
-              <div><span className="section-heading__overline">Endpoint</span><h2 id="provider-form-title">{settings.kind === 'openai-compatible' ? 'OpenAI-compatible API' : 'Codex App Server'}</h2></div>
-              <span className={`settings-status settings-status--${settings.kind === 'codex-app-server' && !codex.connected ? 'off' : 'on'}`}><i /> {settings.kind === 'codex-app-server' ? (codex.connected ? 'account connected' : 'account required') : (settings.apiKeyConfigured ? 'key configured' : 'key not configured')}</span>
+              <div><span className="section-heading__overline">Endpoint</span><h2 id="provider-form-title">{settings.kind === 'openai-compatible' ? 'OpenAI-compatible API' : settings.kind === 'codex-app-server' ? 'Codex App Server' : 'Antigravity'}</h2></div>
+              <span className={`settings-status settings-status--${settings.kind === 'antigravity' || (settings.kind === 'codex-app-server' && !codex.connected) ? 'off' : 'on'}`}><i /> {settings.kind === 'antigravity' ? 'unsupported auth mode' : settings.kind === 'codex-app-server' ? (codex.connected ? 'account connected' : 'account required') : (settings.apiKeyConfigured ? 'key configured' : 'key not configured')}</span>
             </div>
             {settings.kind === 'openai-compatible' ? (
               <div className="settings-form">
@@ -172,11 +175,17 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
                   <label className="toggle-label"><span>Stream responses</span><button aria-checked={settings.streamResponses} className={`toggle${settings.streamResponses ? ' toggle--on' : ''}`} onClick={() => updateSettings('streamResponses', !settings.streamResponses)} role="switch" type="button"><i /></button></label>
                 </div>
               </div>
-            ) : (
+            ) : settings.kind === 'codex-app-server' ? (
               <div className="codex-account">
                 <div className="codex-account__row"><div className="codex-account__avatar">{codex.connected ? '✓' : 'C'}</div><div><strong>{codex.connected ? codex.email : 'Аккаунт ChatGPT не подключён'}</strong><small>{codex.connected ? `${codex.plan ?? 'ChatGPT'} · авторизован ${codex.authenticatedAt ? new Date(codex.authenticatedAt).toLocaleDateString('ru-RU') : ''}` : 'Для Codex App Server нужен официальный OAuth-поток.'}</small></div></div>
                 <button className="button button--accent button--wide" disabled={loggingIn} onClick={() => void handleLogin()} type="button"><Icon name="command" width={15} height={15} />{loggingIn ? 'Открываю OAuth…' : codex.connected ? 'Переподключить через OAuth' : 'Войти через ChatGPT'}</button>
                 <p className="settings-footnote"><Icon name="lock" width={13} height={13} /> Yuri использует только официальный Codex App Server интерфейс. Токен не показывается модели и не сохраняется в SQLite.</p>
+              </div>
+            ) : (
+              <div className="codex-account">
+                <div className="codex-account__row"><div className="codex-account__avatar">A</div><div><strong>Antigravity OAuth недоступен</strong><small>unsupported_auth_mode · данные авторизации не запрашиваются</small></div></div>
+                <p className="settings-footnote"><Icon name="lock" width={13} height={13} /> Yuri не импортирует токены Gemini CLI, browser cookies или token cache. Подключение останется выключенным до официального разрешённого integration contract.</p>
+                <button className="button button--quiet button--wide" onClick={() => updateSettings('kind', 'openai-compatible')} type="button">Перейти к API key endpoint</button>
               </div>
             )}
             <div className="settings-form settings-form--permissions">
@@ -192,7 +201,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
               </label>
               <p className="settings-footnote"><Icon name="lock" width={13} height={13} /> В этих корнях Yuri может читать файлы. Каждая операция <code>filesystem.write</code> показывает точный путь и требует отдельного подтверждения; удаление и symlink escape запрещены.</p>
             </div>
-            <div className="settings-card__actions"><button className="button button--quiet" disabled={testing} onClick={() => void handleTest()} type="button">{testing ? 'Проверяю…' : 'Проверить соединение'}</button><button className="button button--accent" disabled={saving} onClick={() => void handleSave()} type="button">{saving ? 'Сохраняю…' : 'Сохранить'}</button></div>
+            <div className="settings-card__actions"><button className="button button--quiet" disabled={testing || settings.kind === 'antigravity'} onClick={() => void handleTest()} type="button">{testing ? 'Проверяю…' : 'Проверить соединение'}</button><button className="button button--accent" disabled={saving || settings.kind === 'antigravity'} onClick={() => void handleSave()} type="button">{saving ? 'Сохраняю…' : 'Сохранить'}</button></div>
           </section>
 
           <aside className="settings-side">

@@ -41,6 +41,7 @@ import type {
   ProactivitySettings,
   ProviderSettings,
   ProviderSnapshot,
+  ProviderTestResult,
   RunResult,
   Schedule,
   ScheduleBudget,
@@ -165,6 +166,8 @@ function normalizeOnboardingResult(value: unknown, fallbackState: OnboardingStat
   return {
     ok: normalizeBoolean(source.ok ?? source.success ?? source.passed, state.completed && state.providerTested),
     message: optionalString(source, 'message', 'detail', 'error') ?? (state.completed && state.providerTested ? 'Провайдер проверен.' : 'Проверка провайдера не завершена.'),
+    errorCode: optionalString(source, 'errorCode', 'error_code', 'code'),
+    alternative: optionalString(source, 'alternative'),
     state,
   }
 }
@@ -1207,14 +1210,25 @@ class MockYuriClient implements YuriClient {
   }
 
   async saveProviderSettings(settings: ProviderSettings, apiKey?: string): Promise<void> {
+    if (settings.kind === 'antigravity') {
+      throw new Error('Antigravity OAuth недоступен без официального integration contract.')
+    }
     this.provider = {
       ...this.provider,
       settings: { ...settings, apiKeyConfigured: settings.apiKeyConfigured || Boolean(apiKey?.trim()) },
     }
   }
 
-  async testProvider(settings: ProviderSettings): Promise<{ ok: boolean; message: string }> {
+  async testProvider(settings: ProviderSettings): Promise<ProviderTestResult> {
     await sleep(280)
+    if (settings.kind === 'antigravity') {
+      return {
+        ok: false,
+        message: 'Antigravity OAuth недоступен: официальный разрешённый contract для стороннего приложения отсутствует.',
+        errorCode: 'unsupported_auth_mode',
+        alternative: 'openai-compatible-api-key',
+      }
+    }
     if (settings.kind === 'codex-app-server') {
       if (!this.provider.codex.connected) return { ok: false, message: 'Сначала выполните OAuth-вход.' }
       this.onboarding = { ...this.onboarding, completed: true, providerTested: true, completedAt: nowIso() }
@@ -1230,6 +1244,10 @@ class MockYuriClient implements YuriClient {
   }
 
   async completeOnboarding(settings: ProviderSettings, apiKey?: string): Promise<OnboardingResult> {
+    if (settings.kind === 'antigravity') {
+      const probe = await this.testProvider(settings)
+      return { ...probe, state: await this.getOnboardingState() }
+    }
     await this.saveProviderSettings(settings, apiKey)
     const probe = await this.testProvider(settings)
     const state = await this.getOnboardingState()
@@ -1794,6 +1812,9 @@ class WailsYuriClient implements YuriClient {
   }
 
   async saveProviderSettings(settings: ProviderSettings, apiKey?: string): Promise<void> {
+    if (settings.kind === 'antigravity') {
+      throw new Error('Antigravity OAuth недоступен без официального integration contract.')
+    }
     if (settings.kind === 'openai-compatible') {
       await callBridge(['SaveOpenAIProvider'], [{
         id: 'openai',
@@ -1814,8 +1835,8 @@ class WailsYuriClient implements YuriClient {
     }])
   }
 
-  async testProvider(settings: ProviderSettings): Promise<{ ok: boolean; message: string }> {
-    return (await callBridge<{ ok: boolean; message: string }>(['TestProvider', 'ProbeProvider'], [settings])) ?? { ok: false, message: 'Backend не вернул результат проверки.' }
+  async testProvider(settings: ProviderSettings): Promise<ProviderTestResult> {
+    return (await callBridge<ProviderTestResult>(['TestProvider', 'ProbeProvider'], [settings])) ?? { ok: false, message: 'Backend не вернул результат проверки.' }
   }
 
   async getOnboardingState(): Promise<OnboardingState> {
@@ -1836,6 +1857,11 @@ class WailsYuriClient implements YuriClient {
       return normalized.state.completed && normalized.state.providerTested
         ? normalized
         : { ...normalized, ok: false, message: normalized.message || 'Onboarding state не сохранён.', state }
+    }
+
+    if (settings.kind === 'antigravity') {
+      const probe = await this.testProvider(settings)
+      return { ...probe, state: await this.getOnboardingState() }
     }
 
     // Older bridges can still perform the provider save and probe. They must

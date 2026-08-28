@@ -3,6 +3,7 @@ package desktop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/OrdoAI/yuri-agent/internal/config"
+	"github.com/OrdoAI/yuri-agent/internal/providers/antigravity"
 	securitykeyring "github.com/OrdoAI/yuri-agent/internal/security/keyring"
 )
 
@@ -76,6 +78,46 @@ func TestSaveCodexProviderRejectsCredentialFieldsByConstruction(t *testing.T) {
 	}
 	if view.Kind != config.ProviderCodexAppServer || view.HasSecret {
 		t.Fatalf("unexpected Codex provider view %#v", view)
+	}
+}
+
+func TestAntigravityProbeIsExplicitlyUnsupportedWithoutPersistenceOrCredentials(t *testing.T) {
+	paths := providerTestPaths(t)
+	backend := &providerTestKeyring{values: make(map[string]string)}
+	store, err := securitykeyring.NewWithBackend("test.antigravity", backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge := &Bridge{paths: paths, config: config.Default(paths), keyring: store}
+
+	probe := bridge.ProbeProvider(ProviderProbeInput{Kind: config.ProviderAntigravity})
+	if probe.OK || probe.ErrorCode != antigravity.ErrorCodeUnsupportedAuthMode ||
+		probe.Alternative != antigravity.AlternativeOpenAICompatible || probe.ProviderID != antigravity.ProviderID {
+		t.Fatalf("probe = %#v", probe)
+	}
+	result := bridge.CompleteOnboarding(CompleteOnboardingInput{
+		Settings: ProviderSettingsInput{Kind: config.ProviderAntigravity},
+		APIKey:   "must-not-be-stored",
+	})
+	if result.OK || result.ErrorCode != antigravity.ErrorCodeUnsupportedAuthMode ||
+		result.Alternative != antigravity.AlternativeOpenAICompatible || result.State.Completed {
+		t.Fatalf("onboarding result = %#v", result)
+	}
+	if len(backend.values) != 0 || len(bridge.ListProviders()) != 0 {
+		t.Fatalf("unsupported provider changed credentials/config: keys=%#v providers=%#v", backend.values, bridge.ListProviders())
+	}
+	if _, err := os.Stat(paths.ConfigFile); !os.IsNotExist(err) {
+		t.Fatalf("unsupported provider wrote config: %v", err)
+	}
+}
+
+func TestAntigravityCannotStartChatBackend(t *testing.T) {
+	bridge := &Bridge{config: config.Config{Providers: []config.ProviderConfig{{
+		ID: "antigravity", Kind: config.ProviderAntigravity, Enabled: true,
+	}}}}
+	backend, model, err := bridge.chatBackend(context.Background())
+	if backend != nil || model != "" || !errors.Is(err, antigravity.ErrUnsupportedAuthMode) {
+		t.Fatalf("chatBackend() = %#v, %q, %v", backend, model, err)
 	}
 }
 

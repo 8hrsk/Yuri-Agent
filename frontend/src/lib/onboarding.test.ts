@@ -31,6 +31,11 @@ describe('first-run onboarding rules', () => {
     expect(validateOnboardingProvider(codex, { connected: true })).toBeUndefined()
   })
 
+  it('keeps Antigravity disabled until an official integration contract exists', () => {
+    const antigravity = { ...openAISettings, kind: 'antigravity' as const }
+    expect(validateOnboardingProvider(antigravity)).toContain('официальный integration contract')
+  })
+
   it('keeps the stepper order stable', () => {
     expect(onboardingSteps.map((step) => step.id)).toEqual(['welcome', 'provider', 'success'])
     expect(onboardingStepIndex('provider')).toBe(1)
