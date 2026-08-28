@@ -1,6 +1,6 @@
 .PHONY: fmt fmt-check vet test build frontend-install frontend-check frontend-build check \
 	wails-install wails-version wails-doctor macos-build macos-validate macos-package \
-	macos-sign-dev macos-checksum macos-smoke macos-release-check release-check bench-baseline
+	macos-checksum macos-verify macos-smoke mvp-smoke bench-baseline
 
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
@@ -18,7 +18,7 @@ MACOS_DIST_DIR ?= $(ROOT_DIR)/dist/macos
 YURI_VERSION ?= 0.7.0
 MACOS_ARTIFACT ?= $(MACOS_DIST_DIR)/yuri-$(YURI_VERSION)-macos-universal.zip
 MACOS_CHECKSUM ?= $(MACOS_ARTIFACT).sha256
-MACOS_VALIDATOR ?= $(ROOT_DIR)/scripts/validate-macos-release.sh
+MACOS_VALIDATOR ?= $(ROOT_DIR)/scripts/validate-macos-oss.sh
 CHECKSUM_TOOL ?= $(ROOT_DIR)/scripts/checksum-artifact.sh
 
 fmt:
@@ -32,6 +32,9 @@ vet:
 
 test:
 	go test ./cmd/... ./internal/... ./sdk/... ./plugins/...
+
+mvp-smoke:
+	go test -race ./internal/smoke -run '^TestMVPOfflineLifecycle$$' -count=1
 
 build:
 	go build -o bin/yuri ./cmd/yuri
@@ -68,8 +71,8 @@ frontend-check:
 frontend-build:
 	npm --prefix frontend run build
 
-# This is intentionally a production-mode, unsigned development smoke build.
-# Signing/notarization is a separate, externally controlled release step.
+# This is the reproducible production-mode macOS OSS build. The project does
+# not manage signing identities, notarization or distribution credentials.
 macos-build: wails-version
 	@test "$$(uname -s)" = Darwin || { echo "macos-build requires macOS" >&2; exit 1; }
 	@cd "$(ROOT_DIR)/cmd/yuri" && \
@@ -78,14 +81,10 @@ macos-build: wails-version
 	CGO_LDFLAGS="-mmacosx-version-min=$(MACOS_MIN_VERSION)" \
 	"$(WAILS_BIN)" build -clean -platform darwin/universal -trimpath \
 		-ldflags "-s -w" -m -nosyncgomod
+macos-validate: macos-build
+	@"$(MACOS_VALIDATOR)" --app "$(MACOS_APP)" --version "$(YURI_VERSION)"
 
-macos-sign-dev: macos-build
-	@codesign --force --deep --sign - --timestamp=none "$(MACOS_APP)"
-
-macos-validate: macos-sign-dev
-	@"$(MACOS_VALIDATOR)" --mode development --app "$(MACOS_APP)" --version "$(YURI_VERSION)"
-
-macos-package: macos-sign-dev
+macos-package: macos-validate
 	@mkdir -p "$(MACOS_DIST_DIR)"
 	@rm -f "$(MACOS_ARTIFACT)"
 	@ditto -c -k --sequesterRsrc --keepParent "$(MACOS_APP)" "$(MACOS_ARTIFACT)"
@@ -93,19 +92,11 @@ macos-package: macos-sign-dev
 macos-checksum: macos-package
 	@"$(CHECKSUM_TOOL)" "$(MACOS_ARTIFACT)" "$(MACOS_CHECKSUM)"
 
-macos-smoke: macos-sign-dev
-	@"$(MACOS_VALIDATOR)" --mode development --app "$(MACOS_APP)" --version "$(YURI_VERSION)"
-	@mkdir -p "$(MACOS_DIST_DIR)"
-	@rm -f "$(MACOS_ARTIFACT)"
-	@ditto -c -k --sequesterRsrc --keepParent "$(MACOS_APP)" "$(MACOS_ARTIFACT)"
-	@"$(CHECKSUM_TOOL)" "$(MACOS_ARTIFACT)" "$(MACOS_CHECKSUM)"
-	@echo "macOS universal development smoke artifact: $(MACOS_ARTIFACT)"
-	@echo "SHA-256 manifest: $(MACOS_CHECKSUM)"
-
-# Validate an already signed/notarized artifact. This target deliberately does
-# not build, sign, notarize, upload, or publish anything.
-macos-release-check release-check:
-	@"$(MACOS_VALIDATOR)" --mode release --app "$(MACOS_APP)" --version "$(YURI_VERSION)"
+macos-verify: macos-validate macos-checksum
 	@"$(CHECKSUM_TOOL)" --verify "$(MACOS_ARTIFACT)" "$(MACOS_CHECKSUM)"
+
+macos-smoke: macos-verify
+	@echo "macOS universal OSS artifact: $(MACOS_ARTIFACT)"
+	@echo "SHA-256 manifest: $(MACOS_CHECKSUM)"
 
 check: fmt-check vet test frontend-check frontend-build build

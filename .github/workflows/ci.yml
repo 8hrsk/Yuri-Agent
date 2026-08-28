@@ -90,7 +90,7 @@ jobs:
         run: npm run build
 
   macos-foundation:
-    name: macOS universal release smoke
+    name: macOS universal OSS artifact
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -108,6 +108,9 @@ jobs:
       - name: Test Go on target platform
         run: go test ./cmd/... ./internal/... ./sdk/... ./plugins/...
 
+      - name: Run offline MVP lifecycle smoke with race detector
+        run: make mvp-smoke
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -121,13 +124,13 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Build and validate unsigned universal development artifact
+      - name: Build and validate universal OSS artifact
         run: make macos-smoke YURI_VERSION=0.7.0
 
-      - name: Upload universal app and checksum
+      - name: Upload universal OSS archive and checksum as CI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: yuri-macos-universal-${{ github.sha }}
+          name: yuri-macos-universal-oss-${{ github.sha }}
           path: |
             dist/macos/*.zip
             dist/macos/*.sha256

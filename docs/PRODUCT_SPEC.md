@@ -15,7 +15,7 @@ Yuri — персональный desktop-first ИИ-агент с женски�
 
 MVP должен позволять пользователю:
 
-1. Установить и запустить desktop-приложение на macOS; Windows и Linux поддерживаются последующими релизами.
+1. Установить и запустить desktop-приложение на macOS; Windows и Linux добавляются после стабилизации macOS OSS path.
 2. Подключить OpenAI-compatible LLM endpoint по API key либо поддерживаемый OAuth-провайдер.
 3. Войти в ChatGPT через официальный Codex App Server и использовать доступные плану Codex/ChatGPT лимиты, если этот способ доступен для аккаунта пользователя.
 4. Общаться с Yuri текстом и голосом: STT, потоковый ответ и TTS.
@@ -448,9 +448,13 @@ Durable jobs, CRON/timezone/misfire, worker budgets, notifications, quiet hours 
 
 Background review, relationship/affect model, versioned mutable persona, rollback UI, расширенные STT/TTS flows, avatar state machine и простой 2D renderer.
 
-### Этап 6. Hardening and release
+### Этап 6. Hardening and validation
 
-Cross-platform packaging, updates, backup/export, security review, fault injection, performance profiling и документация для пользователей/разработчиков плагинов.
+Cross-platform packaging, updates, backup/export, security review, fault injection, performance profiling и документация для пользователей/разработчиков плагинов. Для macOS этот этап использует OSS CI-артефакт с universal Mach-O, проверкой metadata и SHA-256 manifest; проект не управляет signing/notarization credentials.
+
+### Этап 7. MVP stabilization and dogfooding
+
+Честная acceptance-матрица, единый offline lifecycle smoke, first-run onboarding, сквозные approval/audit проверки, завершение voice pipeline и Wails/macOS dogfooding. OSS packaging остаётся локальным/CI-путём: закреплённый Wails toolchain, universal macOS build для `arm64` + `x86_64`, проверка metadata/архитектур и SHA-256 manifest. Внешние distribution channels и credential-dependent release operations не входят в scope.
 
 ## 11. Решения, которые нужно принять до реализации
 
@@ -478,7 +482,7 @@ Cross-platform packaging, updates, backup/export, security review, fault injecti
 
 ## 12. Предлагаемые решения по умолчанию
 
-- MVP и первый публичный релиз — macOS; затем Windows и Linux без изменения domain layer.
+- MVP и первый поддерживаемый OSS build — macOS; затем Windows и Linux без изменения domain layer.
 - Голос STT + TTS входит в MVP; полноценная Live2D/VRM-анимация остаётся последующим этапом.
 - Первый плагин — reference plugin, затем Telegram или Gmail после стабилизации permission model.
 - Нейтрально-tsundere профиль по умолчанию; yandere-интенсивность включается пользователем.

@@ -1,6 +1,6 @@
 # Yuri
 
-Yuri — локальный desktop-first AI-агент для одного владельца. Первый публичный релиз ориентирован на macOS; архитектура остаётся переносимой на Windows и Linux.
+Yuri — локальный desktop-first AI-агент для одного владельца. Текущий OSS CI-артефакт ориентирован на macOS; архитектура остаётся переносимой на Windows и Linux.
 
 Engineering foundation, conversational vertical slice, storage/memory, plugin runtime, scheduler/proactivity и reflection/personality vertical slice реализованы. Основные решения и границы находятся в следующих документах:
 
@@ -40,15 +40,16 @@ Engineering foundation, conversational vertical slice, storage/memory, plugin ru
 - следующий диалог получает persona и явно субъективную relationship/affect модель отдельными слоями ниже immutable policy и identity seed;
 - Personality/Relationship UI с историей версий и простым 2D-аватаром; push-to-talk поддерживает barge-in, автоозвучка является явным opt-in и не включает микрофон.
 
-CI проверяет core, scheduler/proactivity, reflection/persona storage, Plugin SDK/reference plugin, frontend и отдельный macOS smoke-путь. Следующей отдельной вехой roadmap остаётся release hardening.
+CI проверяет core, scheduler/proactivity, reflection/persona storage, Plugin SDK/reference plugin, frontend и отдельный macOS universal OSS smoke-путь с checksum manifest. Подробности упаковки находятся в [`docs/MACOS_RELEASE.md`](docs/MACOS_RELEASE.md).
 
-Важно: Этап 3 изолирует сбой плагина отдельным процессом, но ещё не превращает сторонний executable в полностью недоверенный код. До OS sandbox/notarization/trust-store hardening устанавливать следует только проверенные пакеты; unsigned package требует явного dev mode.
+Важно: Этап 3 изолирует сбой плагина отдельным процессом, но ещё не превращает сторонний executable в полностью недоверенный код. До OS sandbox и process hardening устанавливать следует только проверенные пакеты; unsigned package требует явного dev mode.
 
 ## Локальная проверка
 
 ```bash
 npm --prefix frontend ci
 make check
+make mvp-smoke
 ```
 
 Wails-команды запускаются из каталога desktop entrypoint, где находится конфигурация проекта:

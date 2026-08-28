@@ -35,6 +35,5 @@
 ## Отложенные вопросы
 
 - точный wire schema и transport upgrade (например, localhost gRPC) после reference plugin;
-- code signing/notarization и OS sandbox profile для release packages;
+- OS sandbox/process hardening и отдельная политика доверия к пакетам для будущих deployment profiles;
 - GitHub repository browsing/automatic install — отдельная product feature после core/plugin security review.
-

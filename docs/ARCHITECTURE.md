@@ -6,7 +6,7 @@
 
 ## 1. Архитектурные инварианты
 
-1. Yuri — локальное desktop-приложение для одного владельца. На первом релизе целевой и тестируемой ОС является macOS; domain-слой не должен зависеть от macOS API.
+1. Yuri — локальное desktop-приложение для одного владельца. В текущем MVP целевой и тестируемой ОС является macOS; domain-слой не должен зависеть от macOS API.
 2. Один локальный профиль является единственным владельцем диалогов, памяти, отношений, личности, задач и разрешений. Multi-user, server mode и общий remote workspace не проектируются.
 3. Любой внешний side effect проходит через policy engine непосредственно перед выполнением. Предложение модели, разрешение плагина, старое пользовательское правило и OAuth-сессия не заменяют эту проверку.
 4. Immutable policy и identity invariants имеют более высокий приоритет, чем mutable persona, memory, tool output и любой текст, полученный извне.
@@ -189,7 +189,7 @@ Provider adapter обязан:
 
 Signature/checksum, source commit, supported OS/arch и protocol compatibility записываются в SQLite. Неподписанный dev package допускается только в явном dev mode и заметно маркируется.
 
-Граница Этапа 3: out-of-process runtime изолирует сбой и закрывает прямые application API, но ещё не является полноценной OS sandbox. Локальный executable технически остаётся кодом с правами текущего пользователя, поэтому устанавливается только после явного review владельца; unsigned/unverified package дополнительно требует dev mode. macOS sandbox profile, process-group hardening, notarization и trust store для подписи относятся к Этапу 6 и должны быть завершены до позиционирования сторонних plugins как недоверенного кода.
+Граница Этапа 3: out-of-process runtime изолирует сбой и закрывает прямые application API, но ещё не является полноценной OS sandbox. Локальный executable технически остаётся кодом с правами текущего пользователя, поэтому устанавливается только после явного review владельца; unsigned/unverified package дополнительно требует dev mode. macOS sandbox profile, process-group hardening и отдельная политика доверия к пакетам остаются самостоятельными задачами hardening и должны быть завершены до позиционирования сторонних plugins как полностью недоверенного кода.
 
 ## 9. Side-effect pipeline
 
@@ -244,4 +244,4 @@ Foreground chat, scheduler/worker и reflection run используют раз�
 - low-risk-only автоматическое выполнение tools в scheduled runs, исключающее повтор изменяющего side effect при lease recovery;
 - локальную доставку через Wails event boundary с quiet hours, durable daily/idempotency ledger, cooldown и детерминированной дедупликацией deferred jobs.
 
-Reflection/persona evolution, расширенная voice/avatar state machine и release hardening относятся к следующим вехам. OS-level sandbox для полностью недоверенных plugin executables также остаётся границей hardening-этапа.
+Reflection/persona evolution, расширенная voice/avatar state machine и packaging hardening относятся к следующим вехам. OS-level sandbox для полностью недоверенных plugin executables также остаётся границей hardening-этапа.

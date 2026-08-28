@@ -113,6 +113,7 @@ flowchart TB
 | T-22 | DoS через oversized message, tool result, plugin stream или unbounded context | Medium | Message/result size limits, token budgets, timeouts, process kill, truncation with source ref, backpressure | Малый локальный ресурс всё равно может быть исчерпан владельцем |
 | T-23 | Микрофон или TTS запускаются незаметно | Medium | Push-to-talk in MVP, visible microphone/speaking state, OS permission, stop control, no wake word/listening by default | OS-level compromise not covered |
 | T-24 | Экспорт/backup содержит secrets или восстанавливает слишком широкие grants | High | Secrets excluded by default, encrypted backup, explicit scope, manifest/version validation, restore review and grant expiry | Пользователь может сам выбрать unsafe export |
+| T-25 | CI-артефакт macOS принимают за доверенный дистрибутив или подменяют archive/manifest | Medium | Явная маркировка OSS, проверка universal bundle metadata, manifest связывает SHA-256 с именем archive, сохранение только в GitHub Actions artifact, отсутствие auto-update/publish path | Checksum подтверждает целостность конкретного файла, но не provenance; ручная загрузка всё равно требует review исходного commit |
 
 ## 6. Особые правила для автономной памяти и личности
 

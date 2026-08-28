@@ -24,12 +24,12 @@ MVP нужно быстро проверять на одной desktop-плат�
 Положительные:
 
 - проще threat model, onboarding, backup и data ownership;
-- можно использовать Keychain и macOS packaging как первый production path;
+- можно использовать Keychain и macOS packaging как первый поддерживаемый OSS path;
 - нет ложного обещания серверной изоляции пользователей.
 
 Ограничения:
 
-- CI и release verification сначала ориентированы на macOS;
+- CI и build verification сначала ориентированы на macOS;
 - локальный процесс защищён только моделью безопасности текущей OS account;
 - UI не должен предполагать, что приложение доступно через remote API.
 
@@ -38,4 +38,3 @@ MVP нужно быстро проверять на одной desktop-плат�
 - добавлять server mode или общий plugin registry как скрытый scope;
 - зашивать macOS calls в domain layer;
 - считать Wails bridge границей авторизации без повторной проверки на стороне Go core.
-
