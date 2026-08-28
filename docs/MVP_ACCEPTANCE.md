@@ -4,7 +4,7 @@
 
 | # | Критерий | Статус | Текущее доказательство | Что требуется закрыть |
 | ---: | --- | --- | --- | --- |
-| 1 | Чистая установка, onboarding, тест провайдера | Partial | Clean-profile first-run gate, typed `CompleteOnboarding` Save→Probe, fake provider success/failure, restart persistence и Wails `OnDomReady` smoke на изолированном profile root | WebKit DOM interaction остаётся ручной до появления стабильного UI harness |
+| 1 | Чистая установка, onboarding, тест провайдера | Automated | Clean-profile first-run gate, typed `CompleteOnboarding` Save→Probe, fake provider success/failure, restart persistence и native Wails/WebKit interaction smoke: welcome → provider form → success → Chat | — |
 | 2 | Streaming, cancel, понятная provider error | Automated | Race-enabled Bridge → local OpenAI-compatible SSE smoke проверяет streaming deltas и durable transcript, `CancelRun` с durable cancelled state и redacted upstream error | — |
 | 3 | Read-only файл внутри root, отказ снаружи | Automated | `internal/tools/filesystem_read_test.go` | Включить в общий MVP smoke |
 | 4 | Изменение файла через approval и audit | Automated | Bounded `filesystem.write` (`create`/`replace`) и сквозной `internal/desktop/filesystem_write_test.go`: exact-path approval, deny без mutation, action-linked tool record и redacted audit | Включить сценарий в общий MVP smoke |
@@ -20,12 +20,12 @@
 | 14 | Dormant исключён из recall, deliberate search находит эпизод | Automated | Memory engine и desktop archive tests | Включить в общий MVP smoke |
 | 15 | Codex login/logout, plan/rate limits, no token persistence | Automated | Race-enabled Bridge → executable fake app-server smoke проверяет device-code metadata, account/Plus plan, rate limits, provider probe, logout/onboarding reset и отсутствие unknown OAuth token canary в DTO/config/SQLite | — |
 | 16 | Antigravity безопасно сообщает unsupported | Automated | Fail-closed `internal/providers/antigravity` adapter, typed `unsupported_auth_mode`, bridge/onboarding tests без config/keyring mutation и явное unavailable-состояние UI | Пересматривать только после появления официального разрешённого vendor contract |
-| 17 | Обязательные macOS E2E smoke проходят | Partial | Universal app build/validation и Wails `OnDomReady`/clean-shutdown smoke выполняются в CI | Автоматизированный WebKit UI interaction, если появится стабильный macOS harness |
+| 17 | Обязательные macOS E2E smoke проходят | Automated | Universal app build/validation, Wails `OnDomReady` lifecycle smoke и native WebKit onboarding interaction выполняются в macOS CI | — |
 
 ## Порядок закрытия Stage 7
 
-1. WebKit DOM/microphone/speech automation для критериев 1, 11 и 17 остаётся отдельным harness-dependent слоем. Offline provider/Codex/plugin lifecycles, negative leak scan, prompt-injection agent loop, voice/chat contract, Codex logout UI и unsupported Antigravity contract уже закрыты.
+1. Остался критерий 11: native WebKit microphone/speech automation с barge-in. Onboarding DOM interaction, offline provider/Codex/plugin lifecycles, negative leak scan, prompt-injection agent loop, voice/chat contract, Codex logout UI и unsupported Antigravity contract уже закрыты.
 
 Реальные OAuth credentials, платные provider calls, Developer ID, notarization и публикация артефактов не являются условиями локального OSS smoke-набора.
 
-Текущий первый срез запускается командами `make mvp-smoke` и на macOS `make macos-launch-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app`. Первый включает race-enabled offline profile lifecycle, production-path plugin package lifecycle, Bridge → local OpenAI-compatible SSE lifecycle и Bridge → executable fake Codex app-server account lifecycle. Второй открывает собранный `.app` с изолированным profile root, ждёт Wails `OnDomReady` marker и проверяет clean shutdown; это ещё не interaction-level Wails/WebKit E2E.
+Текущий набор запускается командой `make mvp-smoke`, а на macOS — `make macos-launch-smoke macos-ui-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app`. Первый включает race-enabled offline profile lifecycle, production-path plugin package lifecycle, Bridge → local OpenAI-compatible SSE lifecycle и Bridge → executable fake Codex app-server account lifecycle. macOS targets открывают собранный `.app` с изолированным profile root: lifecycle smoke проверяет `OnDomReady`/clean shutdown, а UI smoke внутри реального Wails WebKit нажимает onboarding, заполняет provider form, проверяет success и открытие Chat. UI flow использует test-only deterministic provider bridge double; production provider Bridge → HTTP lifecycle проверяется отдельным race-enabled smoke.

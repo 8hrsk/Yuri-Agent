@@ -54,6 +54,47 @@ func TestLaunchSmokeEnvironmentRejectsMarkerOutsideIsolatedRoot(t *testing.T) {
 	}
 }
 
+func TestLaunchSmokeEnvironmentAcceptsIsolatedOnboardingUIFlow(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(config.TestModeEnv, "1")
+	t.Setenv(config.TestProfileRootEnv, root)
+	t.Setenv(launchSmokeReadyFileEnv, filepath.Join(root, "ready.json"))
+	t.Setenv(launchSmokeAutoExitEnv, "1")
+	t.Setenv(uiSmokeFlowEnv, uiSmokeFlowOnboarding)
+	t.Setenv(uiSmokeResultFileEnv, filepath.Join(root, "ui-result.json"))
+
+	options, err := launchSmokeOptionsFromEnvironment()
+	if err != nil {
+		t.Fatalf("launchSmokeOptionsFromEnvironment() error = %v", err)
+	}
+	if options.uiFlow != uiSmokeFlowOnboarding || options.uiResultFile == "" {
+		t.Fatalf("UI smoke options = %#v", options)
+	}
+}
+
+func TestLaunchSmokeEnvironmentRejectsIncompleteOrEscapingUIFlow(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(config.TestModeEnv, "1")
+	t.Setenv(config.TestProfileRootEnv, root)
+	t.Setenv(launchSmokeReadyFileEnv, filepath.Join(root, "ready.json"))
+	t.Setenv(uiSmokeFlowEnv, uiSmokeFlowOnboarding)
+
+	if _, err := launchSmokeOptionsFromEnvironment(); err == nil {
+		t.Fatal("UI smoke accepted a missing result marker")
+	}
+
+	t.Setenv(uiSmokeResultFileEnv, filepath.Join(t.TempDir(), "ui-result.json"))
+	if _, err := launchSmokeOptionsFromEnvironment(); err == nil {
+		t.Fatal("UI smoke accepted a result marker outside its isolated profile root")
+	}
+
+	t.Setenv(uiSmokeResultFileEnv, filepath.Join(root, "ui-result.json"))
+	t.Setenv(uiSmokeFlowEnv, "unknown")
+	if _, err := launchSmokeOptionsFromEnvironment(); err == nil {
+		t.Fatal("UI smoke accepted an unknown flow")
+	}
+}
+
 func TestWriteLaunchSmokeReadyPublishesOnlyHealth(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ready.json")
 	status := desktop.Status{State: "ready", Version: "0.7.0-stage7", Platform: "darwin/arm64"}

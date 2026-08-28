@@ -2,12 +2,13 @@
 set -eu
 
 usage() {
-  echo "usage: $0 --app PATH.app [--timeout SECONDS]" >&2
+  echo "usage: $0 --app PATH.app [--timeout SECONDS] [--ui-flow onboarding]" >&2
   exit 2
 }
 
 app=
 timeout=20
+ui_flow=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --app)
@@ -18,6 +19,11 @@ while [ "$#" -gt 0 ]; do
     --timeout)
       [ "$#" -ge 2 ] || usage
       timeout=$2
+      shift 2
+      ;;
+    --ui-flow)
+      [ "$#" -ge 2 ] || usage
+      ui_flow=$2
       shift 2
       ;;
     *) usage ;;
@@ -33,6 +39,7 @@ case "$timeout" in
   ''|*[!0-9]*) usage ;;
 esac
 [ "$timeout" -gt 0 ] || usage
+[ -z "$ui_flow" ] || [ "$ui_flow" = "onboarding" ] || usage
 
 app_directory=$(cd "$(dirname "$app")" && pwd -P)
 app="$app_directory/$(basename "$app")"
@@ -57,6 +64,7 @@ existing_pids=$(/usr/bin/pgrep -x "$executable_name" || true)
 
 smoke_root=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/yuri-launch-smoke.XXXXXX")
 ready_file="$smoke_root/dom-ready.json"
+ui_result_file="$smoke_root/ui-result.json"
 launch_log="$smoke_root/launch.log"
 open_pid=
 
@@ -92,14 +100,27 @@ trap cleanup EXIT INT TERM HUP
 
 # Launch Services receives every smoke variable explicitly. The production
 # binary ignores profile redirection and auto-exit unless YURI_TEST_MODE=1.
-/usr/bin/open -n -W \
-  --stdout "$launch_log" \
-  --stderr "$launch_log" \
-  --env "YURI_TEST_MODE=1" \
-  --env "YURI_TEST_PROFILE_ROOT=$smoke_root" \
-  --env "YURI_TEST_READY_FILE=$ready_file" \
-  --env "YURI_TEST_AUTO_EXIT=1" \
-  "$app" &
+if [ -n "$ui_flow" ]; then
+  /usr/bin/open -n -W \
+    --stdout "$launch_log" \
+    --stderr "$launch_log" \
+    --env "YURI_TEST_MODE=1" \
+    --env "YURI_TEST_PROFILE_ROOT=$smoke_root" \
+    --env "YURI_TEST_READY_FILE=$ready_file" \
+    --env "YURI_TEST_AUTO_EXIT=1" \
+    --env "YURI_TEST_UI_FLOW=$ui_flow" \
+    --env "YURI_TEST_UI_RESULT_FILE=$ui_result_file" \
+    "$app" &
+else
+  /usr/bin/open -n -W \
+    --stdout "$launch_log" \
+    --stderr "$launch_log" \
+    --env "YURI_TEST_MODE=1" \
+    --env "YURI_TEST_PROFILE_ROOT=$smoke_root" \
+    --env "YURI_TEST_READY_FILE=$ready_file" \
+    --env "YURI_TEST_AUTO_EXIT=1" \
+    "$app" &
+fi
 open_pid=$!
 
 deadline=$(( $(/bin/date +%s) + timeout ))
@@ -122,6 +143,39 @@ grep -q '"state":"ready"' "$ready_file" || {
   echo "unexpected Wails readiness marker" >&2
   exit 1
 }
+
+if [ -n "$ui_flow" ]; then
+  ui_deadline=$(( $(/bin/date +%s) + timeout ))
+  while [ ! -f "$ui_result_file" ] && [ "$(/bin/date +%s)" -lt "$ui_deadline" ]; do
+    if ! process_alive "$open_pid"; then
+      echo "app exited before the WebKit UI result was published" >&2
+      exit 1
+    fi
+    /bin/sleep 1
+  done
+  [ -f "$ui_result_file" ] || {
+    echo "WebKit UI flow did not finish within ${timeout}s" >&2
+    exit 1
+  }
+  grep -q '"flow":"onboarding"' "$ui_result_file" || {
+    echo "unexpected WebKit UI flow result" >&2
+    exit 1
+  }
+  grep -q '"state":"passed"' "$ui_result_file" || {
+    echo "WebKit UI flow failed: $(sed -n '1p' "$ui_result_file")" >&2
+    exit 1
+  }
+  for checkpoint in welcome-visible provider-form-visible provider-submit-dispatched success-visible chat-visible; do
+    grep -q "\"$checkpoint\"" "$ui_result_file" || {
+      echo "WebKit UI flow is missing checkpoint: $checkpoint" >&2
+      exit 1
+    }
+  done
+  if grep -a -q 'ui-smoke-secret-canary' "$ui_result_file" "$launch_log"; then
+    echo "WebKit UI smoke leaked its secret canary into diagnostics" >&2
+    exit 1
+  fi
+fi
 
 database_file="$smoke_root/data/yuri.sqlite3"
 [ -f "$database_file" ] || {
@@ -158,4 +212,8 @@ if [ -x /usr/bin/sqlite3 ]; then
 fi
 
 echo "macOS Wails launch smoke passed: $app"
-echo "DOM ready, isolated profile created, and application shut down cleanly"
+if [ -n "$ui_flow" ]; then
+  echo "WebKit onboarding interacted successfully, Chat opened, and the application shut down cleanly"
+else
+  echo "DOM ready, isolated profile created, and application shut down cleanly"
+fi

@@ -24,17 +24,20 @@ make macos-smoke YURI_VERSION=0.7.0
 
 Job `macos-foundation` в `.github/workflows/ci.yml` запускает тот же `make macos-smoke`, а затем загружает `dist/macos/*.zip` и `dist/macos/*.sha256` через `actions/upload-artifact`. Это единственное автоматическое сохранение артефактов. CI artifact не является установщиком, обновляющим каналом или обещанием совместимости за пределами проверенной macOS universal сборки.
 
-## Wails launch smoke
+## Wails launch и UI smoke
 
-После сборки можно проверить фактический запуск `.app` без Playwright или другого browser automation:
+После сборки можно проверить фактический запуск `.app` и onboarding interaction без Playwright или внешнего WebDriver:
 
 ```text
 make macos-launch-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app
+make macos-ui-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app
 ```
 
-Target запускает bundle через `/usr/bin/open -n -W`, поэтому проверяется именно macOS application lifecycle, а не отдельный executable. Launch Services явно получает закрытые тестовые переменные окружения: приложение использует временный profile root, после загрузки WebKit DOM атомарно публикует readiness marker и само вызывает штатный quit. Скрипт проверяет marker, создание изолированной SQLite БД, завершение процесса и `PRAGMA query_only=ON; PRAGMA integrity_check`. Временный root удаляется после успешного и аварийного завершения; при ошибке выводится launch diagnostics.
+Оба target запускают bundle через `/usr/bin/open -n -W`, поэтому проверяется именно macOS application lifecycle, а не отдельный executable. Launch Services явно получает закрытые тестовые переменные окружения: приложение использует временный profile root, после загрузки WebKit DOM атомарно публикует readiness marker и само вызывает штатный quit. Скрипт проверяет marker, создание изолированной SQLite БД, завершение процесса и `PRAGMA query_only=ON; PRAGMA integrity_check`. Временный root удаляется после успешного и аварийного завершения; при ошибке выводится launch diagnostics.
 
-Это lifecycle smoke с границей `OnDomReady`: он доказывает старт Wails/Go bridge, загрузку React/WebKit, создание durable store и clean shutdown, но не кликает элементы интерфейса. UI onboarding и typed bridge contract проверяются frontend Vitest; полноценная WebKit UI automation остаётся отдельным инструментом, если для неё появится стабильный macOS harness. Smoke требует macOS interactive GUI session и не использует реальные OAuth/provider credentials.
+`macos-launch-smoke` остаётся быстрым lifecycle smoke с границей `OnDomReady`. `macos-ui-smoke` дополнительно подключает bridge, который существует только при явном `YURI_TEST_MODE=1` и изолированном profile root. Встроенный WebKit-сценарий ждёт React UI, нажимает welcome, заполняет provider form, отправляет typed payload, проверяет success screen и открывает Chat. Reporter принимает только фиксированную последовательность checkpoint, записывает результат с правами `0600`, маскирует canary и завершает приложение. В production launch этот bridge не bind-ится.
+
+Provider response в UI-smoke детерминированно подменяется на renderer bridge boundary, поэтому тест не требует сети или credentials. Реальный Bridge → OpenAI-compatible HTTP/SSE lifecycle отдельно проверяется race-enabled `make mvp-smoke`. Вместе эти проверки покрывают UI interaction и production backend path без нестабильного внешнего сервиса. Smoke требует macOS interactive GUI session.
 
 Для локальной проверки уже собранного bundle можно вызвать валидатор напрямую:
 
@@ -61,3 +64,4 @@ scripts/checksum-artifact.sh --verify \
 - Валидатор подтверждает `APPL`, bundle id `ai.ordo.yuri`, macOS 11.0.0 и обе Mach-O архитектуры.
 - SHA-256 manifest создан автоматически и проходит повторную проверку.
 - Проверены onboarding, text/voice, approvals, memory, plugin crash recovery, scheduler restart и quiet hours.
+- Native WebKit onboarding smoke проходит welcome → provider → success → Chat без утечки test canary.

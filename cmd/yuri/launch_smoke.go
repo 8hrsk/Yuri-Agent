@@ -14,18 +14,23 @@ import (
 const (
 	launchSmokeReadyFileEnv = "YURI_TEST_READY_FILE"
 	launchSmokeAutoExitEnv  = "YURI_TEST_AUTO_EXIT"
+	uiSmokeFlowEnv          = "YURI_TEST_UI_FLOW"
+	uiSmokeResultFileEnv    = "YURI_TEST_UI_RESULT_FILE"
+	uiSmokeFlowOnboarding   = "onboarding"
 )
 
 // launchSmokeOptions is deliberately only available behind config.TestModeEnv.
 // It gives an external macOS harness a readiness boundary after WebKit's DOM
 // is ready, while keeping ordinary launches free of test-specific behavior.
 type launchSmokeOptions struct {
-	readyFile string
-	autoExit  bool
+	readyFile    string
+	autoExit     bool
+	uiFlow       string
+	uiResultFile string
 }
 
 func (options launchSmokeOptions) enabled() bool {
-	return options.readyFile != "" || options.autoExit
+	return options.readyFile != "" || options.autoExit || options.uiFlow != ""
 }
 
 func (options launchSmokeOptions) writeReady(status desktop.Status) error {
@@ -39,12 +44,16 @@ func launchSmokeOptionsFromEnvironment() (launchSmokeOptions, error) {
 	mode, modeSet := os.LookupEnv(config.TestModeEnv)
 	readyValue, readySet := os.LookupEnv(launchSmokeReadyFileEnv)
 	autoExitValue, autoExitSet := os.LookupEnv(launchSmokeAutoExitEnv)
+	uiFlowValue, uiFlowSet := os.LookupEnv(uiSmokeFlowEnv)
+	uiResultValue, uiResultSet := os.LookupEnv(uiSmokeResultFileEnv)
 	mode = strings.TrimSpace(mode)
 	readyFile := strings.TrimSpace(readyValue)
+	uiFlow := strings.TrimSpace(uiFlowValue)
+	uiResultFile := strings.TrimSpace(uiResultValue)
 
 	if mode == "" {
-		if modeSet || readySet || autoExitSet {
-			return launchSmokeOptions{}, fmt.Errorf("%s, %s, and %s require %s=1", launchSmokeReadyFileEnv, launchSmokeAutoExitEnv, config.TestProfileRootEnv, config.TestModeEnv)
+		if modeSet || readySet || autoExitSet || uiFlowSet || uiResultSet {
+			return launchSmokeOptions{}, fmt.Errorf("launch and UI smoke variables require %s=1", config.TestModeEnv)
 		}
 		return launchSmokeOptions{}, nil
 	}
@@ -60,16 +69,24 @@ func launchSmokeOptionsFromEnvironment() (launchSmokeOptions, error) {
 	if readyFile != "" && !filepath.IsAbs(readyFile) {
 		return launchSmokeOptions{}, fmt.Errorf("%s must be an absolute path", launchSmokeReadyFileEnv)
 	}
+	if uiResultFile != "" && !filepath.IsAbs(uiResultFile) {
+		return launchSmokeOptions{}, fmt.Errorf("%s must be an absolute path", uiSmokeResultFileEnv)
+	}
+	profileRoot := filepath.Clean(strings.TrimSpace(os.Getenv(config.TestProfileRootEnv)))
 	if readyFile != "" {
-		profileRoot := filepath.Clean(strings.TrimSpace(os.Getenv(config.TestProfileRootEnv)))
 		readyFile = filepath.Clean(readyFile)
-		relative, err := filepath.Rel(profileRoot, readyFile)
-		if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		if !smokeFileInsideProfile(profileRoot, readyFile) {
 			return launchSmokeOptions{}, fmt.Errorf("%s must be a file inside %s", launchSmokeReadyFileEnv, config.TestProfileRootEnv)
 		}
 	}
+	if uiResultFile != "" {
+		uiResultFile = filepath.Clean(uiResultFile)
+		if !smokeFileInsideProfile(profileRoot, uiResultFile) {
+			return launchSmokeOptions{}, fmt.Errorf("%s must be a file inside %s", uiSmokeResultFileEnv, config.TestProfileRootEnv)
+		}
+	}
 
-	options := launchSmokeOptions{readyFile: readyFile}
+	options := launchSmokeOptions{readyFile: readyFile, uiFlow: uiFlow, uiResultFile: uiResultFile}
 	if autoExitSet {
 		if strings.TrimSpace(autoExitValue) != "1" {
 			return launchSmokeOptions{}, fmt.Errorf("%s must be exactly 1 when configured", launchSmokeAutoExitEnv)
@@ -79,7 +96,20 @@ func launchSmokeOptionsFromEnvironment() (launchSmokeOptions, error) {
 	if options.autoExit && options.readyFile == "" {
 		return launchSmokeOptions{}, fmt.Errorf("%s requires %s", launchSmokeAutoExitEnv, launchSmokeReadyFileEnv)
 	}
+	if uiFlowSet || uiResultSet {
+		if uiFlow != uiSmokeFlowOnboarding {
+			return launchSmokeOptions{}, fmt.Errorf("%s must be %q", uiSmokeFlowEnv, uiSmokeFlowOnboarding)
+		}
+		if uiResultFile == "" {
+			return launchSmokeOptions{}, fmt.Errorf("%s requires %s", uiSmokeFlowEnv, uiSmokeResultFileEnv)
+		}
+	}
 	return options, nil
+}
+
+func smokeFileInsideProfile(profileRoot, path string) bool {
+	relative, err := filepath.Rel(profileRoot, path)
+	return err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 type launchSmokeReadyMarker struct {

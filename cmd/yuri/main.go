@@ -15,6 +15,9 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed ui_smoke_onboarding.js
+var uiSmokeOnboardingScript string
+
 func main() {
 	launchSmoke, err := launchSmokeOptionsFromEnvironment()
 	if err != nil {
@@ -40,6 +43,7 @@ func main() {
 		Bind:              []interface{}{bridge},
 	}
 	var readyResult chan error
+	var uiSmokeReporter *UISmokeReporter
 	if launchSmoke.enabled() {
 		startupComplete := make(chan struct{})
 		readyResult = make(chan error, 1)
@@ -47,12 +51,19 @@ func main() {
 			bridge.Startup(ctx)
 			close(startupComplete)
 		}
+		if launchSmoke.uiFlow != "" {
+			uiSmokeReporter = newUISmokeReporter(launchSmoke)
+			app.Bind = append(app.Bind, uiSmokeReporter)
+		}
 		// DomReady is the launch-smoke boundary: it proves that the real Wails
 		// frontend/WebKit loaded, not merely that Go constructed a Bridge.
 		app.OnDomReady = func(ctx context.Context) {
 			<-startupComplete
 			readyResult <- launchSmoke.writeReady(bridge.Health())
-			if launchSmoke.autoExit {
+			if uiSmokeReporter != nil {
+				uiSmokeReporter.attach(ctx)
+				wailsruntime.WindowExecJS(ctx, uiSmokeOnboardingScript)
+			} else if launchSmoke.autoExit {
 				wailsruntime.Quit(ctx)
 			}
 		}
