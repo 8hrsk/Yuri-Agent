@@ -48,7 +48,9 @@ func (backend *Backend) Start(ctx context.Context, request agent.ModelRequest) (
 	if model == "codex-default" {
 		model = ""
 	}
-	thread, err := backend.Client.StartThreadWithOptions(ctx, ThreadOptions{Model: model, CWD: backend.CWD})
+	thread, err := backend.Client.StartThreadWithOptions(ctx, ThreadOptions{
+		Model: model, CWD: backend.CWD, ReadableRoots: backend.ReadableRoots,
+	})
 	if err != nil {
 		release()
 		return nil, fmt.Errorf("start Codex thread: %w", err)

@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 )
 
+const (
+	appServerApprovalPolicy = "never"
+	appServerThreadSandbox  = "read-only"
+)
+
 func (client *Client) ReadAccount(ctx context.Context, refresh bool) (AccountReadResult, error) {
 	var result AccountReadResult
 	err := client.Request(ctx, "account/read", struct {
@@ -50,14 +55,24 @@ func (client *Client) StartThread(ctx context.Context, model string) (Thread, er
 }
 
 type ThreadOptions struct {
-	Model string
-	CWD   string
+	Model         string
+	CWD           string
+	ReadableRoots []string
 }
 
 func (client *Client) StartThreadWithOptions(ctx context.Context, options ThreadOptions) (Thread, error) {
+	params := threadStartParams(options)
+	var result struct {
+		Thread Thread `json:"thread"`
+	}
+	err := client.Request(ctx, "thread/start", params, &result)
+	return result.Thread, err
+}
+
+func threadStartParams(options ThreadOptions) map[string]any {
 	params := map[string]any{
-		"approvalPolicy": "unlessTrusted",
-		"sandbox":        "readOnly",
+		"approvalPolicy": appServerApprovalPolicy,
+		"sandbox":        appServerThreadSandbox,
 		"serviceName":    "yuri",
 	}
 	if options.Model != "" {
@@ -66,11 +81,10 @@ func (client *Client) StartThreadWithOptions(ctx context.Context, options Thread
 	if options.CWD != "" {
 		params["cwd"] = options.CWD
 	}
-	var result struct {
-		Thread Thread `json:"thread"`
+	if len(options.ReadableRoots) > 0 {
+		params["runtimeWorkspaceRoots"] = append([]string(nil), options.ReadableRoots...)
 	}
-	err := client.Request(ctx, "thread/start", params, &result)
-	return result.Thread, err
+	return params
 }
 
 func (client *Client) StartTurn(ctx context.Context, threadID, text string) (Turn, error) {
@@ -86,17 +100,22 @@ type TurnOptions struct {
 }
 
 func (client *Client) StartTurnWithOptions(ctx context.Context, options TurnOptions) (Turn, error) {
+	params := turnStartParams(options)
+	var result struct {
+		Turn Turn `json:"turn"`
+	}
+	err := client.Request(ctx, "turn/start", params, &result)
+	return result.Turn, err
+}
+
+func turnStartParams(options TurnOptions) map[string]any {
 	params := map[string]any{
 		"threadId":       options.ThreadID,
 		"input":          []map[string]string{{"type": "text", "text": options.Text}},
-		"approvalPolicy": "unlessTrusted",
+		"approvalPolicy": appServerApprovalPolicy,
 		"sandboxPolicy": map[string]any{
-			"type": "readOnly",
-			"access": map[string]any{
-				"type":                    "restricted",
-				"includePlatformDefaults": true,
-				"readableRoots":           append([]string(nil), options.ReadableRoots...),
-			},
+			"type":          "readOnly",
+			"networkAccess": false,
 		},
 	}
 	if options.CWD != "" {
@@ -105,11 +124,10 @@ func (client *Client) StartTurnWithOptions(ctx context.Context, options TurnOpti
 	if options.Model != "" {
 		params["model"] = options.Model
 	}
-	var result struct {
-		Turn Turn `json:"turn"`
+	if len(options.ReadableRoots) > 0 {
+		params["runtimeWorkspaceRoots"] = append([]string(nil), options.ReadableRoots...)
 	}
-	err := client.Request(ctx, "turn/start", params, &result)
-	return result.Turn, err
+	return params
 }
 
 func (client *Client) InterruptTurn(ctx context.Context, threadID, turnID string) error {
