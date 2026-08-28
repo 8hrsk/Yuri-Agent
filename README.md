@@ -2,6 +2,8 @@
 
 Yuri — локальный desktop-first AI-агент для одного владельца. Текущий OSS CI-артефакт ориентирован на macOS; архитектура остаётся переносимой на Windows и Linux.
 
+Yuri core и Plugin SDK распространяются по [Apache License 2.0](LICENSE). Лицензии сторонних зависимостей сохраняются согласно их собственным notices.
+
 Engineering foundation, conversational vertical slice, storage/memory, plugin runtime, scheduler/proactivity и reflection/personality vertical slice реализованы. Основные решения и границы находятся в следующих документах:
 
 - [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — техническое задание и roadmap;

@@ -465,12 +465,12 @@ Cross-platform packaging, updates, backup/export, security review, fault injecti
 - Голос STT + TTS входит в MVP и реализуется в Conversational agent vertical slice.
 - Для macOS MVP push-to-talk использует OpenAI-compatible STT adapter; воспроизведение TTS использует системный WebKit/macOS speech synthesis с прерыванием. Provider-neutral TTS port и OpenAI-compatible adapter остаются доступны для последующего выбора голоса.
 - Продукт локальный и single-user; multi-user/server mode не предусматривается.
+- Лицензия Yuri core и Plugin SDK — Apache License 2.0; канонический текст находится в корневом [`LICENSE`](../LICENSE). Лицензии сторонних зависимостей не изменяются.
 
 ### Блокирующие для Этапа 0
 
-1. Лицензия GitHub-репозитория Yuri и лицензия Plugin SDK.
-2. Допустим ли локальный встроенный inference в будущем или продукт всегда использует внешний endpoint.
-3. Требуется ли шифрование всей локальной БД в первой версии или достаточно Keychain + шифрования чувствительных полей/backups.
+1. Допустим ли локальный встроенный inference в будущем или продукт всегда использует внешний endpoint.
+2. Требуется ли шифрование всей локальной БД в первой версии или достаточно Keychain + шифрования чувствительных полей/backups.
 
 ### Блокирующие для продуктового scope MVP
 
