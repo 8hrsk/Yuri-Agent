@@ -8,7 +8,7 @@
 | 2 | Streaming, cancel, понятная provider error | Partial | Agent/provider contract tests, frontend mock streaming | Реальный Wails bridge smoke с cancel/error |
 | 3 | Read-only файл внутри root, отказ снаружи | Automated | `internal/tools/filesystem_read_test.go` | Включить в общий MVP smoke |
 | 4 | Изменение файла через approval и audit | Automated | Bounded `filesystem.write` (`create`/`replace`) и сквозной `internal/desktop/filesystem_write_test.go`: exact-path approval, deny без mutation, action-linked tool record и redacted audit | Включить сценарий в общий MVP smoke |
-| 5 | Plugin install/permission/call/crash/restart | Partial | Offline lifecycle smoke проверяет реальный process handshake/invoke/stop; отдельно есть supervisor/reference integration и desktop install tests | Расширить smoke до package install, grants и crash/restart |
+| 5 | Plugin install/permission/call/crash/restart | Automated | Race-enabled desktop smoke собирает реальный test package, устанавливает его через Bridge, сохраняет и передаёт grant, вызывает tool, переживает process crash/auto-recovery и восстанавливает enabled plugin после переоткрытия SQLite | — |
 | 6 | Автономная память и recall в другом диалоге | Automated | Offline lifecycle smoke проверяет SQLite memory/provenance/recall; desktop tests покрывают cross-session retrieval | Добавить полный agent-loop сценарий между диалогами |
 | 7 | Durable CRON, restart, no-overlap, history | Automated | Offline lifecycle smoke проверяет one-shot/history; scheduler и SQLite integration tests покрывают restart/no-overlap | Добавить desktop bridge reopen в smoke |
 | 8 | Quiet hours блокируют уведомление | Automated | Proactivity timezone/DST/policy tests | Включить в общий MVP smoke |
@@ -24,10 +24,9 @@
 
 ## Порядок закрытия Stage 7
 
-1. Расширить plugin smoke до package install, grants и crash/restart (критерий 5).
-2. Добавить Bridge → fake-provider streaming/cancel/error и Codex lifecycle smoke (критерии 2 и 15).
-3. WebKit DOM/microphone/speech automation для критериев 1, 11 и 17 остаётся отдельным harness-dependent слоем. Offline negative leak scan, prompt-injection agent loop, voice/chat contract, Codex logout UI и unsupported Antigravity contract уже закрыты.
+1. Добавить Bridge → fake-provider streaming/cancel/error и Codex lifecycle smoke (критерии 2 и 15).
+2. WebKit DOM/microphone/speech automation для критериев 1, 11 и 17 остаётся отдельным harness-dependent слоем. Offline plugin lifecycle, negative leak scan, prompt-injection agent loop, voice/chat contract, Codex logout UI и unsupported Antigravity contract уже закрыты.
 
 Реальные OAuth credentials, платные provider calls, Developer ID, notarization и публикация артефактов не являются условиями локального OSS smoke-набора.
 
-Текущий первый срез запускается командами `make mvp-smoke` и на macOS `make macos-launch-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app`. Первый использует один временный SQLite-профиль и последовательно проходит conversation/archive, memory/provenance/recall, versioned persona/relationship/affect, untrusted-file prompt injection через agent loop, durable one-shot job, реальный reference plugin process, encrypted backup/restore и единый negative leak scan по context/audit/log/storage/profile artifacts. Второй открывает собранный `.app` с изолированным profile root, ждёт Wails `OnDomReady` marker и проверяет clean shutdown; это ещё не interaction-level Wails/WebKit E2E.
+Текущий первый срез запускается командами `make mvp-smoke` и на macOS `make macos-launch-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app`. Первый включает два race-enabled пути: единый временный SQLite-профиль для conversation/archive, memory/provenance/recall, versioned persona/relationship/affect, untrusted-file prompt injection, durable job, reference plugin, backup/restore и negative leak scan; а также production-path plugin package lifecycle с grants, crash recovery и восстановлением после переоткрытия БД. Второй открывает собранный `.app` с изолированным profile root, ждёт Wails `OnDomReady` marker и проверяет clean shutdown; это ещё не interaction-level Wails/WebKit E2E.
