@@ -244,6 +244,14 @@ func Load(paths Paths) (Config, error) {
 	if strings.TrimSpace(value.Persona.ProfileID) == "" {
 		value.Persona = Default(paths).Persona
 	}
+	// Early Codex OAuth builds persisted a model copied from the generic
+	// OpenAI-compatible form. ChatGPT OAuth only accepts models exposed by the
+	// account, so an empty value delegates selection to Codex App Server.
+	for index := range value.Providers {
+		if value.Providers[index].Kind == ProviderCodexAppServer {
+			value.Providers[index].Model = ""
+		}
+	}
 	if err := value.Validate(); err != nil {
 		return Config{}, err
 	}

@@ -88,6 +88,24 @@ func TestLoadLegacyConfigDefaultsToIncompleteOnboarding(t *testing.T) {
 	}
 }
 
+func TestLoadClearsLegacyCodexOAuthModel(t *testing.T) {
+	paths := testPaths(t)
+	if err := os.MkdirAll(paths.ConfigDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"version":1,"locale":"ru-RU","log_level":"info","data_directory":"` + paths.DataDirectory + `","providers":[{"id":"codex","kind":"codex-app-server","display_name":"Codex App Server","model":"gpt-5-codex","binary":"codex","enabled":true}]}`
+	if err := os.WriteFile(paths.ConfigFile, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(value.Providers) != 1 || value.Providers[0].Model != "" {
+		t.Fatalf("loaded Codex provider = %#v, want account-default model", value.Providers)
+	}
+}
+
 func TestConfigRejectsPartialOnboardingTransition(t *testing.T) {
 	paths := testPaths(t)
 	value := Default(paths)

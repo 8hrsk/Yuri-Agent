@@ -140,8 +140,14 @@ func (client *Client) Events() <-chan Event { return client.events }
 
 func (client *Client) Initialize(ctx context.Context, info ClientInfo) error {
 	params := struct {
-		ClientInfo ClientInfo `json:"clientInfo"`
-	}{ClientInfo: info}
+		ClientInfo   ClientInfo             `json:"clientInfo"`
+		Capabilities InitializeCapabilities `json:"capabilities"`
+	}{
+		ClientInfo: info,
+		Capabilities: InitializeCapabilities{
+			ExperimentalAPI: true,
+		},
+	}
 	if err := client.Request(ctx, "initialize", params, nil); err != nil {
 		return fmt.Errorf("initialize Codex app server: %w", err)
 	}

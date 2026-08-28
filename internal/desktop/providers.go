@@ -227,8 +227,8 @@ func (b *Bridge) SaveCodexProvider(input SaveCodexProviderInput) (ProviderView, 
 	}
 	provider := config.ProviderConfig{
 		ID: strings.TrimSpace(input.ID), Kind: config.ProviderCodexAppServer,
-		DisplayName: strings.TrimSpace(input.DisplayName), Model: strings.TrimSpace(input.Model),
-		Binary: strings.TrimSpace(input.Binary), Enabled: input.Enabled,
+		DisplayName: strings.TrimSpace(input.DisplayName),
+		Binary:      strings.TrimSpace(input.Binary), Enabled: input.Enabled,
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()

@@ -23,6 +23,7 @@ func TestInitializeAndAccountFlow(t *testing.T) {
 
 	serverDone := make(chan error, 1)
 	var logoutSeen atomic.Bool
+	var experimentalAPISeen atomic.Bool
 	go func() {
 		scanner := bufio.NewScanner(serverInput)
 		for scanner.Scan() {
@@ -32,6 +33,11 @@ func TestInitializeAndAccountFlow(t *testing.T) {
 				return
 			}
 			method, _ := message["method"].(string)
+			if method == "initialize" {
+				params, _ := message["params"].(map[string]any)
+				capabilities, _ := params["capabilities"].(map[string]any)
+				experimentalAPISeen.Store(capabilities["experimentalApi"] == true)
+			}
 			id, hasID := message["id"]
 			if !hasID {
 				continue
@@ -63,6 +69,9 @@ func TestInitializeAndAccountFlow(t *testing.T) {
 	defer cancel()
 	if err := client.Initialize(ctx, ClientInfo{Name: "yuri", Title: "Yuri", Version: "test"}); err != nil {
 		t.Fatal(err)
+	}
+	if !experimentalAPISeen.Load() {
+		t.Fatal("initialize did not opt into experimental API required by runtimeWorkspaceRoots")
 	}
 	account, err := client.ReadAccount(ctx, false)
 	if err != nil {

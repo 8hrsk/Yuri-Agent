@@ -1804,7 +1804,7 @@ class WailsYuriClient implements YuriClient {
     const openai = providerList.find((item): item is UnknownRecord => Boolean(item && typeof item === 'object' && ((item as UnknownRecord).kind === 'openai-compatible' || (item as UnknownRecord).type === 'openai-compatible')))
     const selectedOpenAI = enabledProvider && (enabledProvider.kind === 'openai-compatible' || enabledProvider.type === 'openai-compatible') ? enabledProvider : openai
     const settings: ProviderSettings = enabledProvider && (enabledProvider.kind === 'codex-app-server' || enabledProvider.type === 'codex-app-server')
-      ? { ...defaultSettings, kind: 'codex-app-server', model: String(enabledProvider.model ?? 'gpt-5-codex') }
+      ? { ...defaultSettings, kind: 'codex-app-server', model: String(enabledProvider.model ?? '') }
       : selectedOpenAI
       ? {
           ...defaultSettings,

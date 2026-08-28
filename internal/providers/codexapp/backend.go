@@ -45,7 +45,7 @@ func (backend *Backend) Start(ctx context.Context, request agent.ModelRequest) (
 	}
 	release := func() { <-backend.turns }
 	model := request.Model
-	if model == "codex-default" {
+	if model == "codex-default" || model == "gpt-5-codex" {
 		model = ""
 	}
 	thread, err := backend.Client.StartThreadWithOptions(ctx, ThreadOptions{
@@ -154,11 +154,9 @@ func (stream *codexModelStream) Recv(ctx context.Context) (agent.ModelEvent, err
 				var params struct {
 					ThreadID string `json:"threadId"`
 					Turn     struct {
-						ID     string `json:"id"`
-						Status string `json:"status"`
-						Error  *struct {
-							Message string `json:"message"`
-						} `json:"error"`
+						ID     string          `json:"id"`
+						Status string          `json:"status"`
+						Error  *codexTurnError `json:"error"`
 					} `json:"turn"`
 				}
 				if err := json.Unmarshal(event.Params, &params); err != nil {
@@ -168,7 +166,7 @@ func (stream *codexModelStream) Recv(ctx context.Context) (agent.ModelEvent, err
 					continue
 				}
 				if params.Turn.Status == "failed" {
-					return agent.ModelEvent{}, errors.New("Codex turn failed")
+					return agent.ModelEvent{}, safeCodexTurnError(params.Turn.Error)
 				}
 				if params.Turn.Status == "interrupted" {
 					return agent.ModelEvent{}, context.Canceled
@@ -178,11 +176,49 @@ func (stream *codexModelStream) Recv(ctx context.Context) (agent.ModelEvent, err
 				stream.mu.Unlock()
 				return agent.ModelEvent{Type: agent.ModelEventCompleted, FinishReason: params.Turn.Status}, nil
 			case "error":
-				// Upstream messages can reflect sensitive prompt fragments, so the
-				// normalized error deliberately exposes no raw payload.
-				return agent.ModelEvent{}, errors.New("Codex app server reported a turn error")
+				var params struct {
+					ThreadID  string          `json:"threadId"`
+					TurnID    string          `json:"turnId"`
+					WillRetry bool            `json:"willRetry"`
+					Error     *codexTurnError `json:"error"`
+				}
+				if err := json.Unmarshal(event.Params, &params); err != nil {
+					return agent.ModelEvent{}, errors.New("Codex app server reported a turn error")
+				}
+				if !stream.matches(params.ThreadID, params.TurnID) || params.WillRetry {
+					continue
+				}
+				return agent.ModelEvent{}, safeCodexTurnError(params.Error)
 			}
 		}
+	}
+}
+
+type codexTurnError struct {
+	Message        string          `json:"message"`
+	CodexErrorInfo json.RawMessage `json:"codexErrorInfo"`
+}
+
+func safeCodexTurnError(turnError *codexTurnError) error {
+	if turnError == nil {
+		return errors.New("Codex turn failed")
+	}
+	message := strings.ToLower(turnError.Message)
+	switch {
+	case strings.Contains(message, "not supported when using codex with a chatgpt account"):
+		return errors.New("Codex: выбранная модель недоступна для ChatGPT OAuth; используйте модель аккаунта по умолчанию")
+	case strings.Contains(string(turnError.CodexErrorInfo), "usageLimitExceeded"):
+		return errors.New("Codex: лимит использования ChatGPT исчерпан")
+	case strings.Contains(string(turnError.CodexErrorInfo), "unauthorized"):
+		return errors.New("Codex: сессия ChatGPT OAuth недоступна; выполните вход повторно")
+	case strings.Contains(string(turnError.CodexErrorInfo), "contextWindowExceeded"):
+		return errors.New("Codex: контекст диалога превышает лимит модели")
+	case strings.Contains(string(turnError.CodexErrorInfo), "serverOverloaded"):
+		return errors.New("Codex: сервис временно перегружен; повторите запрос позже")
+	default:
+		// Do not expose arbitrary upstream text: it may contain prompt fragments
+		// or provider diagnostics unsuitable for the conversation UI.
+		return errors.New("Codex app server reported a turn error")
 	}
 }
 

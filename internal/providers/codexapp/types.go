@@ -19,6 +19,10 @@ type ClientInfo struct {
 	Version string `json:"version"`
 }
 
+type InitializeCapabilities struct {
+	ExperimentalAPI bool `json:"experimentalApi"`
+}
+
 type Event struct {
 	ID     json.RawMessage `json:"id,omitempty"`
 	Method string          `json:"method"`
