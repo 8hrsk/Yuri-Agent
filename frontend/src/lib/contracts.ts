@@ -167,6 +167,130 @@ export interface PluginPackageInspection {
   requiresDevMode?: boolean
 }
 
+export type ScheduleType = 'once' | 'interval' | 'cron'
+
+export type ScheduleStatus = 'active' | 'paused' | 'completed' | 'error' | 'unknown'
+
+export type MisfirePolicy = 'skip' | 'run_once'
+
+export type DeliveryChannel = 'in_app' | 'notification'
+
+export interface ScheduleBudget {
+  maxDurationSeconds?: number
+  maxTokens?: number
+  maxToolCalls?: number
+}
+
+export interface Schedule {
+  id: string
+  title: string
+  prompt: string
+  type: ScheduleType
+  /** ISO instant used by one-shot schedules. */
+  runAt?: string
+  /** Interval duration in seconds. */
+  intervalSeconds?: number
+  /** Standard five-field cron expression. */
+  expression?: string
+  timezone: string
+  misfirePolicy: MisfirePolicy
+  enabled: boolean
+  status: ScheduleStatus
+  nextRunAt?: string
+  lastRunAt?: string
+  deliveryChannel: DeliveryChannel
+  budget?: ScheduleBudget
+  createdAt?: string
+  updatedAt?: string
+  lastError?: string
+}
+
+export interface ScheduleInput {
+  id?: string
+  title: string
+  prompt: string
+  type: ScheduleType
+  runAt?: string
+  intervalSeconds?: number
+  expression?: string
+  timezone: string
+  misfirePolicy: MisfirePolicy
+  enabled?: boolean
+  deliveryChannel?: DeliveryChannel
+  budget?: ScheduleBudget
+}
+
+export type JobRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped' | 'unknown'
+
+export interface JobRun {
+  id: string
+  scheduleId: string
+  scheduleTitle?: string
+  status: JobRunStatus
+  attempt: number
+  startedAt?: string
+  finishedAt?: string
+  durationMs?: number
+  error?: string
+  summary?: string
+  triggeredBy?: 'schedule' | 'manual' | 'recovery' | 'unknown'
+}
+
+export interface JobRunListOptions {
+  scheduleId?: string
+  limit?: number
+}
+
+export interface ProactivitySettings {
+  enabled: boolean
+  quietHoursEnabled: boolean
+  quietHoursStart: string
+  quietHoursEnd: string
+  timezone: string
+  dailyLimit: number
+  cooldownMinutes: number
+  allowLocalNotifications: boolean
+}
+
+export type ActivityType = 'job' | 'proactive' | 'system' | 'reflection' | 'memory' | 'unknown'
+
+export type ActivityStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped' | 'blocked' | 'info' | 'unknown'
+
+export interface ActivityEvent {
+  id: string
+  type: ActivityType
+  status: ActivityStatus
+  title: string
+  detail?: string
+  source?: string
+  scheduleId?: string
+  runId?: string
+  createdAt: string
+  durationMs?: number
+  reason?: string
+  provenance?: string
+}
+
+export interface ActivityListOptions {
+  limit?: number
+  type?: ActivityType | 'all'
+  status?: ActivityStatus | 'all'
+}
+
+export type YuriNotificationType = 'task.completed' | 'background.completed' | 'plugin.event' | 'rule.triggered' | 'agent.message' | 'unknown'
+
+export interface YuriNotification {
+  id: string
+  type: YuriNotificationType
+  title: string
+  body: string
+  createdAt: string
+  allowNative: boolean
+  permission?: NotificationPermission
+  conversationId?: string
+  deepLink?: string
+}
+
 export interface PluginInstallRequest {
   path: string
   devMode?: boolean
@@ -283,4 +407,15 @@ export interface YuriClient {
   uninstallPlugin(pluginId: string): Promise<void>
   startPlugin(pluginId: string): Promise<PluginRecord | undefined>
   stopPlugin(pluginId: string): Promise<PluginRecord | undefined>
+  listSchedules(): Promise<Schedule[]>
+  createSchedule(input: ScheduleInput): Promise<Schedule | undefined>
+  updateSchedule(input: ScheduleInput): Promise<Schedule | undefined>
+  setScheduleEnabled(scheduleId: string, enabled: boolean): Promise<Schedule | undefined>
+  runScheduleNow(scheduleId: string): Promise<JobRun | undefined>
+  cancelJobRun(runId: string): Promise<JobRun | undefined>
+  deleteSchedule(scheduleId: string): Promise<void>
+  listJobRuns(options?: JobRunListOptions): Promise<JobRun[]>
+  getProactivitySettings(): Promise<ProactivitySettings>
+  saveProactivitySettings(input: ProactivitySettings): Promise<void>
+  listActivity(options?: ActivityListOptions): Promise<ActivityEvent[]>
 }

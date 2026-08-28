@@ -17,6 +17,7 @@ import (
 const (
 	defaultMaxSteps           = 8
 	defaultMaxTokens          = int64(32_000)
+	defaultMaxToolCalls       = 32
 	defaultMaxToolOutputBytes = int64(256 * 1024)
 	defaultMaxDuration        = 10 * time.Minute
 )
@@ -81,6 +82,7 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 	result := RunResult{}
 	seenCalls := make(map[string]ToolResult)
 	seenCallArgs := make(map[string]string)
+	toolCallsUsed := 0
 
 	for step := 1; step <= budget.MaxSteps; step++ {
 		if err := contextErr(runCtx); err != nil {
@@ -119,8 +121,12 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 			}
 			return result, nil
 		}
+		if toolCallsUsed+len(calls) > budget.MaxToolCalls {
+			return r.fail(runCtx, input, result, fmt.Errorf("%w: tool call limit %d exceeded", ErrBudgetExceeded, budget.MaxToolCalls))
+		}
 
 		for _, call := range calls {
+			toolCallsUsed++
 			result.ToolCalls = append(result.ToolCalls, call)
 			toolMessage, err := r.executeTool(runCtx, input, call, step, budget.MaxToolOutputBytes, seenCalls, seenCallArgs)
 			if err != nil {
@@ -146,6 +152,9 @@ func normalizedBudget(b domain.RunBudget) domain.RunBudget {
 	}
 	if b.MaxTokens <= 0 {
 		b.MaxTokens = defaultMaxTokens
+	}
+	if b.MaxToolCalls <= 0 {
+		b.MaxToolCalls = defaultMaxToolCalls
 	}
 	if b.MaxToolOutputBytes <= 0 {
 		b.MaxToolOutputBytes = defaultMaxToolOutputBytes

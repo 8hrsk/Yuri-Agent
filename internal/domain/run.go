@@ -64,12 +64,14 @@ func (s RunState) Valid() bool {
 type RunBudget struct {
 	MaxSteps           int   `json:"max_steps"`
 	MaxTokens          int64 `json:"max_tokens"`
+	MaxToolCalls       int   `json:"max_tool_calls"`
 	MaxToolOutputBytes int64 `json:"max_tool_output_bytes"`
 	MaxDurationSeconds int   `json:"max_duration_seconds"`
 }
 
 func (b RunBudget) Valid() bool {
-	return b.MaxSteps >= 0 && b.MaxTokens >= 0 && b.MaxToolOutputBytes >= 0 && b.MaxDurationSeconds >= 0
+	return b.MaxSteps >= 0 && b.MaxTokens >= 0 && b.MaxToolCalls >= 0 &&
+		b.MaxToolOutputBytes >= 0 && b.MaxDurationSeconds >= 0
 }
 
 // AgentRun is the domain representation of an execution. It deliberately

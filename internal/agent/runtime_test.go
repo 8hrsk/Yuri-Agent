@@ -151,6 +151,33 @@ func TestRuntimeAppliesAuthorizationAndApprovalBeforeExecute(t *testing.T) {
 	}
 }
 
+func TestRuntimeRejectsToolBatchBeyondBudgetBeforeSideEffects(t *testing.T) {
+	backend := &scriptedBackend{streams: [][]ModelEvent{{
+		{Type: ModelEventToolCallStarted, ToolCallID: "call_1", ToolName: "echo", Arguments: `{"value":"one"}`},
+		{Type: ModelEventToolCallStarted, ToolCallID: "call_2", ToolName: "echo", Arguments: `{"value":"two"}`},
+		{Type: ModelEventCompleted},
+	}}}
+	registry := NewToolRegistry()
+	echo := &echoTool{}
+	if err := registry.Register(echo); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := NewRuntime(backend, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.Run(context.Background(), RunRequest{
+		ModelRequest: ModelRequest{Model: "test-model", Messages: []Message{{Role: RoleUser, Content: "run both"}}},
+		Budget:       domain.RunBudget{MaxSteps: 2, MaxTokens: 100, MaxToolCalls: 1, MaxToolOutputBytes: 1000, MaxDurationSeconds: 2},
+	})
+	if !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("Run() error = %v, want ErrBudgetExceeded", err)
+	}
+	if echo.calls != 0 {
+		t.Fatalf("tool calls = %d, want no partial side effects", echo.calls)
+	}
+}
+
 func TestRuntimeStopsOnCancellation(t *testing.T) {
 	backend := &blockingBackend{started: make(chan struct{})}
 	runtime, err := NewRuntime(backend, NewToolRegistry())

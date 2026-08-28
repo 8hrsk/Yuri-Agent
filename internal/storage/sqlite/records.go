@@ -80,6 +80,7 @@ type Repositories struct {
 	ToolCalls     *ToolCallRepository
 	Audit         *AuditRepository
 	Plugins       *PluginRepository
+	Scheduler     *SchedulerRepository
 }
 
 // NewRepositories constructs all repositories over one authoritative SQLite
@@ -98,6 +99,7 @@ func NewRepositories(database *sql.DB) (*Repositories, error) {
 		ToolCalls:     NewToolCallRepository(database),
 		Audit:         NewAuditRepository(database),
 		Plugins:       NewPluginRepository(database),
+		Scheduler:     NewSchedulerRepository(database),
 	}, nil
 }
 

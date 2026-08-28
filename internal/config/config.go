@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const (
@@ -22,14 +23,15 @@ const (
 // Config contains process-level settings that are safe to persist as JSON.
 // Feature-specific settings will be added through versioned migrations.
 type Config struct {
-	Version            int              `json:"version"`
-	Locale             string           `json:"locale"`
-	LogLevel           string           `json:"log_level"`
-	DataDirectory      string           `json:"data_directory"`
-	AllowedDirectories []string         `json:"allowed_directories,omitempty"`
-	Providers          []ProviderConfig `json:"providers,omitempty"`
-	Voice              VoiceConfig      `json:"voice,omitempty"`
-	PluginDevMode      bool             `json:"plugin_dev_mode,omitempty"`
+	Version            int               `json:"version"`
+	Locale             string            `json:"locale"`
+	LogLevel           string            `json:"log_level"`
+	DataDirectory      string            `json:"data_directory"`
+	AllowedDirectories []string          `json:"allowed_directories,omitempty"`
+	Providers          []ProviderConfig  `json:"providers,omitempty"`
+	Voice              VoiceConfig       `json:"voice,omitempty"`
+	PluginDevMode      bool              `json:"plugin_dev_mode,omitempty"`
+	Proactivity        ProactivityConfig `json:"proactivity"`
 }
 
 type ProviderKind string
@@ -59,6 +61,20 @@ type VoiceConfig struct {
 	TranscriptionModel      string `json:"transcription_model,omitempty"`
 	SpeechModel             string `json:"speech_model,omitempty"`
 	Voice                   string `json:"voice,omitempty"`
+}
+
+// ProactivityConfig is persisted as simple UI-facing values. Runtime policy
+// adapters convert cooldown minutes to durations and never store transient
+// delivery counters in this file.
+type ProactivityConfig struct {
+	Enabled                 bool   `json:"enabled"`
+	QuietHoursEnabled       bool   `json:"quiet_hours_enabled"`
+	QuietHoursStart         string `json:"quiet_hours_start"`
+	QuietHoursEnd           string `json:"quiet_hours_end"`
+	Timezone                string `json:"timezone"`
+	DailyLimit              int    `json:"daily_limit"`
+	CooldownMinutes         int    `json:"cooldown_minutes"`
+	AllowLocalNotifications bool   `json:"allow_local_notifications"`
 }
 
 // Paths contains all local roots owned by the single-user Yuri installation.
@@ -126,6 +142,10 @@ func Default(paths Paths) Config {
 		Locale:        "ru-RU",
 		LogLevel:      "info",
 		DataDirectory: paths.DataDirectory,
+		Proactivity: ProactivityConfig{
+			Enabled: false, QuietHoursEnabled: true, QuietHoursStart: "23:00", QuietHoursEnd: "07:00",
+			Timezone: "UTC", DailyLimit: 5, CooldownMinutes: 30, AllowLocalNotifications: true,
+		},
 	}
 }
 
@@ -141,6 +161,11 @@ func Load(paths Paths) (Config, error) {
 	}
 	if err := json.Unmarshal(content, &value); err != nil {
 		return Config{}, fmt.Errorf("decode config: %w", err)
+	}
+	// Config files created before Stage 4 have no proactivity object. Preserve
+	// backward compatibility while keeping new installations deny-by-default.
+	if strings.TrimSpace(value.Proactivity.Timezone) == "" {
+		value.Proactivity = Default(paths).Proactivity
 	}
 	if err := value.Validate(); err != nil {
 		return Config{}, err
@@ -241,7 +266,36 @@ func (c Config) Validate() error {
 			return fmt.Errorf("provider %q has unsupported kind %q", provider.ID, provider.Kind)
 		}
 	}
+	if err := c.Proactivity.Validate(); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (c ProactivityConfig) Validate() error {
+	if _, err := time.LoadLocation(strings.TrimSpace(c.Timezone)); err != nil {
+		return fmt.Errorf("invalid proactivity timezone %q: %w", c.Timezone, err)
+	}
+	if c.DailyLimit < 0 || c.DailyLimit > 10_000 {
+		return errors.New("proactivity daily_limit must be between 0 and 10000")
+	}
+	if c.CooldownMinutes < 0 || c.CooldownMinutes > 365*24*60 {
+		return errors.New("proactivity cooldown_minutes is outside the supported range")
+	}
+	if c.QuietHoursEnabled {
+		if !validClockTime(c.QuietHoursStart) || !validClockTime(c.QuietHoursEnd) {
+			return errors.New("proactivity quiet hours must use HH:MM")
+		}
+	}
+	return nil
+}
+
+func validClockTime(value string) bool {
+	if len(value) != 5 || value[2] != ':' {
+		return false
+	}
+	parsed, err := time.Parse("15:04", value)
+	return err == nil && parsed.Format("15:04") == value
 }
 
 func validateRemoteURL(raw string) error {

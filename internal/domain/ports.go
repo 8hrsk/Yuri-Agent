@@ -14,6 +14,11 @@ type RunRepository interface {
 // the more explicit persistence term while exposing the architectural alias.
 type RunStore = RunRepository
 
+// SchedulerStore is the architectural alias for the durable schedule/job
+// repository. The concrete contract is declared with scheduler entities in
+// scheduler.go to keep worker and storage adapters independent of UI code.
+type SchedulerStore = SchedulerRepository
+
 type ApprovalRepository interface {
 	Create(context.Context, Approval) error
 	Get(context.Context, ID) (Approval, error)

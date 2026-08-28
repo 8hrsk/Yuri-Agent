@@ -14,7 +14,9 @@ import (
 	"github.com/OrdoAI/yuri-agent/internal/config"
 	"github.com/OrdoAI/yuri-agent/internal/observability"
 	"github.com/OrdoAI/yuri-agent/internal/plugins"
+	"github.com/OrdoAI/yuri-agent/internal/proactivity"
 	"github.com/OrdoAI/yuri-agent/internal/providers/codexapp"
+	schedulerpkg "github.com/OrdoAI/yuri-agent/internal/scheduler"
 	securitykeyring "github.com/OrdoAI/yuri-agent/internal/security/keyring"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 )
@@ -38,6 +40,8 @@ type Bridge struct {
 	modelTurns        chan struct{}
 	shuttingDown      bool
 	pluginSupervisors map[string]*plugins.Supervisor
+	proactivity       *proactivity.Service
+	scheduler         *schedulerpkg.Scheduler
 }
 
 // Status is safe to expose to the local frontend and contains no secrets.
@@ -83,12 +87,29 @@ func NewBridge(ctx context.Context) (*Bridge, error) {
 		return nil, err
 	}
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
-	return &Bridge{
+	bridge := &Bridge{
 		logger: logger, database: database, repositories: repositories, paths: paths,
 		config: value, keyring: securitykeyring.New(), activeRuns: make(map[string]context.CancelFunc),
 		approvals: make(map[string]chan bool), backgroundCtx: backgroundCtx, backgroundCancel: backgroundCancel,
 		modelTurns: make(chan struct{}, 1), pluginSupervisors: make(map[string]*plugins.Supervisor),
-	}, nil
+	}
+	service, err := proactivity.NewService(proactivitySettings(value.Proactivity), proactivity.FuncNotifier(bridge.emitNotification))
+	if err != nil {
+		database.Close()
+		return nil, fmt.Errorf("initialize proactivity policy: %w", err)
+	}
+	bridge.proactivity = service
+	if err := bridge.restoreProactivityLedger(ctx); err != nil {
+		database.Close()
+		return nil, fmt.Errorf("restore proactivity ledger: %w", err)
+	}
+	worker, err := schedulerpkg.New(repositories.Scheduler, schedulerpkg.ExecuteFunc(bridge.executeScheduledJob), schedulerpkg.Options{})
+	if err != nil {
+		database.Close()
+		return nil, fmt.Errorf("initialize scheduler: %w", err)
+	}
+	bridge.scheduler = worker
+	return bridge, nil
 }
 
 // Startup receives the Wails application context.
@@ -98,6 +119,11 @@ func (b *Bridge) Startup(ctx context.Context) {
 	b.mu.Unlock()
 	b.logger.InfoContext(ctx, "desktop runtime started", "platform", runtime.GOOS)
 	b.restoreEnabledPlugins()
+	if b.scheduler != nil {
+		if err := b.scheduler.Start(b.backgroundCtx); err != nil {
+			b.logger.ErrorContext(ctx, "start scheduler", "error", err)
+		}
+	}
 }
 
 // Shutdown releases durable resources after background work has stopped.
@@ -120,6 +146,11 @@ func (b *Bridge) Shutdown(ctx context.Context) {
 	if backgroundCancel != nil {
 		backgroundCancel()
 	}
+	if b.scheduler != nil {
+		if err := b.scheduler.Stop(); err != nil {
+			b.logger.ErrorContext(ctx, "stop scheduler", "error", err)
+		}
+	}
 	for _, supervisor := range supervisors {
 		stopCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		_ = supervisor.Stop(stopCtx)
@@ -138,7 +169,7 @@ func (b *Bridge) Shutdown(ctx context.Context) {
 
 // Health is the Stage 0 bridge smoke endpoint.
 func (b *Bridge) Health() Status {
-	return Status{State: "ready", Version: "0.4.0-stage3", Platform: runtime.GOOS + "/" + runtime.GOARCH}
+	return Status{State: "ready", Version: "0.5.0-stage4", Platform: runtime.GOOS + "/" + runtime.GOARCH}
 }
 
 func (b *Bridge) context() (context.Context, context.CancelFunc) {

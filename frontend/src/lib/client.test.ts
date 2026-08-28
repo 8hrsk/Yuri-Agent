@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { createYuriClient, resetYuriClientForTests } from './client'
+import {
+  canUseNativeNotification,
+  createYuriClient,
+  requestBrowserNotificationPermission,
+  resetYuriClientForTests,
+  subscribeNotifications,
+} from './client'
 
 describe('Yuri client contract', () => {
   beforeEach(() => {
@@ -122,6 +128,260 @@ describe('Yuri client contract', () => {
         { name: 'EnablePlugin', args: [{ id: 'reference.demo', pluginId: 'reference.demo' }] },
         { name: 'UninstallPlugin', args: [{ id: 'reference.demo', pluginId: 'reference.demo' }] },
       ])
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
+  it('exposes durable scheduler and proactivity controls in the offline preview', async () => {
+    const client = createYuriClient()
+    const schedules = await client.listSchedules()
+
+    expect(schedules[0]).toMatchObject({
+      id: 'schedule-daily-briefing',
+      type: 'cron',
+      expression: '0 9 * * 1-5',
+      timezone: 'Europe/Moscow',
+      misfirePolicy: 'run_once',
+      enabled: true,
+    })
+    expect((await client.listJobRuns({ scheduleId: schedules[0]?.id })).length).toBeGreaterThan(0)
+    expect((await client.listActivity({ type: 'proactive' }))[0]?.type).toBe('proactive')
+
+    const created = await client.createSchedule({
+      title: 'Проверка задач',
+      prompt: 'Проверь, что scheduler отвечает.',
+      type: 'interval',
+      intervalSeconds: 3600,
+      timezone: 'UTC',
+      misfirePolicy: 'skip',
+      deliveryChannel: 'in_app',
+    })
+    expect(created).toMatchObject({ title: 'Проверка задач', type: 'interval', enabled: true })
+    expect(await client.setScheduleEnabled(created!.id, false)).toMatchObject({ enabled: false, status: 'paused' })
+    await client.deleteSchedule(created!.id)
+    expect((await client.listSchedules()).find((item) => item.id === created!.id)).toBeUndefined()
+
+    const settings = await client.getProactivitySettings()
+    await client.saveProactivitySettings({ ...settings, enabled: false, dailyLimit: 0 })
+    expect(await client.getProactivitySettings()).toMatchObject({ enabled: false, dailyLimit: 0 })
+  })
+
+  it('normalizes scheduler payloads and forwards the Stage 4 Wails API', async () => {
+    const calls: Array<{ name: string; args: unknown[] }> = []
+    const schedule = {
+      schedule_id: 'schedule-1',
+      name: 'Сводка',
+      instruction: 'Собери сводку.',
+      schedule_type: 'cron',
+      cron_expression: '0 9 * * 1-5',
+      timezone: 'Europe/Moscow',
+      misfire_policy: 'run_once',
+      enabled: false,
+      state: 'paused',
+      next_run_at: '2026-08-29T06:00:00.000Z',
+      delivery_channel: 'notification',
+    }
+    const bridge = {
+      ListConversations: () => [],
+      ListSchedules: () => [schedule],
+      CreateSchedule: (input: unknown) => {
+        calls.push({ name: 'CreateSchedule', args: [input] })
+        return { ...schedule, enabled: true, state: 'active' }
+      },
+      SetScheduleEnabled: (input: unknown) => {
+        calls.push({ name: 'SetScheduleEnabled', args: [input] })
+        return { ...schedule, enabled: true, state: 'active' }
+      },
+      RunScheduleNow: (input: unknown) => {
+        calls.push({ name: 'RunScheduleNow', args: [input] })
+        return { id: 'run-1', schedule_id: 'schedule-1', state: 'completed', attempt: 1, triggered_by: 'manual' }
+      },
+      CancelJobRun: (input: unknown) => {
+        calls.push({ name: 'CancelJobRun', args: [input] })
+        return { id: 'run-1', schedule_id: 'schedule-1', state: 'cancelled', attempt: 1, trigger: 'manual' }
+      },
+      DeleteSchedule: (input: unknown) => {
+        calls.push({ name: 'DeleteSchedule', args: [input] })
+      },
+      ListJobRuns: (input: unknown) => {
+        calls.push({ name: 'ListJobRuns', args: [input] })
+        return [{ id: 'run-1', schedule_id: 'schedule-1', state: 'completed', attempt: 1 }]
+      },
+      GetProactivitySettings: () => ({
+        global_enabled: false,
+        quiet_hours_enabled: true,
+        quiet_hours_start: '22:30',
+        quiet_hours_end: '07:30',
+        timezone: 'UTC',
+        daily_limit: 4,
+        cooldown_minutes: 15,
+        allow_local_notifications: false,
+      }),
+      SaveProactivitySettings: (input: unknown) => {
+        calls.push({ name: 'SaveProactivitySettings', args: [input] })
+      },
+      ListActivity: (input: unknown) => {
+        calls.push({ name: 'ListActivity', args: [input] })
+        return [{ event_id: 'activity-1', category: 'proactive', state: 'skipped', action: 'Отложено', created_at: '2026-08-28T10:00:00.000Z' }]
+      },
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      const client = createYuriClient()
+      expect(client.mode).toBe('wails')
+      await expect(client.listSchedules()).resolves.toMatchObject([{ id: 'schedule-1', title: 'Сводка', type: 'cron', status: 'paused', enabled: false }])
+      await expect(client.createSchedule({
+        title: 'Новая',
+        prompt: 'Сделай.',
+        type: 'once',
+        runAt: '2026-08-29T09:00:00.000Z',
+        timezone: 'UTC',
+        misfirePolicy: 'skip',
+      })).resolves.toMatchObject({ id: 'schedule-1', enabled: true })
+      await expect(client.setScheduleEnabled('schedule-1', true)).resolves.toMatchObject({ enabled: true })
+      await expect(client.runScheduleNow('schedule-1')).resolves.toMatchObject({ scheduleId: 'schedule-1', status: 'completed', triggeredBy: 'manual' })
+      await expect(client.cancelJobRun('run-1')).resolves.toMatchObject({ id: 'run-1', status: 'cancelled' })
+      await expect(client.listJobRuns({ scheduleId: 'schedule-1', limit: 5 })).resolves.toMatchObject([{ scheduleId: 'schedule-1', status: 'completed' }])
+      await expect(client.getProactivitySettings()).resolves.toMatchObject({ enabled: false, quietHoursStart: '22:30', dailyLimit: 4 })
+      await client.saveProactivitySettings({ ...(await client.getProactivitySettings()), enabled: true })
+      await expect(client.listActivity({ limit: 10 })).resolves.toMatchObject([{ id: 'activity-1', type: 'proactive', status: 'skipped' }])
+      await client.deleteSchedule('schedule-1')
+      expect(calls.map((call) => call.name)).toEqual([
+        'CreateSchedule',
+        'SetScheduleEnabled',
+        'RunScheduleNow',
+        'CancelJobRun',
+        'ListJobRuns',
+        'SaveProactivitySettings',
+        'ListActivity',
+        'DeleteSchedule',
+      ])
+      expect(calls[0]?.args[0]).toMatchObject({ title: 'Новая', type: 'once', scheduleType: 'once', cron_expression: undefined })
+      expect(calls[1]?.args[0]).toEqual({ id: 'schedule-1', scheduleId: 'schedule-1', enabled: true })
+      expect(calls[3]?.args[0]).toEqual({ id: 'run-1', runId: 'run-1' })
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
+  it('subscribes to notification events and gates native delivery on explicit flags', async () => {
+    const listeners = new Map<string, (value: unknown) => void>()
+    const bridge = { ListConversations: () => [] }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    const previousNotification = (globalThis as { Notification?: unknown }).Notification
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        go: { main: { Bridge: bridge } },
+        runtime: {
+          EventsOn: (name: string, callback: (value: unknown) => void) => { listeners.set(name, callback) },
+          EventsOff: (name: string) => { listeners.delete(name) },
+        },
+      },
+    })
+    resetYuriClientForTests()
+
+    try {
+      const received: string[] = []
+      const unsubscribe = subscribeNotifications((notification) => received.push(notification.id))
+      listeners.get('yuri:notification')?.({
+        data: {
+          notification: {
+            notification_id: 'notification-1',
+            type: 'task.completed',
+            title: 'Задача завершена',
+            body: 'Утренняя сводка готова.',
+            allow_native: 'true',
+            created_at: '2026-08-28T10:00:00.000Z',
+          },
+        },
+      })
+      expect(received).toEqual(['notification-1'])
+      unsubscribe()
+      expect(listeners.has('yuri:notification')).toBe(false)
+
+      const fakeNotification = { permission: 'granted' as NotificationPermission, requestPermission: async () => 'granted' as NotificationPermission }
+      Object.defineProperty(globalThis, 'Notification', { configurable: true, value: fakeNotification })
+      const nativeAllowed = {
+        id: 'notification-2',
+        type: 'agent.message' as const,
+        title: 'Yuri',
+        body: 'Я здесь.',
+        createdAt: '2026-08-28T10:00:00.000Z',
+        allowNative: true,
+      }
+      expect(canUseNativeNotification(nativeAllowed)).toBe(true)
+      expect(canUseNativeNotification({ ...nativeAllowed, allowNative: false })).toBe(false)
+      expect(canUseNativeNotification({ ...nativeAllowed, permission: 'denied' })).toBe(false)
+      fakeNotification.permission = 'default'
+      expect(canUseNativeNotification(nativeAllowed)).toBe(false)
+      let requestCount = 0
+      fakeNotification.requestPermission = async () => {
+        requestCount += 1
+        return 'granted'
+      }
+      expect(await requestBrowserNotificationPermission()).toBe('granted')
+      expect(requestCount).toBe(1)
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      if (previousNotification === undefined) delete (globalThis as { Notification?: unknown }).Notification
+      else Object.defineProperty(globalThis, 'Notification', { configurable: true, value: previousNotification })
+      resetYuriClientForTests()
+    }
+  })
+
+  it('propagates rejected Stage 4 read calls instead of replacing them with fallback data', async () => {
+    const bridge = {
+      ListConversations: () => [],
+      ListSchedules: () => Promise.reject(new Error('schedule storage unavailable')),
+      ListJobRuns: () => Promise.reject(new Error('job history unavailable')),
+      CancelJobRun: () => Promise.reject(new Error('cancel unavailable')),
+      GetProactivitySettings: () => Promise.reject(new Error('proactivity settings unavailable')),
+      ListActivity: () => Promise.reject(new Error('activity unavailable')),
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      const client = createYuriClient()
+      await expect(client.listSchedules()).rejects.toThrow('schedule storage unavailable')
+      await expect(client.listJobRuns({ limit: 5 })).rejects.toThrow('job history unavailable')
+      await expect(client.cancelJobRun('run-1')).rejects.toThrow('cancel unavailable')
+      await expect(client.getProactivitySettings()).rejects.toThrow('proactivity settings unavailable')
+      await expect(client.listActivity({ limit: 5 })).rejects.toThrow('activity unavailable')
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
+  it('uses Stage 4 fallback data only when the Wails methods are absent', async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: { ListConversations: () => [] } } } } })
+    resetYuriClientForTests()
+
+    try {
+      const client = createYuriClient()
+      await expect(client.listSchedules()).resolves.toEqual([])
+      await expect(client.listJobRuns()).resolves.toEqual([])
+      await expect(client.cancelJobRun('run-1')).resolves.toBeUndefined()
+      await expect(client.listActivity()).resolves.toEqual([])
+      await expect(client.getProactivitySettings()).resolves.toMatchObject({
+        enabled: false,
+        quietHoursStart: '23:00',
+        dailyLimit: 5,
+      })
     } finally {
       if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
       else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })

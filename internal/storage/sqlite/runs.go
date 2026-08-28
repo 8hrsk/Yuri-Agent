@@ -40,11 +40,11 @@ func (r *RunRepository) Create(ctx context.Context, run domain.AgentRun) error {
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO agent_runs(
 			id, kind, conversation_id, parent_run_id, state,
-			max_steps, max_tokens, max_tool_output_bytes, max_duration_seconds,
+			max_steps, max_tokens, max_tool_calls, max_tool_output_bytes, max_duration_seconds,
 			failure, version, created_at, updated_at, started_at, finished_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(run.ID), string(run.Kind), nullableID(run.ConversationID), nullableID(run.ParentRunID),
-		string(run.State), run.Budget.MaxSteps, run.Budget.MaxTokens, run.Budget.MaxToolOutputBytes,
+		string(run.State), run.Budget.MaxSteps, run.Budget.MaxTokens, run.Budget.MaxToolCalls, run.Budget.MaxToolOutputBytes,
 		run.Budget.MaxDurationSeconds, nullableStringValue(run.Failure), run.Version, createdAt, updatedAt,
 		nullableTimeValue(run.StartedAt), nullableTimeValue(run.FinishedAt))
 	return wrappedSQLError("create run", err)
@@ -72,11 +72,11 @@ func (r *RunRepository) get(ctx context.Context, id string) (domain.AgentRun, er
 	)
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, kind, conversation_id, parent_run_id, state,
-		       max_steps, max_tokens, max_tool_output_bytes, max_duration_seconds,
+		       max_steps, max_tokens, max_tool_calls, max_tool_output_bytes, max_duration_seconds,
 		       failure, version, created_at, updated_at, started_at, finished_at
 		FROM agent_runs WHERE id = ?`, id).Scan(
 		&idValue, &kind, &nullableString{Value: &conversationID}, &nullableString{Value: &parentID}, &state,
-		&run.Budget.MaxSteps, &run.Budget.MaxTokens, &run.Budget.MaxToolOutputBytes, &run.Budget.MaxDurationSeconds,
+		&run.Budget.MaxSteps, &run.Budget.MaxTokens, &run.Budget.MaxToolCalls, &run.Budget.MaxToolOutputBytes, &run.Budget.MaxDurationSeconds,
 		&nullableString{Value: &failure}, &run.Version, &createdAt, &updatedAt, &startedAt, &finishedAt)
 	if err != nil {
 		return domain.AgentRun{}, wrappedSQLError("get run", err)
@@ -124,11 +124,11 @@ func (r *RunRepository) Save(ctx context.Context, run domain.AgentRun) error {
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE agent_runs SET
 			kind = ?, conversation_id = ?, parent_run_id = ?, state = ?,
-			max_steps = ?, max_tokens = ?, max_tool_output_bytes = ?, max_duration_seconds = ?,
+			max_steps = ?, max_tokens = ?, max_tool_calls = ?, max_tool_output_bytes = ?, max_duration_seconds = ?,
 			failure = ?, version = ?, updated_at = ?, started_at = ?, finished_at = ?
 		WHERE id = ? AND version = ?`,
 		string(run.Kind), nullableID(run.ConversationID), nullableID(run.ParentRunID), string(run.State),
-		run.Budget.MaxSteps, run.Budget.MaxTokens, run.Budget.MaxToolOutputBytes, run.Budget.MaxDurationSeconds,
+		run.Budget.MaxSteps, run.Budget.MaxTokens, run.Budget.MaxToolCalls, run.Budget.MaxToolOutputBytes, run.Budget.MaxDurationSeconds,
 		nullableStringValue(run.Failure), run.Version, updatedAt, nullableTimeValue(run.StartedAt), nullableTimeValue(run.FinishedAt),
 		string(run.ID), run.Version-1)
 	if err != nil {

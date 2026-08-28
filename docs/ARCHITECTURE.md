@@ -229,9 +229,9 @@ Foreground chat, scheduler/worker и reflection run используют раз�
 
 При закрытии оно отменяет foreground contexts, сохраняет checkpoints, закрывает plugin processes и оставляет durable job records для следующего запуска. Crash recovery не должен превращать неопределённый side effect в повторный без idempotency/approval guard.
 
-## 11. Этап 0 и границы реализации
+## 11. Текущий implementation boundary
 
-Этап 0 предоставляет:
+Реализованные этапы 0–4 предоставляют:
 
 - структуру монорепозитория и versioned domain/application ports;
 - Wails + React shell и typed bridge без product-specific обходов;
@@ -239,5 +239,9 @@ Foreground chat, scheduler/worker и reflection run используют раз�
 - SQLite migration runner, repository interfaces и Keychain port;
 - immutable policy/identity boundary и threat model;
 - CI, contract-test scaffolding и локальные contributor instructions.
+- durable scheduler с атомарными claims, leases, retry, misfire recovery и запретом overlap по умолчанию;
+- отдельные background run contexts и budgets, Tasks/Activity UI, отмену активного run и explainable proactivity policy;
+- low-risk-only автоматическое выполнение tools в scheduled runs, исключающее повтор изменяющего side effect при lease recovery;
+- локальную доставку через Wails event boundary с quiet hours, durable daily/idempotency ledger, cooldown и детерминированной дедупликацией deferred jobs.
 
-Полная реализация memory retrieval, plugin runtime, scheduler, reflection/persona evolution, voice providers и avatar renderer относится к последующим вехам. На Этапе 0 создаются только порты, схемы и тестовые seams, если они нужны для сборки foundation.
+Reflection/persona evolution, расширенная voice/avatar state machine и release hardening относятся к следующим вехам. OS-level sandbox для полностью недоверенных plugin executables также остаётся границей hardening-этапа.

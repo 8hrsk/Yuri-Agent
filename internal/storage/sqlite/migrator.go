@@ -17,6 +17,16 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
+// compatibleMigrationChecksums contains checksums emitted by pre-release
+// builds whose SQL schema is identical to the committed migration. Keep this
+// list exact and intentionally small: arbitrary checksum mismatches must still
+// stop startup instead of silently accepting a modified migration.
+var compatibleMigrationChecksums = map[int]map[string]struct{}{
+	4: {
+		"6a6e29516f13a6d786e420025101e65ca1ebbdee37673ceac85988ac915ee4d3": {},
+	},
+}
+
 // Migration is an immutable schema change bundled with the application.
 type Migration struct {
 	Version  int
@@ -89,7 +99,20 @@ func Migrate(ctx context.Context, database *sql.DB) error {
 	for _, migration := range migrations {
 		if checksum, ok := applied[migration.Version]; ok {
 			if checksum != migration.Checksum {
-				return fmt.Errorf("migration %d checksum changed", migration.Version)
+				if !compatibleMigrationChecksum(migration.Version, checksum) {
+					return fmt.Errorf("migration %d checksum changed", migration.Version)
+				}
+				result, err := database.ExecContext(ctx,
+					"UPDATE schema_migrations SET checksum = ? WHERE version = ? AND checksum = ?",
+					migration.Checksum, migration.Version, checksum,
+				)
+				if err != nil {
+					return fmt.Errorf("upgrade compatible migration %d checksum: %w", migration.Version, err)
+				}
+				changed, err := result.RowsAffected()
+				if err != nil || changed != 1 {
+					return fmt.Errorf("upgrade compatible migration %d checksum: concurrent migration change", migration.Version)
+				}
 			}
 			continue
 		}
@@ -113,6 +136,15 @@ func Migrate(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+func compatibleMigrationChecksum(version int, checksum string) bool {
+	allowed, ok := compatibleMigrationChecksums[version]
+	if !ok {
+		return false
+	}
+	_, ok = allowed[checksum]
+	return ok
 }
 
 func appliedMigrations(ctx context.Context, database *sql.DB) (map[int]string, error) {

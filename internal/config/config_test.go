@@ -19,6 +19,24 @@ func TestLoadMissingReturnsDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadBackfillsStageFourProactivityDefaults(t *testing.T) {
+	paths := testPaths(t)
+	if err := os.MkdirAll(paths.ConfigDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"version":1,"locale":"ru-RU","log_level":"info","data_directory":"` + paths.DataDirectory + `"}`
+	if err := os.WriteFile(paths.ConfigFile, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Proactivity.Timezone != "UTC" || value.Proactivity.Enabled {
+		t.Fatalf("legacy config proactivity = %#v", value.Proactivity)
+	}
+}
+
 func TestSaveAndLoadRoundTrip(t *testing.T) {
 	paths := testPaths(t)
 	want := Default(paths)
@@ -111,6 +129,25 @@ func TestProviderConfigRejectsInsecureRemoteURLAndCodexCredential(t *testing.T) 
 	value.Providers = []ProviderConfig{{ID: "codex", Kind: ProviderCodexAppServer, CredentialRef: "must-not-exist"}}
 	if err := value.Validate(); err == nil {
 		t.Fatal("expected Codex credential reference error")
+	}
+}
+
+func TestProactivityConfigValidation(t *testing.T) {
+	paths := testPaths(t)
+	value := Default(paths)
+	value.Proactivity.Enabled = true
+	value.Proactivity.Timezone = "Europe/Moscow"
+	if err := value.Validate(); err != nil {
+		t.Fatalf("valid proactivity config rejected: %v", err)
+	}
+	value.Proactivity.QuietHoursStart = "9:00"
+	if err := value.Validate(); err == nil {
+		t.Fatal("invalid quiet hours were accepted")
+	}
+	value.Proactivity.QuietHoursStart = "23:00"
+	value.Proactivity.Timezone = "Mars/Phobos"
+	if err := value.Validate(); err == nil {
+		t.Fatal("invalid IANA timezone was accepted")
 	}
 }
 

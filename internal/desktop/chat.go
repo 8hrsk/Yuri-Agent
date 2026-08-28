@@ -159,6 +159,24 @@ func (b *Bridge) NewConversation(title string) (ConversationView, error) {
 // SendMessage performs one durable interactive run. Events are both emitted
 // live through Wails and returned as a fallback for non-Wails/test clients.
 func (b *Bridge) SendMessage(request ChatRequest) (ChatRunResult, error) {
+	return b.sendMessage(request, domain.RunKindInteractive)
+}
+
+// sendMessage runs the common agent pipeline for foreground and durable
+// background work. The run kind is persisted so scheduled executions remain
+// distinguishable from owner-initiated chat turns in activity and recovery.
+func (b *Bridge) sendMessage(request ChatRequest, runKind domain.RunKind) (ChatRunResult, error) {
+	return b.sendMessageContext(nil, request, runKind)
+}
+
+func (b *Bridge) sendMessageContext(parent context.Context, request ChatRequest, runKind domain.RunKind) (ChatRunResult, error) {
+	return b.sendMessageContextWithBudget(parent, request, runKind, domain.RunBudget{})
+}
+
+func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request ChatRequest, runKind domain.RunKind, requestedBudget domain.RunBudget) (ChatRunResult, error) {
+	if !runKind.Valid() {
+		return ChatRunResult{}, errors.New("invalid run kind")
+	}
 	request.Text = strings.TrimSpace(request.Text)
 	if request.Text == "" {
 		return ChatRunResult{}, errors.New("message text is required")
@@ -172,13 +190,15 @@ func (b *Bridge) SendMessage(request ChatRequest) (ChatRunResult, error) {
 		}
 	}
 
-	b.mu.RLock()
-	appContext := b.appCtx
-	b.mu.RUnlock()
-	if appContext == nil {
-		appContext = context.Background()
+	if parent == nil {
+		b.mu.RLock()
+		parent = b.appCtx
+		b.mu.RUnlock()
+		if parent == nil {
+			parent = context.Background()
+		}
 	}
-	runContext, cancel := context.WithCancel(appContext)
+	runContext, cancel := context.WithCancel(parent)
 	defer cancel()
 
 	now := time.Now().UTC()
@@ -204,11 +224,26 @@ func (b *Bridge) SendMessage(request ChatRequest) (ChatRunResult, error) {
 	if err != nil {
 		return ChatRunResult{}, err
 	}
-	run, err := domain.NewRun(runID, domain.RunKindInteractive, conversationID, now)
+	run, err := domain.NewRun(runID, runKind, conversationID, now)
 	if err != nil {
 		return ChatRunResult{}, err
 	}
-	run.Budget = domain.RunBudget{MaxSteps: 8, MaxTokens: 32_000, MaxToolOutputBytes: 256 * 1024, MaxDurationSeconds: 600}
+	run.Budget = domain.RunBudget{MaxSteps: 8, MaxTokens: 32_000, MaxToolCalls: 32, MaxToolOutputBytes: 256 * 1024, MaxDurationSeconds: 600}
+	if requestedBudget.MaxSteps > 0 {
+		run.Budget.MaxSteps = requestedBudget.MaxSteps
+	}
+	if requestedBudget.MaxTokens > 0 {
+		run.Budget.MaxTokens = requestedBudget.MaxTokens
+	}
+	if requestedBudget.MaxToolCalls > 0 {
+		run.Budget.MaxToolCalls = requestedBudget.MaxToolCalls
+	}
+	if requestedBudget.MaxToolOutputBytes > 0 {
+		run.Budget.MaxToolOutputBytes = requestedBudget.MaxToolOutputBytes
+	}
+	if requestedBudget.MaxDurationSeconds > 0 {
+		run.Budget.MaxDurationSeconds = requestedBudget.MaxDurationSeconds
+	}
 	if err := b.repositories.Runs.Create(runContext, run); err != nil {
 		return ChatRunResult{}, err
 	}
@@ -245,7 +280,11 @@ func (b *Bridge) SendMessage(request ChatRequest) (ChatRunResult, error) {
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
-	runtime.Authorizer = desktopToolAuthorizer{}
+	if runKind == domain.RunKindBackground {
+		runtime.Authorizer = backgroundToolAuthorizer{}
+	} else {
+		runtime.Authorizer = desktopToolAuthorizer{}
+	}
 	runtime.Approvals = desktopApprovalHandler{bridge: b}
 	emitter.tools = registry
 	memoryEngine, err := b.newMemoryEngine(backend, model)
@@ -456,6 +495,11 @@ func (b *Bridge) chatTools(now time.Time) (*agent.ToolRegistry, error) {
 			return nil, err
 		}
 	}
+	if b.scheduler != nil {
+		if err := registry.Register(scheduleAgentTool{bridge: b}); err != nil {
+			return nil, err
+		}
+	}
 	for pluginID, supervisor := range supervisors {
 		state, _ := supervisor.State()
 		if state != plugins.StateRunning {
@@ -575,6 +619,22 @@ func (desktopToolAuthorizer) Authorize(_ context.Context, request agent.ToolAuth
 	default:
 		return agent.ToolAuthorizationResult{Decision: domain.PermissionDeny, Reason: "unknown tool risk"}, nil
 	}
+}
+
+// backgroundToolAuthorizer prevents a lease recovery or automatic retry from
+// repeating a side effect. Scheduled research can still use low-risk read
+// tools; mutations and external sends require an interactive owner-confirmed
+// run until tools expose a durable execution-key idempotency contract.
+type backgroundToolAuthorizer struct{}
+
+func (backgroundToolAuthorizer) Authorize(_ context.Context, request agent.ToolAuthorizationRequest) (agent.ToolAuthorizationResult, error) {
+	if request.Tool.Risk == domain.RiskLow {
+		return agent.ToolAuthorizationResult{Decision: domain.PermissionAllow, Reason: "low-risk background tool"}, nil
+	}
+	return agent.ToolAuthorizationResult{
+		Decision: domain.PermissionDeny,
+		Reason:   "изменяющие и внешние действия фоновой задачи требуют интерактивного запуска",
+	}, nil
 }
 
 type desktopApprovalHandler struct{ bridge *Bridge }
