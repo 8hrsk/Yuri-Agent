@@ -5,7 +5,7 @@
 | # | Критерий | Статус | Текущее доказательство | Что требуется закрыть |
 | ---: | --- | --- | --- | --- |
 | 1 | Чистая установка, onboarding, тест провайдера | Partial | Clean-profile first-run gate, typed `CompleteOnboarding` Save→Probe, fake provider success/failure, restart persistence и Wails `OnDomReady` smoke на изолированном profile root | WebKit DOM interaction остаётся ручной до появления стабильного UI harness |
-| 2 | Streaming, cancel, понятная provider error | Partial | Agent/provider contract tests, frontend mock streaming | Реальный Wails bridge smoke с cancel/error |
+| 2 | Streaming, cancel, понятная provider error | Automated | Race-enabled Bridge → local OpenAI-compatible SSE smoke проверяет streaming deltas и durable transcript, `CancelRun` с durable cancelled state и redacted upstream error | — |
 | 3 | Read-only файл внутри root, отказ снаружи | Automated | `internal/tools/filesystem_read_test.go` | Включить в общий MVP smoke |
 | 4 | Изменение файла через approval и audit | Automated | Bounded `filesystem.write` (`create`/`replace`) и сквозной `internal/desktop/filesystem_write_test.go`: exact-path approval, deny без mutation, action-linked tool record и redacted audit | Включить сценарий в общий MVP smoke |
 | 5 | Plugin install/permission/call/crash/restart | Automated | Race-enabled desktop smoke собирает реальный test package, устанавливает его через Bridge, сохраняет и передаёт grant, вызывает tool, переживает process crash/auto-recovery и восстанавливает enabled plugin после переоткрытия SQLite | — |
@@ -24,9 +24,9 @@
 
 ## Порядок закрытия Stage 7
 
-1. Добавить Bridge → fake-provider streaming/cancel/error и Codex lifecycle smoke (критерии 2 и 15).
+1. Добавить Bridge → fake Codex app-server lifecycle smoke (критерий 15); OpenAI-compatible streaming/cancel/error уже закрыт.
 2. WebKit DOM/microphone/speech automation для критериев 1, 11 и 17 остаётся отдельным harness-dependent слоем. Offline plugin lifecycle, negative leak scan, prompt-injection agent loop, voice/chat contract, Codex logout UI и unsupported Antigravity contract уже закрыты.
 
 Реальные OAuth credentials, платные provider calls, Developer ID, notarization и публикация артефактов не являются условиями локального OSS smoke-набора.
 
-Текущий первый срез запускается командами `make mvp-smoke` и на macOS `make macos-launch-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app`. Первый включает два race-enabled пути: единый временный SQLite-профиль для conversation/archive, memory/provenance/recall, versioned persona/relationship/affect, untrusted-file prompt injection, durable job, reference plugin, backup/restore и negative leak scan; а также production-path plugin package lifecycle с grants, crash recovery и восстановлением после переоткрытия БД. Второй открывает собранный `.app` с изолированным profile root, ждёт Wails `OnDomReady` marker и проверяет clean shutdown; это ещё не interaction-level Wails/WebKit E2E.
+Текущий первый срез запускается командами `make mvp-smoke` и на macOS `make macos-launch-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app`. Первый включает race-enabled offline profile lifecycle, production-path plugin package lifecycle и Bridge → local OpenAI-compatible SSE lifecycle со streaming/cancel/error. Второй открывает собранный `.app` с изолированным profile root, ждёт Wails `OnDomReady` marker и проверяет clean shutdown; это ещё не interaction-level Wails/WebKit E2E.
