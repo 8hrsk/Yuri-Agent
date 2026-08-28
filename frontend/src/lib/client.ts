@@ -22,6 +22,8 @@ import type {
   MemoryRecord,
   MemorySource,
   MemoryUpdate,
+  OnboardingResult,
+  OnboardingState,
   PersonaVersion,
   PersonalitySnapshot,
   DeliveryChannel,
@@ -80,6 +82,11 @@ const defaultSettings: ProviderSettings = {
   streamResponses: true,
 }
 
+const defaultOnboardingState: OnboardingState = {
+  completed: false,
+  providerTested: false,
+}
+
 const defaultLimits: UsageLimits = {
   plan: 'ChatGPT Plus',
   windowLabel: '5-часовое окно',
@@ -116,6 +123,60 @@ function normalizeEncryptedBackup(value: unknown): EncryptedBackupInfo | undefin
     blobCount: Math.max(0, Math.round(optionalNumber(source, 'blobCount', 'blob_count') ?? 0)),
     hasConfig: normalizeBoolean(source.hasConfig ?? source.has_config, false),
     restoredTo: optionalString(source, 'restoredTo', 'restored_to'),
+  }
+}
+
+function normalizeOnboardingState(value: unknown): OnboardingState {
+  if (!value || typeof value !== 'object') return { ...defaultOnboardingState }
+  const raw = value as UnknownRecord
+  const source = raw.onboarding && typeof raw.onboarding === 'object'
+    ? raw.onboarding as UnknownRecord
+    : raw
+  return {
+    completed: normalizeBoolean(source.completed ?? source.complete ?? source.isComplete ?? source.is_complete, false),
+    providerTested: normalizeBoolean(
+      source.providerTested
+        ?? source.provider_tested
+        ?? source.providerProbeSucceeded
+        ?? source.provider_probe_succeeded
+        ?? source.providerCheckPassed
+        ?? source.provider_check_passed,
+      false,
+    ),
+    completedAt: optionalString(source, 'completedAt', 'completed_at'),
+  }
+}
+
+function normalizeOnboardingResult(value: unknown, fallbackState: OnboardingState): OnboardingResult {
+  if (!value || typeof value !== 'object') {
+    return { ok: false, message: 'Backend не вернул результат onboarding.', state: fallbackState }
+  }
+  const raw = value as UnknownRecord
+  const source = raw.result && typeof raw.result === 'object' ? raw.result as UnknownRecord : raw
+  const nestedState = source.state ?? source.onboarding ?? source.onboardingState ?? source.onboarding_state
+  const hasInlineState = source.completed !== undefined
+    || source.providerTested !== undefined
+    || source.provider_tested !== undefined
+    || source.providerProbeSucceeded !== undefined
+    || source.provider_probe_succeeded !== undefined
+  const state = nestedState === undefined
+    ? (hasInlineState ? normalizeOnboardingState(source) : fallbackState)
+    : normalizeOnboardingState(nestedState)
+  return {
+    ok: normalizeBoolean(source.ok ?? source.success ?? source.passed, state.completed && state.providerTested),
+    message: optionalString(source, 'message', 'detail', 'error') ?? (state.completed && state.providerTested ? 'Провайдер проверен.' : 'Проверка провайдера не завершена.'),
+    state,
+  }
+}
+
+function onboardingSettingsWire(settings: ProviderSettings): UnknownRecord {
+  return {
+    kind: settings.kind,
+    baseUrl: settings.baseUrl,
+    model: settings.model,
+    timeoutSeconds: settings.timeoutSeconds,
+    streamResponses: settings.streamResponses,
+    apiKeyConfigured: settings.apiKeyConfigured,
   }
 }
 
@@ -1087,6 +1148,7 @@ class MockYuriClient implements YuriClient {
     settings: { ...defaultSettings },
     codex: { connected: false },
   }
+  private onboarding: OnboardingState = { ...defaultOnboardingState }
   private allowedDirectories: string[] = []
   private schedules: Schedule[] = [starterSchedule()]
   private jobRuns: JobRun[] = starterJobRuns()
@@ -1154,10 +1216,24 @@ class MockYuriClient implements YuriClient {
   async testProvider(settings: ProviderSettings): Promise<{ ok: boolean; message: string }> {
     await sleep(280)
     if (settings.kind === 'codex-app-server') {
-      return { ok: this.provider.codex.connected, message: this.provider.codex.connected ? 'Codex App Server отвечает.' : 'Сначала выполните OAuth-вход.' }
+      if (!this.provider.codex.connected) return { ok: false, message: 'Сначала выполните OAuth-вход.' }
+      this.onboarding = { ...this.onboarding, completed: true, providerTested: true, completedAt: nowIso() }
+      return { ok: true, message: 'Codex App Server отвечает.' }
     }
     if (!settings.baseUrl.trim() || !settings.model.trim()) return { ok: false, message: 'Укажите Base URL и модель.' }
+    this.onboarding = { ...this.onboarding, completed: true, providerTested: true, completedAt: nowIso() }
     return { ok: true, message: 'Endpoint доступен для потокового запроса.' }
+  }
+
+  async getOnboardingState(): Promise<OnboardingState> {
+    return { ...this.onboarding }
+  }
+
+  async completeOnboarding(settings: ProviderSettings, apiKey?: string): Promise<OnboardingResult> {
+    await this.saveProviderSettings(settings, apiKey)
+    const probe = await this.testProvider(settings)
+    const state = await this.getOnboardingState()
+    return { ...probe, state }
   }
 
   async loginCodex(): Promise<CodexAccount> {
@@ -1690,11 +1766,12 @@ class WailsYuriClient implements YuriClient {
 
   async getProviderSnapshot(): Promise<ProviderSnapshot> {
     const providers = await callBridgeSafe<unknown>(['ListProviders'])
-    const accountResult = await callBridgeSafe<unknown>(['CodexAccount'])
-    const account = accountResult && typeof accountResult === 'object' ? normalizeCodexAccount(accountResult as UnknownRecord) : undefined
-    const limits = normalizeUsageLimits(await callBridgeSafe<unknown>(['CodexRateLimits']))
     const providerList = Array.isArray(providers) ? providers : []
     const enabledProvider = providerList.find((item): item is UnknownRecord => Boolean(item && typeof item === 'object' && (item as UnknownRecord).enabled))
+    const codexConfigured = providerList.some((item) => Boolean(item && typeof item === 'object' && ((item as UnknownRecord).kind === 'codex-app-server' || (item as UnknownRecord).type === 'codex-app-server')))
+    const accountResult = codexConfigured ? await callBridgeSafe<unknown>(['CodexAccount']) : undefined
+    const account = accountResult && typeof accountResult === 'object' ? normalizeCodexAccount(accountResult as UnknownRecord) : undefined
+    const limits = codexConfigured ? normalizeUsageLimits(await callBridgeSafe<unknown>(['CodexRateLimits'])) : undefined
     const openai = providerList.find((item): item is UnknownRecord => Boolean(item && typeof item === 'object' && ((item as UnknownRecord).kind === 'openai-compatible' || (item as UnknownRecord).type === 'openai-compatible')))
     const selectedOpenAI = enabledProvider && (enabledProvider.kind === 'openai-compatible' || enabledProvider.type === 'openai-compatible') ? enabledProvider : openai
     const settings: ProviderSettings = enabledProvider && (enabledProvider.kind === 'codex-app-server' || enabledProvider.type === 'codex-app-server')
@@ -1739,6 +1816,42 @@ class WailsYuriClient implements YuriClient {
 
   async testProvider(settings: ProviderSettings): Promise<{ ok: boolean; message: string }> {
     return (await callBridge<{ ok: boolean; message: string }>(['TestProvider', 'ProbeProvider'], [settings])) ?? { ok: false, message: 'Backend не вернул результат проверки.' }
+  }
+
+  async getOnboardingState(): Promise<OnboardingState> {
+    return normalizeOnboardingState(await callBridgeSafe<unknown>(['GetOnboardingState', 'GetFirstRunState', 'OnboardingState']))
+  }
+
+  async completeOnboarding(settings: ProviderSettings, apiKey?: string): Promise<OnboardingResult> {
+    const payload: UnknownRecord = {
+      settings: onboardingSettingsWire(settings),
+    }
+    if (apiKey?.trim()) payload.apiKey = apiKey
+
+    const completeMethod = findBridgeMethod(['CompleteOnboarding', 'CompleteFirstRun'])
+    if (completeMethod) {
+      const result = await completeMethod(payload)
+      const state = await this.getOnboardingState()
+      const normalized = normalizeOnboardingResult(result, state)
+      return normalized.state.completed && normalized.state.providerTested
+        ? normalized
+        : { ...normalized, ok: false, message: normalized.message || 'Onboarding state не сохранён.', state }
+    }
+
+    // Older bridges can still perform the provider save and probe. They must
+    // persist completion from TestProvider itself; the renderer has no setter.
+    await this.saveProviderSettings(settings, apiKey)
+    const probe = await this.testProvider(settings)
+    const state = await this.getOnboardingState()
+    if (!probe.ok) return { ...probe, state }
+    if (!state.completed || !state.providerTested) {
+      return {
+        ok: false,
+        message: 'Провайдер отвечает, но onboarding state не сохранён. Повторите попытку после обновления backend.',
+        state,
+      }
+    }
+    return { ...probe, state }
   }
 
   async loginCodex(): Promise<CodexAccount> {
@@ -2023,7 +2136,7 @@ let client: YuriClient | undefined
 
 export function createYuriClient(): YuriClient {
   if (client) return client
-  client = findBridgeMethod(['ListConversations', 'GetConversations', 'SendMessage', 'StartChat'])
+  client = findBridgeMethod(['ListConversations', 'GetConversations', 'SendMessage', 'StartChat', 'GetOnboardingState', 'GetFirstRunState', 'CompleteOnboarding', 'CompleteFirstRun'])
     ? new WailsYuriClient()
     : new MockYuriClient()
   return client

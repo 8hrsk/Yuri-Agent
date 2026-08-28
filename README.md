@@ -39,6 +39,7 @@ Engineering foundation, conversational vertical slice, storage/memory, plugin ru
 - bounded post-turn reflection без tools: строгий JSON contract, cooldown, max-delta/range guards, запрет внешнего неподтверждённого evidence и последовательный запуск для единственного локального профиля;
 - следующий диалог получает persona и явно субъективную relationship/affect модель отдельными слоями ниже immutable policy и identity seed;
 - Personality/Relationship UI с историей версий и простым 2D-аватаром; push-to-talk поддерживает barge-in, автоозвучка является явным opt-in и не включает микрофон.
+- first-run onboarding с OpenAI-compatible и Codex OAuth вариантами; durable completion устанавливается backend только после успешного provider probe.
 
 CI проверяет core, scheduler/proactivity, reflection/persona storage, Plugin SDK/reference plugin, frontend и отдельный macOS universal OSS smoke-путь с checksum manifest. Подробности упаковки находятся в [`docs/MACOS_RELEASE.md`](docs/MACOS_RELEASE.md).
 

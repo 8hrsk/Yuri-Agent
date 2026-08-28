@@ -4,7 +4,7 @@
 
 | # | Критерий | Статус | Текущее доказательство | Что требуется закрыть |
 | ---: | --- | --- | --- | --- |
-| 1 | Чистая установка, onboarding, тест провайдера | Missing | Provider settings и probe существуют | First-run onboarding flow и Wails smoke на чистом data root |
+| 1 | Чистая установка, onboarding, тест провайдера | Partial | Clean-profile first-run gate, typed `CompleteOnboarding` Save→Probe, fake provider success/failure и restart persistence | Wails/WebKit launch smoke на чистом data root |
 | 2 | Streaming, cancel, понятная provider error | Partial | Agent/provider contract tests, frontend mock streaming | Реальный Wails bridge smoke с cancel/error |
 | 3 | Read-only файл внутри root, отказ снаружи | Automated | `internal/tools/filesystem_read_test.go` | Включить в общий MVP smoke |
 | 4 | Изменение файла через approval и audit | Missing | Risk/approval policy существует | Bounded filesystem write tool и сквозной approval/audit test |
@@ -25,7 +25,7 @@
 ## Порядок закрытия Stage 7
 
 1. Расширить существующий offline MVP lifecycle smoke единым leak scan.
-2. First-run onboarding и Wails bridge smoke на временном data root.
+2. Добавить Wails/WebKit launch smoke для реализованного first-run onboarding на временном data root.
 3. Bounded filesystem write через существующий approval/policy boundary.
 4. Явный unsupported Antigravity contract и Codex logout UI.
 5. Fake-provider voice/chat smoke без сети и повторный acceptance audit.

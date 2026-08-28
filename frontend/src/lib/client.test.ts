@@ -33,6 +33,102 @@ describe('Yuri client contract', () => {
     expect(events.at(-1)).toBe('run.completed')
   })
 
+  it('keeps the mock first-run gate closed until provider probe succeeds', async () => {
+    const client = createYuriClient()
+    expect(await client.getOnboardingState()).toEqual({ completed: false, providerTested: false })
+
+    const settings = (await client.getProviderSnapshot()).settings
+    const result = await client.completeOnboarding(settings)
+
+    expect(result).toMatchObject({
+      ok: true,
+      state: { completed: true, providerTested: true },
+    })
+    expect(await client.getOnboardingState()).toMatchObject({ completed: true, providerTested: true })
+  })
+
+  it('forwards typed first-run state and atomic completion through Wails', async () => {
+    const calls: Array<{ name: string; args: unknown[] }> = []
+    const bridge = {
+      GetOnboardingState: () => {
+        calls.push({ name: 'GetOnboardingState', args: [] })
+        return { completed: false, provider_tested: false }
+      },
+      CompleteOnboarding: (input: unknown) => {
+        calls.push({ name: 'CompleteOnboarding', args: [input] })
+        return {
+          ok: true,
+          message: 'Endpoint отвечает.',
+          state: { completed: true, provider_tested: true, completed_at: '2026-08-28T12:00:00Z' },
+        }
+      },
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      const client = createYuriClient()
+      expect(client.mode).toBe('wails')
+      await expect(client.getOnboardingState()).resolves.toEqual({ completed: false, providerTested: false })
+      const result = await client.completeOnboarding({
+        kind: 'openai-compatible',
+        baseUrl: 'https://api.example.test/v1',
+        model: 'test-model',
+        apiKeyConfigured: false,
+        timeoutSeconds: 90,
+        streamResponses: true,
+      }, 'preview-key')
+
+      expect(result).toMatchObject({ ok: true, state: { completed: true, providerTested: true } })
+      expect(calls).toEqual([
+        { name: 'GetOnboardingState', args: [] },
+        {
+          name: 'CompleteOnboarding',
+          args: [{
+            settings: {
+              kind: 'openai-compatible',
+              baseUrl: 'https://api.example.test/v1',
+              model: 'test-model',
+              apiKeyConfigured: false,
+              timeoutSeconds: 90,
+              streamResponses: true,
+            },
+            apiKey: 'preview-key',
+          }],
+        },
+        { name: 'GetOnboardingState', args: [] },
+      ])
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
+  it('does not start Codex while reading a clean first-run provider snapshot', async () => {
+    let codexCalls = 0
+    const bridge = {
+      ListProviders: () => [],
+      CodexAccount: () => { codexCalls += 1; return { account: null } },
+      CodexRateLimits: () => { codexCalls += 1; return undefined },
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      const snapshot = await createYuriClient().getProviderSnapshot()
+      expect(snapshot.settings.kind).toBe('openai-compatible')
+      expect(snapshot.codex.connected).toBe(false)
+      expect(codexCalls).toBe(0)
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
   it('holds a side effect at approval until the user resolves it', async () => {
     const client = createYuriClient()
     const events: string[] = []

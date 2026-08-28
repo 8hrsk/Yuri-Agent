@@ -508,6 +508,23 @@ export interface ProviderSnapshot {
   codex: CodexAccount
 }
 
+/**
+ * First-run completion is durable only after a provider probe succeeds. The
+ * renderer keeps these two flags separate so a saved-but-untested endpoint
+ * never silently bypasses onboarding on the next launch.
+ */
+export interface OnboardingState {
+  completed: boolean
+  providerTested: boolean
+  completedAt?: string
+}
+
+export interface OnboardingResult {
+  ok: boolean
+  message: string
+  state: OnboardingState
+}
+
 export interface EncryptedBackupInput {
   /** Empty in Wails to request the native save dialog. */
   path?: string
@@ -561,6 +578,8 @@ export interface YuriClient {
   getProviderSnapshot(): Promise<ProviderSnapshot>
   saveProviderSettings(settings: ProviderSettings, apiKey?: string): Promise<void>
   testProvider(settings: ProviderSettings): Promise<{ ok: boolean; message: string }>
+  getOnboardingState(): Promise<OnboardingState>
+  completeOnboarding(settings: ProviderSettings, apiKey?: string): Promise<OnboardingResult>
   loginCodex(): Promise<CodexAccount>
   refreshCodexLimits(): Promise<UsageLimits | undefined>
   createEncryptedBackup(input: EncryptedBackupInput): Promise<EncryptedBackupInfo | undefined>

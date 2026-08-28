@@ -29,10 +29,23 @@ type Config struct {
 	DataDirectory      string            `json:"data_directory"`
 	AllowedDirectories []string          `json:"allowed_directories,omitempty"`
 	Providers          []ProviderConfig  `json:"providers,omitempty"`
+	Onboarding         OnboardingConfig  `json:"onboarding"`
 	Voice              VoiceConfig       `json:"voice,omitempty"`
 	PluginDevMode      bool              `json:"plugin_dev_mode,omitempty"`
 	Proactivity        ProactivityConfig `json:"proactivity"`
 	Persona            PersonaConfig     `json:"persona"`
+}
+
+// OnboardingConfig contains only durable first-run lifecycle state. A profile
+// is complete only after the desktop bridge has successfully probed a saved
+// provider; saving provider metadata alone must not advance this flag.
+//
+// The field is additive to config version 1. Load starts from Default, so
+// legacy config files without an onboarding object remain valid and safely
+// default to an incomplete first run.
+type OnboardingConfig struct {
+	Completed      bool `json:"completed"`
+	ProviderTested bool `json:"provider_tested"`
 }
 
 type ProviderKind string
@@ -152,6 +165,7 @@ func Default(paths Paths) Config {
 		Locale:        "ru-RU",
 		LogLevel:      "info",
 		DataDirectory: paths.DataDirectory,
+		Onboarding:    OnboardingConfig{},
 		Proactivity: ProactivityConfig{
 			Enabled: false, QuietHoursEnabled: true, QuietHoursStart: "23:00", QuietHoursEnd: "07:00",
 			Timezone: "UTC", DailyLimit: 5, CooldownMinutes: 30, AllowLocalNotifications: true,
@@ -290,6 +304,16 @@ func (c Config) Validate() error {
 	}
 	if err := c.Persona.Validate(); err != nil {
 		return err
+	}
+	if err := c.Onboarding.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c OnboardingConfig) Validate() error {
+	if c.Completed != c.ProviderTested {
+		return errors.New("onboarding completed and provider_tested must transition together")
 	}
 	return nil
 }

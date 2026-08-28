@@ -14,6 +14,25 @@ import (
 	openaiadapter "github.com/OrdoAI/yuri-agent/internal/providers/openai"
 )
 
+// OnboardingState is the durable first-run lifecycle exposed to the UI. The
+// bridge only transitions to complete after a provider probe succeeds; there
+// is intentionally no generic setter for this state.
+type OnboardingState string
+
+const (
+	OnboardingStatePending  OnboardingState = "pending"
+	OnboardingStateComplete OnboardingState = "complete"
+)
+
+// OnboardingView is a read-only, secret-free snapshot of first-run state.
+// ProviderConfigured describes saved metadata, not provider health.
+type OnboardingView struct {
+	State              OnboardingState `json:"state"`
+	Completed          bool            `json:"completed"`
+	ProviderTested     bool            `json:"providerTested"`
+	ProviderConfigured bool            `json:"providerConfigured"`
+}
+
 type ProviderView struct {
 	ID          string              `json:"id"`
 	Kind        config.ProviderKind `json:"kind"`
@@ -51,6 +70,7 @@ type LoginView struct {
 }
 
 type ProviderSettingsInput struct {
+	ProviderID       string              `json:"providerId,omitempty"`
 	Kind             config.ProviderKind `json:"kind"`
 	BaseURL          string              `json:"baseUrl"`
 	Model            string              `json:"model"`
@@ -60,8 +80,66 @@ type ProviderSettingsInput struct {
 }
 
 type ProviderTestResult struct {
-	OK      bool   `json:"ok"`
-	Message string `json:"message"`
+	OK         bool           `json:"ok"`
+	Message    string         `json:"message"`
+	ProviderID string         `json:"providerId,omitempty"`
+	Onboarding OnboardingView `json:"onboarding"`
+}
+
+// ProviderProbeInput is the typed bridge contract for a provider probe. It is
+// an alias so existing TestProvider callers keep the same wire shape.
+type ProviderProbeInput = ProviderSettingsInput
+
+// ProviderProbeResult is the typed bridge result for a provider probe.
+type ProviderProbeResult = ProviderTestResult
+
+// CompleteOnboardingInput combines the transient provider form with the
+// secret needed to save a new OpenAI-compatible credential. APIKey is used
+// only during this call and is never copied into config, SQLite, audit, or the
+// returned result.
+type CompleteOnboardingInput struct {
+	Settings ProviderSettingsInput `json:"settings"`
+	APIKey   string                `json:"apiKey,omitempty"`
+}
+
+// OnboardingResult reports the result of the save-and-probe operation and the
+// resulting durable state. It intentionally contains no provider payload.
+type OnboardingResult struct {
+	OK      bool           `json:"ok"`
+	Message string         `json:"message"`
+	State   OnboardingView `json:"state"`
+}
+
+// GetOnboardingState returns durable first-run state without consulting or
+// exposing any provider credential.
+func (b *Bridge) GetOnboardingState() OnboardingView {
+	b.mu.RLock()
+	completed := b.config.Onboarding.Completed
+	providerTested := b.config.Onboarding.ProviderTested
+	providers := append([]config.ProviderConfig(nil), b.config.Providers...)
+	b.mu.RUnlock()
+
+	configured := false
+	for _, provider := range providers {
+		if !provider.Enabled {
+			continue
+		}
+		switch provider.Kind {
+		case config.ProviderOpenAICompatible:
+			configured = provider.Model != "" && provider.CredentialRef != ""
+		case config.ProviderCodexAppServer:
+			configured = true
+		}
+		if configured {
+			break
+		}
+	}
+	state := OnboardingStatePending
+	if completed && providerTested {
+		state = OnboardingStateComplete
+	}
+	completed = completed && providerTested
+	return OnboardingView{State: state, Completed: completed, ProviderTested: providerTested, ProviderConfigured: configured}
 }
 
 func (b *Bridge) ListProviders() []ProviderView {
@@ -104,6 +182,9 @@ func (b *Bridge) SaveOpenAIProvider(input SaveOpenAIProviderInput) (ProviderView
 	candidate.Providers = upsertProvider(candidate.Providers, provider)
 	if err := candidate.Validate(); err != nil {
 		return ProviderView{}, err
+	}
+	if b.keyring == nil {
+		return ProviderView{}, errors.New("system keyring is unavailable")
 	}
 	oldSecret, oldError := b.keyring.Get(ctx, reference)
 	if input.APIKey == "" {
@@ -164,17 +245,69 @@ func (b *Bridge) SaveCodexProvider(input SaveCodexProviderInput) (ProviderView, 
 // TestProvider performs a minimal provider-owned request. It never returns
 // credentials or raw provider payloads to the UI.
 func (b *Bridge) TestProvider(input ProviderSettingsInput) ProviderTestResult {
+	return b.probeProvider(input)
+}
+
+// ProbeProvider is the explicit typed provider-probe bridge method used by
+// first-run onboarding. A successful probe durably completes onboarding; a
+// save without a successful probe leaves it pending.
+func (b *Bridge) ProbeProvider(input ProviderProbeInput) ProviderProbeResult {
+	return b.probeProvider(input)
+}
+
+// CompleteOnboarding saves the submitted provider and immediately probes it.
+// It cannot be used as a generic state setter: onboarding becomes complete
+// only through the successful probe performed here (or by TestProvider/
+// ProbeProvider). A failed save or probe leaves the durable state pending.
+func (b *Bridge) CompleteOnboarding(input CompleteOnboardingInput) OnboardingResult {
+	settings := input.Settings
+	if settings.Kind == "" {
+		settings.Kind = config.ProviderOpenAICompatible
+	}
+
+	switch settings.Kind {
+	case config.ProviderOpenAICompatible:
+		providerID := strings.TrimSpace(settings.ProviderID)
+		if providerID == "" {
+			providerID = "openai"
+		}
+		if _, err := b.SaveOpenAIProvider(SaveOpenAIProviderInput{
+			ID: providerID, DisplayName: "OpenAI-compatible", BaseURL: settings.BaseURL,
+			Model: settings.Model, APIKey: input.APIKey, Enabled: true,
+		}); err != nil {
+			return OnboardingResult{Message: safeError(err.Error()), State: b.GetOnboardingState()}
+		}
+		settings.ProviderID = providerID
+	case config.ProviderCodexAppServer:
+		if _, err := b.SaveCodexProvider(SaveCodexProviderInput{
+			ID: settings.ProviderID, DisplayName: "Codex App Server", Model: settings.Model,
+			Binary: "codex", Enabled: true,
+		}); err != nil {
+			return OnboardingResult{Message: safeError(err.Error()), State: b.GetOnboardingState()}
+		}
+	default:
+		return OnboardingResult{Message: fmt.Sprintf("unsupported provider kind %q", settings.Kind), State: b.GetOnboardingState()}
+	}
+
+	probe := b.ProbeProvider(settings)
+	return OnboardingResult{OK: probe.OK, Message: probe.Message, State: probe.Onboarding}
+}
+
+func (b *Bridge) probeProvider(input ProviderSettingsInput) ProviderTestResult {
 	ctx, cancel := b.context()
 	defer cancel()
 	if input.Kind == config.ProviderCodexAppServer {
 		account, err := b.CodexAccount()
 		if err != nil {
-			return ProviderTestResult{Message: safeError(err.Error())}
+			return b.providerProbeFailure(input.ProviderID, safeError(err.Error()))
 		}
 		if account.Account == nil {
-			return ProviderTestResult{Message: "Codex App Server отвечает, но ChatGPT OAuth ещё не завершён"}
+			return b.providerProbeFailure(input.ProviderID, "Codex App Server отвечает, но ChatGPT OAuth ещё не завершён")
 		}
-		return ProviderTestResult{OK: true, Message: "Codex App Server и ChatGPT OAuth доступны"}
+		return b.providerProbeSuccess(ctx, input.ProviderID, "Codex App Server и ChatGPT OAuth доступны")
+	}
+	if input.Kind != "" && input.Kind != config.ProviderOpenAICompatible {
+		return b.providerProbeFailure(input.ProviderID, fmt.Sprintf("unsupported provider kind %q", input.Kind))
 	}
 
 	b.mu.RLock()
@@ -182,17 +315,22 @@ func (b *Bridge) TestProvider(input ProviderSettingsInput) ProviderTestResult {
 	b.mu.RUnlock()
 	var selected *config.ProviderConfig
 	for index := range providers {
-		if providers[index].Kind == config.ProviderOpenAICompatible && providers[index].Enabled {
+		if providers[index].Kind == config.ProviderOpenAICompatible && providers[index].Enabled &&
+			(input.ProviderID == "" || providers[index].ID == strings.TrimSpace(input.ProviderID)) {
 			selected = &providers[index]
 			break
 		}
 	}
 	if selected == nil {
-		return ProviderTestResult{Message: "Сначала сохраните OpenAI-compatible провайдер и API key"}
+		return b.providerProbeFailure(input.ProviderID, "Сначала сохраните OpenAI-compatible провайдер и API key")
+	}
+	providerID := selected.ID
+	if b.keyring == nil {
+		return b.providerProbeFailure(providerID, "API key недоступен в системном keyring")
 	}
 	secret, err := b.keyring.Get(ctx, selected.CredentialRef)
 	if err != nil {
-		return ProviderTestResult{Message: "API key недоступен в системном keyring"}
+		return b.providerProbeFailure(providerID, "API key недоступен в системном keyring")
 	}
 	timeout := time.Duration(input.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
@@ -203,7 +341,7 @@ func (b *Bridge) TestProvider(input ProviderSettingsInput) ProviderTestResult {
 		Style: openaiadapter.APIStyleResponses, Timeout: timeout, MaxAttempts: 1,
 	})
 	if err != nil {
-		return ProviderTestResult{Message: safeError(err.Error())}
+		return b.providerProbeFailure(providerID, safeError(err.Error()))
 	}
 	stream, err := client.Start(ctx, agent.ModelRequest{
 		Model: selected.Model,
@@ -214,21 +352,53 @@ func (b *Bridge) TestProvider(input ProviderSettingsInput) ProviderTestResult {
 		MaxOutputTokens: 8,
 	})
 	if err != nil {
-		return ProviderTestResult{Message: safeError(err.Error())}
+		return b.providerProbeFailure(providerID, safeError(err.Error()))
 	}
 	defer stream.Close()
 	for {
 		event, receiveErr := stream.Recv(ctx)
 		if receiveErr != nil {
 			if errors.Is(receiveErr, io.EOF) {
-				return ProviderTestResult{OK: true, Message: "Endpoint отвечает"}
+				return b.providerProbeSuccess(ctx, providerID, "Endpoint отвечает")
 			}
-			return ProviderTestResult{Message: safeError(receiveErr.Error())}
+			return b.providerProbeFailure(providerID, safeError(receiveErr.Error()))
 		}
 		if event.Type == agent.ModelEventTextDelta || event.Type == agent.ModelEventCompleted {
-			return ProviderTestResult{OK: true, Message: "Endpoint отвечает и поддерживает модель"}
+			return b.providerProbeSuccess(ctx, providerID, "Endpoint отвечает и поддерживает модель")
 		}
 	}
+}
+
+func (b *Bridge) providerProbeSuccess(ctx context.Context, providerID, message string) ProviderTestResult {
+	if err := b.completeOnboarding(ctx); err != nil {
+		return b.providerProbeFailure(providerID, "Проверка провайдера успешна, но состояние onboarding не удалось сохранить")
+	}
+	return ProviderTestResult{
+		OK: true, Message: message, ProviderID: providerID, Onboarding: b.GetOnboardingState(),
+	}
+}
+
+func (b *Bridge) providerProbeFailure(providerID, message string) ProviderTestResult {
+	return ProviderTestResult{Message: message, ProviderID: strings.TrimSpace(providerID), Onboarding: b.GetOnboardingState()}
+}
+
+// completeOnboarding is intentionally private and has no caller other than a
+// successful provider probe. The config write and in-memory transition happen
+// under one bridge lock, so a restart observes either pending or complete.
+func (b *Bridge) completeOnboarding(_ context.Context) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.config.Onboarding.Completed && b.config.Onboarding.ProviderTested {
+		return nil
+	}
+	candidate := b.config
+	candidate.Onboarding.Completed = true
+	candidate.Onboarding.ProviderTested = true
+	if err := config.Save(b.paths, candidate); err != nil {
+		return err
+	}
+	b.config = candidate
+	return nil
 }
 
 func (b *Bridge) CodexAccount() (codexapp.AccountReadResult, error) {

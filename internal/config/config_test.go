@@ -17,6 +17,36 @@ func TestLoadMissingReturnsDefaults(t *testing.T) {
 	if value.Locale != "ru-RU" || value.DataDirectory != paths.DataDirectory {
 		t.Fatalf("Load() = %#v", value)
 	}
+	if value.Onboarding.Completed || value.Onboarding.ProviderTested {
+		t.Fatalf("clean profile onboarding = %#v, want incomplete", value.Onboarding)
+	}
+}
+
+func TestLoadLegacyConfigDefaultsToIncompleteOnboarding(t *testing.T) {
+	paths := testPaths(t)
+	if err := os.MkdirAll(paths.ConfigDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"version":1,"locale":"ru-RU","log_level":"info","data_directory":"` + paths.DataDirectory + `","providers":[{"id":"main","kind":"openai-compatible","display_name":"Main","base_url":"http://localhost:43111/v1","model":"model","credential_ref":"provider.main.api-key","enabled":true}]}`
+	if err := os.WriteFile(paths.ConfigFile, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Onboarding.Completed || value.Onboarding.ProviderTested {
+		t.Fatalf("legacy config onboarding = %#v, want incomplete until a probe succeeds", value.Onboarding)
+	}
+}
+
+func TestConfigRejectsPartialOnboardingTransition(t *testing.T) {
+	paths := testPaths(t)
+	value := Default(paths)
+	value.Onboarding.Completed = true
+	if err := value.Validate(); err == nil {
+		t.Fatal("Validate() accepted completed onboarding without a successful provider probe")
+	}
 }
 
 func TestLoadBackfillsStageFourProactivityDefaults(t *testing.T) {
