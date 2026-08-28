@@ -14,7 +14,7 @@
 | 8 | Quiet hours блокируют уведомление | Automated | Proactivity timezone/DST/policy tests | Включить в общий MVP smoke |
 | 9 | API key отсутствует в SQLite/log/audit/context | Partial | Config/keyring и redaction tests | Единый negative leak scan после realistic lifecycle |
 | 10 | Prompt injection не выдаёт permission | Partial | Policy/reflection injection tests | Untrusted file/web content в agent-loop smoke |
-| 11 | STT → agent → TTS с barge-in и visible state | Partial | STT adapter и renderer voice tests | Wails/WebKit voice smoke с fake provider |
+| 11 | STT → agent → TTS с barge-in и visible state | Partial | Offline fake-Wails `voice-chat-smoke.test.ts` проходит audio wire → STT → streaming chat → системный TTS → cancel; отдельно покрыты OpenAI-compatible voice adapter и avatar state mapping | Реальный WebKit microphone/speech interaction остаётся manual до стабильного UI harness |
 | 12 | Reflection не блокирует chat и не имеет tools | Automated | Coordinator/gate/model reflection tests | Включить в общий MVP smoke |
 | 13 | Persona/relationship/mood эволюция и rollback | Automated | Offline lifecycle smoke проверяет versioned persona/relationship/affect; reflection + desktop tests покрывают bounded evolution/rollback | Добавить multi-turn Bridge sequence |
 | 14 | Dormant исключён из recall, deliberate search находит эпизод | Automated | Memory engine и desktop archive tests | Включить в общий MVP smoke |
@@ -24,9 +24,10 @@
 
 ## Порядок закрытия Stage 7
 
-1. Расширить существующий offline MVP lifecycle smoke единым leak scan.
-2. Поддерживать Wails `OnDomReady` launch smoke для реализованного first-run onboarding на временном profile root; UI WebKit interaction остаётся отдельным manual/harness-dependent слоем.
-3. Fake-provider voice/chat smoke без сети и повторный acceptance audit. Codex logout UI и unsupported Antigravity contract уже закрыты отдельными fail-closed срезами.
+1. Расширить realistic offline lifecycle единым negative leak scan и untrusted-content agent-loop сценарием (критерии 9–10).
+2. Расширить plugin smoke до package install, grants и crash/restart (критерий 5).
+3. Добавить Bridge → fake-provider streaming/cancel/error и Codex lifecycle smoke (критерии 2 и 15).
+4. WebKit DOM/microphone/speech automation для критериев 1, 11 и 17 остаётся отдельным harness-dependent слоем. Offline voice/chat contract, Codex logout UI и unsupported Antigravity contract уже закрыты.
 
 Реальные OAuth credentials, платные provider calls, Developer ID, notarization и публикация артефактов не являются условиями локального OSS smoke-набора.
 

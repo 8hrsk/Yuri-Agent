@@ -40,3 +40,36 @@ export function writeAutoSpeakPreference(enabled: boolean, storage?: PreferenceS
 export function saveAutoSpeakPreference(enabled: boolean): void {
   writeAutoSpeakPreference(enabled)
 }
+
+type SpeechSynthesisPort = Pick<SpeechSynthesis, 'cancel' | 'speak'>
+
+/**
+ * Starts one bounded renderer-owned utterance. Keeping this browser boundary
+ * pure lets the offline smoke verify the same cancel-before-speak behavior
+ * used by the React hook without requesting microphone or audio permissions.
+ */
+export function playSpeech(
+  synthesis: SpeechSynthesisPort,
+  createUtterance: (text: string) => SpeechSynthesisUtterance,
+  text: string,
+  onSettled: () => void,
+): boolean {
+  const value = text.trim()
+  if (!value) return false
+  synthesis.cancel()
+  const utterance = createUtterance(value)
+  utterance.lang = 'ru-RU'
+  utterance.onend = onSettled
+  utterance.onerror = onSettled
+  try {
+    synthesis.speak(utterance)
+    return true
+  } catch {
+    onSettled()
+    return false
+  }
+}
+
+export function cancelSpeech(synthesis: Pick<SpeechSynthesis, 'cancel'>): void {
+  synthesis.cancel()
+}

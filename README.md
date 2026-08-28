@@ -23,6 +23,7 @@ Engineering foundation, conversational vertical slice, storage/memory, plugin ru
 - agent loop с cancellation, budgets, structured tool calls и idempotency;
 - filesystem tools только внутри явно разрешённых директорий: low-risk чтение и bounded `create`/`replace` с точечным approval, атомарным commit, проверкой текущего SHA-256 и redacted audit;
 - push-to-talk с OpenAI-compatible STT и прерываемое системное TTS;
+- offline fake-Wails smoke проверяет цепочку STT → streaming chat → системный TTS и barge-in без сети и реальных credentials;
 - Wails UI для диалогов, состояний запуска, approvals и provider settings;
 - общий неизменяемый архив всех диалогов с SQLite FTS5 и provenance;
 - автономное post-turn извлечение памяти без обязательного подтверждения;

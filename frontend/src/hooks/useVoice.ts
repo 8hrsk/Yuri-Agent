@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { cancelSpeech, playSpeech } from '../lib/voice'
+
 export type VoiceState = 'idle' | 'recording' | 'ready' | 'error'
 
 type UseVoiceResult = {
@@ -152,7 +154,7 @@ export function useTTS(): UseTTSResult {
 
   const stop = useCallback(() => {
     speechTokenRef.current += 1
-    if (supported) window.speechSynthesis.cancel()
+    if (supported) cancelSpeech(window.speechSynthesis)
     setSpeakingId(undefined)
   }, [supported])
 
@@ -160,21 +162,16 @@ export function useTTS(): UseTTSResult {
     if (!supported || !text.trim()) return
     const token = speechTokenRef.current + 1
     speechTokenRef.current = token
-    window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = 'ru-RU'
     const clearIfCurrent = () => {
       if (speechTokenRef.current === token) setSpeakingId(undefined)
     }
-    utterance.onend = clearIfCurrent
-    utterance.onerror = clearIfCurrent
     setSpeakingId(messageId)
-    window.speechSynthesis.speak(utterance)
+    playSpeech(window.speechSynthesis, (value) => new SpeechSynthesisUtterance(value), text, clearIfCurrent)
   }, [supported])
 
   useEffect(() => () => {
     speechTokenRef.current += 1
-    if (supported) window.speechSynthesis.cancel()
+    if (supported) cancelSpeech(window.speechSynthesis)
   }, [supported])
 
   return { speakingId, supported, speak, stop }
