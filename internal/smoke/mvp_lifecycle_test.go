@@ -1,10 +1,12 @@
 package smoke
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,15 +19,17 @@ import (
 	"github.com/OrdoAI/yuri-agent/internal/backup"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 	"github.com/OrdoAI/yuri-agent/internal/memory"
+	"github.com/OrdoAI/yuri-agent/internal/observability"
 	"github.com/OrdoAI/yuri-agent/internal/plugins"
 	schedulerpkg "github.com/OrdoAI/yuri-agent/internal/scheduler"
+	securitykeyring "github.com/OrdoAI/yuri-agent/internal/security/keyring"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 )
 
 // TestMVPOfflineLifecycle is a bounded dogfooding path for the local MVP. It
 // deliberately shares one temporary SQLite database between sequential
 // subtests so the test exercises durable hand-offs rather than isolated mocks.
-// No network, keyring, GUI, or provider credentials are involved.
+// No network, OS keyring, GUI, or live provider credentials are involved.
 func TestMVPOfflineLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -50,6 +54,17 @@ func TestMVPOfflineLifecycle(t *testing.T) {
 	relationshipID := domain.ID("relationship-dogfood")
 	affectID := domain.ID("affect-dogfood")
 	pluginID := domain.ID("yuri.reference-echo")
+	const apiKeyCanary = "sk-yuri-offline-negative-leak-canary-9f5a"
+	const passphraseCanary = "yuri-backup-passphrase-canary-2b7e"
+	lifecycleArtifacts := make(map[string][]byte)
+	credentialBackend := &smokeKeyringBackend{values: make(map[string]string)}
+	credentialStore, err := securitykeyring.NewWithBackend("ai.ordo.yuri.smoke", credentialBackend)
+	if err != nil {
+		t.Fatalf("construct in-memory keyring: %v", err)
+	}
+	if err := credentialStore.Put(ctx, "provider.offline", apiKeyCanary); err != nil {
+		t.Fatalf("store provider canary in keyring boundary: %v", err)
+	}
 
 	t.Run("conversation archive and memory", func(t *testing.T) {
 		conversation := storage.Conversation{
@@ -132,6 +147,7 @@ func TestMVPOfflineLifecycle(t *testing.T) {
 		if len(snapshot.Entries) != 1 || snapshot.Entries[0].Memory.ID != memoryID {
 			t.Fatalf("unexpected core snapshot: %#v", snapshot)
 		}
+		lifecycleArtifacts["memory context snapshot"] = []byte(snapshot.Text)
 		versions, err := repositories.Memories.ListVersions(ctx, memoryID, 0)
 		if err != nil {
 			t.Fatalf("list memory versions: %v", err)
@@ -369,11 +385,10 @@ func TestMVPOfflineLifecycle(t *testing.T) {
 		repositoryRoot := repositoryRoot(t)
 		manifestPath := filepath.Join(repositoryRoot, "plugins", "reference", plugins.ManifestFileName)
 		archivePath := filepath.Join(testRoot, "dogfood.yuribackup")
-		const passphrase = "offline-dogfood-passphrase"
-		_, err := backup.Export(ctx, database, archivePath, passphrase, backup.ExportOptions{
+		_, err := backup.Export(ctx, database, archivePath, passphraseCanary, backup.ExportOptions{
 			ConfigMetadata: map[string]any{
-				"profile": "dogfood", "api_key": "must-not-export", "providers": []any{
-					map[string]any{"model": "offline", "api_key": "must-not-export"},
+				"profile": "dogfood", "api_key": apiKeyCanary, "providers": []any{
+					map[string]any{"model": "offline", "credential_ref": "provider.offline", "api_key": apiKeyCanary},
 				},
 			},
 			Blobs: []backup.Blob{{Name: "reference-plugin.json", Source: manifestPath}},
@@ -381,7 +396,7 @@ func TestMVPOfflineLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("export encrypted backup: %v", err)
 		}
-		manifest, err := backup.Validate(ctx, archivePath, passphrase, backup.RestoreOptions{})
+		manifest, err := backup.Validate(ctx, archivePath, passphraseCanary, backup.RestoreOptions{})
 		if err != nil {
 			t.Fatalf("validate encrypted backup: %v", err)
 		}
@@ -389,7 +404,7 @@ func TestMVPOfflineLifecycle(t *testing.T) {
 			t.Fatalf("unexpected backup manifest: %#v", manifest)
 		}
 		restoreDir := filepath.Join(testRoot, "restored")
-		result, err := backup.RestoreToTemp(ctx, archivePath, passphrase, restoreDir, backup.RestoreOptions{})
+		result, err := backup.RestoreToTemp(ctx, archivePath, passphraseCanary, restoreDir, backup.RestoreOptions{})
 		if err != nil {
 			t.Fatalf("restore encrypted backup: %v", err)
 		}
@@ -400,9 +415,10 @@ func TestMVPOfflineLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read restored config: %v", err)
 		}
-		if strings.Contains(string(config), "api_key") || strings.Contains(string(config), "must-not-export") {
+		if strings.Contains(string(config), "api_key") || strings.Contains(string(config), "credential_ref") || strings.Contains(string(config), apiKeyCanary) {
 			t.Fatalf("restored config retained secret-shaped metadata: %s", config)
 		}
+		lifecycleArtifacts["restored config"] = config
 		restoredDB, err := storage.Open(ctx, result.DatabasePath)
 		if err != nil {
 			t.Fatalf("open restored sqlite: %v", err)
@@ -425,11 +441,109 @@ func TestMVPOfflineLifecycle(t *testing.T) {
 			t.Fatalf("restored plugin metadata: %v", err)
 		}
 	})
+
+	t.Run("negative secret leak scan", func(t *testing.T) {
+		storedCredential, err := credentialStore.Get(ctx, "provider.offline")
+		if err != nil || storedCredential != apiKeyCanary {
+			t.Fatalf("keyring boundary lost provider credential: value=%q err=%v", storedCredential, err)
+		}
+
+		var logOutput bytes.Buffer
+		logger := observability.NewLogger(observability.LoggerOptions{
+			Level: slog.LevelInfo, Format: "json", Output: &logOutput,
+		})
+		logger.InfoContext(observability.WithCorrelationID(ctx, "offline-leak-scan"), "provider boundary exercised",
+			"api_key", apiKeyCanary, "backup_password", passphraseCanary, "provider", "offline")
+		if !bytes.Contains(logOutput.Bytes(), []byte("[REDACTED]")) {
+			t.Fatalf("structured log did not mark sensitive attributes as redacted: %s", logOutput.Bytes())
+		}
+		lifecycleArtifacts["structured log"] = bytes.Clone(logOutput.Bytes())
+
+		if err := repositories.Audit.Append(ctx, storage.AuditEvent{
+			ID: domain.ID("audit-negative-leak-scan"), Actor: domain.ActorSystem,
+			Action: "security.negative_leak_scan", Target: "offline-profile",
+			Decision: domain.PermissionAllow, PayloadRedacted: `{"provider":"offline","credential":"[REDACTED]"}`,
+			CreatedAt: now.Add(4 * time.Second),
+		}); err != nil {
+			t.Fatalf("append redacted audit event: %v", err)
+		}
+		auditEvents, err := repositories.Audit.List(ctx)
+		if err != nil {
+			t.Fatalf("list audit events for leak scan: %v", err)
+		}
+		auditJSON, err := json.Marshal(auditEvents)
+		if err != nil {
+			t.Fatalf("encode audit events for leak scan: %v", err)
+		}
+		lifecycleArtifacts["audit metadata"] = auditJSON
+
+		if _, err := database.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+			t.Fatalf("checkpoint sqlite before leak scan: %v", err)
+		}
+		assertNoSecretCanaries(t, lifecycleArtifacts, []string{apiKeyCanary, passphraseCanary})
+		assertTreeHasNoSecretCanaries(t, testRoot, []string{apiKeyCanary, passphraseCanary})
+	})
 }
 
 type fixedClock struct{ now time.Time }
 
 func (c fixedClock) Now() time.Time { return c.now }
+
+type smokeKeyringBackend struct{ values map[string]string }
+
+func (backend *smokeKeyringBackend) Set(service, account, secret string) error {
+	backend.values[service+":"+account] = secret
+	return nil
+}
+
+func (backend *smokeKeyringBackend) Get(service, account string) (string, error) {
+	value, ok := backend.values[service+":"+account]
+	if !ok {
+		return "", securitykeyring.ErrNotFound
+	}
+	return value, nil
+}
+
+func (backend *smokeKeyringBackend) Delete(service, account string) error {
+	delete(backend.values, service+":"+account)
+	return nil
+}
+
+func assertNoSecretCanaries(t *testing.T, artifacts map[string][]byte, canaries []string) {
+	t.Helper()
+	for name, content := range artifacts {
+		for _, canary := range canaries {
+			if bytes.Contains(content, []byte(canary)) {
+				t.Fatalf("secret canary leaked into %s", name)
+			}
+		}
+	}
+}
+
+func assertTreeHasNoSecretCanaries(t *testing.T, root string, canaries []string) {
+	t.Helper()
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, canary := range canaries {
+			if bytes.Contains(content, []byte(canary)) {
+				return fmt.Errorf("secret canary leaked into profile artifact %s", path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
