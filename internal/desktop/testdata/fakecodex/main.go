@@ -56,6 +56,14 @@ func main() {
 				},
 				"refreshToken": token,
 			}
+		case "model/list":
+			result = map[string]any{"data": []map[string]any{
+				{
+					"id": "model-default", "model": "gpt-test-default", "displayName": "GPT Test Default",
+					"description": "Default fake Codex model", "hidden": false, "isDefault": true,
+					"defaultReasoningEffort": "medium", "supportedReasoningEfforts": []any{},
+				},
+			}}
 		}
 		if err := encoder.Encode(map[string]any{"id": message.ID, "result": result}); err != nil {
 			os.Exit(4)

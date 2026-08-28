@@ -79,8 +79,8 @@ func TestSaveCodexProviderRejectsCredentialFieldsByConstruction(t *testing.T) {
 	if view.Kind != config.ProviderCodexAppServer || view.HasSecret {
 		t.Fatalf("unexpected Codex provider view %#v", view)
 	}
-	if view.Model != "" {
-		t.Fatalf("Codex OAuth persisted an explicit model: %#v", view)
+	if view.Model != "model" {
+		t.Fatalf("Codex OAuth lost the model picker selection: %#v", view)
 	}
 }
 

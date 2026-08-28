@@ -77,6 +77,22 @@ type RateLimitsResult struct {
 	RateLimitsByLimitID map[string]RateLimit `json:"rateLimitsByLimitId"`
 }
 
+type Model struct {
+	ID                     string   `json:"id"`
+	Model                  string   `json:"model"`
+	DisplayName            string   `json:"displayName"`
+	Description            string   `json:"description"`
+	Hidden                 bool     `json:"hidden"`
+	IsDefault              bool     `json:"isDefault"`
+	DefaultReasoningEffort string   `json:"defaultReasoningEffort"`
+	InputModalities        []string `json:"inputModalities,omitempty"`
+}
+
+type ModelListResult struct {
+	Data       []Model `json:"data"`
+	NextCursor string  `json:"nextCursor,omitempty"`
+}
+
 type Thread struct {
 	ID string `json:"id"`
 }

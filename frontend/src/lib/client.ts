@@ -10,6 +10,7 @@ import type {
   ChatEvent,
   ChatRequest,
   CodexAccount,
+  CodexModel,
   CodexLogoutResult,
   Conversation,
   EncryptedBackupInfo,
@@ -1281,6 +1282,29 @@ class MockYuriClient implements YuriClient {
     return { disconnected: true, onboarding: { ...this.onboarding } }
   }
 
+  async getCodexModels(): Promise<CodexModel[]> {
+    return [
+      {
+        id: 'gpt-5.6-sol',
+        model: 'gpt-5.6-sol',
+        displayName: 'GPT-5.6 Codex',
+        description: 'Основная модель для сложных агентных задач.',
+        isDefault: true,
+        defaultReasoningEffort: 'medium',
+        inputModalities: ['text', 'image'],
+      },
+      {
+        id: 'gpt-5.6-terra',
+        model: 'gpt-5.6-terra',
+        displayName: 'GPT-5.6 Terra',
+        description: 'Сбалансированная модель для повседневных задач.',
+        isDefault: false,
+        defaultReasoningEffort: 'medium',
+        inputModalities: ['text', 'image'],
+      },
+    ]
+  }
+
   async refreshCodexLimits(): Promise<UsageLimits | undefined> {
     if (!this.provider.codex.connected) return undefined
     await sleep(220)
@@ -1840,7 +1864,7 @@ class WailsYuriClient implements YuriClient {
     await callBridge(['SaveCodexProvider', 'SaveProviderSettings', 'SetProviderSettings'], [{
       id: 'codex',
       displayName: 'Codex App Server',
-      model: '',
+      model: settings.model,
       binary: 'codex',
       enabled: true,
     }])
@@ -1920,6 +1944,10 @@ class WailsYuriClient implements YuriClient {
       disconnected: true,
       onboarding: normalizeOnboardingState(result.onboarding ?? result.state),
     }
+  }
+
+  async getCodexModels(): Promise<CodexModel[]> {
+    return normalizeCodexModels(await callBridgeSafe<unknown>(['CodexModels', 'ListCodexModels']))
   }
 
   async refreshCodexLimits(): Promise<UsageLimits | undefined> {
@@ -2137,25 +2165,56 @@ class WailsYuriClient implements YuriClient {
   private async runWithBridge(names: string[], request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult> {
     // Wails v2 currently exposes a single ChatRequest object. The adapter keeps
     // the request typed so the binding can evolve without changing the UI.
-    const seen = new Set<string>()
+    const liveEventCounts = new Map<string, number>()
     const handleLiveEvent = (value: unknown) => {
       const event = normalizeChatEvent(value)
       if (!event) return
       const key = JSON.stringify(event)
-      if (seen.has(key)) return
-      seen.add(key)
+      liveEventCounts.set(key, (liveEventCounts.get(key) ?? 0) + 1)
       onEvent(event)
     }
     const unsubscribe = subscribeRuntimeEvent('yuri:chat', handleLiveEvent)
     try {
       const result = await callBridge<RunResult | { runId?: string; status?: RunResult['status']; events?: ChatEvent[] }>(names, [request])
       if (!result) return { runId: makeId('run'), status: 'error' }
-      if ('events' in result && Array.isArray(result.events)) result.events.forEach(handleLiveEvent)
+      if ('events' in result && Array.isArray(result.events)) {
+        result.events.forEach((value) => {
+          const event = normalizeChatEvent(value)
+          if (!event) return
+          const key = JSON.stringify(event)
+          const liveCount = liveEventCounts.get(key) ?? 0
+          if (liveCount > 0) {
+            liveEventCounts.set(key, liveCount - 1)
+            return
+          }
+          onEvent(event)
+        })
+      }
       return { runId: result.runId ?? makeId('run'), status: result.status ?? 'complete' }
     } finally {
       unsubscribe?.()
     }
   }
+}
+
+function normalizeCodexModels(value: unknown): CodexModel[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const source = item as UnknownRecord
+    const model = optionalString(source, 'model')
+    if (!model) return []
+    const rawModalities = source.inputModalities ?? source.input_modalities
+    return [{
+      id: optionalString(source, 'id') ?? model,
+      model,
+      displayName: optionalString(source, 'displayName', 'display_name') ?? model,
+      description: optionalString(source, 'description'),
+      isDefault: normalizeBoolean(source.isDefault ?? source.is_default, false),
+      defaultReasoningEffort: optionalString(source, 'defaultReasoningEffort', 'default_reasoning_effort'),
+      inputModalities: Array.isArray(rawModalities) ? rawModalities.map(String) : [],
+    }]
+  })
 }
 
 function normalizeCodexAccount(value: UnknownRecord): CodexAccount {

@@ -3330,6 +3330,42 @@ kbd {
   border-color: rgba(185, 165, 255, 0.45);
 }
 
+.codex-model-picker {
+  display: grid;
+  gap: 7px;
+  color: #918b9f;
+  font-size: 9px;
+}
+
+.codex-model-picker > span {
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.codex-model-picker select {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 30px 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: 0;
+  color: #d8d3e3;
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.codex-model-picker select:focus {
+  border-color: rgba(185, 165, 255, 0.45);
+}
+
+.codex-model-picker small {
+  min-height: 13px;
+  color: #747083;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
 .onboarding-form__actions {
   justify-content: flex-end;
   gap: 8px;

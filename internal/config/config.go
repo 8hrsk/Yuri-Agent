@@ -244,11 +244,11 @@ func Load(paths Paths) (Config, error) {
 	if strings.TrimSpace(value.Persona.ProfileID) == "" {
 		value.Persona = Default(paths).Persona
 	}
-	// Early Codex OAuth builds persisted a model copied from the generic
-	// OpenAI-compatible form. ChatGPT OAuth only accepts models exposed by the
-	// account, so an empty value delegates selection to Codex App Server.
+	// Early Codex OAuth builds persisted model placeholders or copied the
+	// generic OpenAI-compatible default. Clear only those legacy values; models
+	// explicitly selected from model/list remain durable.
 	for index := range value.Providers {
-		if value.Providers[index].Kind == ProviderCodexAppServer {
+		if value.Providers[index].Kind == ProviderCodexAppServer && legacyCodexModel(value.Providers[index].Model) {
 			value.Providers[index].Model = ""
 		}
 	}
@@ -256,6 +256,15 @@ func Load(paths Paths) (Config, error) {
 		return Config{}, err
 	}
 	return value, nil
+}
+
+func legacyCodexModel(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "codex-default", "gpt-5-codex", "gpt-4o-mini":
+		return true
+	default:
+		return false
+	}
 }
 
 // Save writes configuration atomically with owner-only permissions.

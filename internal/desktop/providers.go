@@ -75,6 +75,16 @@ type CodexLogoutView struct {
 	Onboarding   OnboardingView `json:"onboarding"`
 }
 
+type CodexModelView struct {
+	ID                     string   `json:"id"`
+	Model                  string   `json:"model"`
+	DisplayName            string   `json:"displayName"`
+	Description            string   `json:"description,omitempty"`
+	IsDefault              bool     `json:"isDefault"`
+	DefaultReasoningEffort string   `json:"defaultReasoningEffort,omitempty"`
+	InputModalities        []string `json:"inputModalities,omitempty"`
+}
+
 type ProviderSettingsInput struct {
 	ProviderID       string              `json:"providerId,omitempty"`
 	Kind             config.ProviderKind `json:"kind"`
@@ -227,8 +237,8 @@ func (b *Bridge) SaveCodexProvider(input SaveCodexProviderInput) (ProviderView, 
 	}
 	provider := config.ProviderConfig{
 		ID: strings.TrimSpace(input.ID), Kind: config.ProviderCodexAppServer,
-		DisplayName: strings.TrimSpace(input.DisplayName),
-		Binary:      strings.TrimSpace(input.Binary), Enabled: input.Enabled,
+		DisplayName: strings.TrimSpace(input.DisplayName), Model: strings.TrimSpace(input.Model),
+		Binary: strings.TrimSpace(input.Binary), Enabled: input.Enabled,
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -498,6 +508,32 @@ func (b *Bridge) CodexRateLimits() (codexapp.RateLimitsResult, error) {
 		return codexapp.RateLimitsResult{}, err
 	}
 	return client.ReadRateLimits(ctx)
+}
+
+func (b *Bridge) CodexModels() ([]CodexModelView, error) {
+	ctx, cancel := b.context()
+	defer cancel()
+	client, err := b.ensureCodex(ctx)
+	if err != nil {
+		return nil, err
+	}
+	models, err := client.ListModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]CodexModelView, 0, len(models))
+	for _, model := range models {
+		if model.Hidden || strings.TrimSpace(model.Model) == "" {
+			continue
+		}
+		views = append(views, CodexModelView{
+			ID: model.ID, Model: model.Model, DisplayName: model.DisplayName,
+			Description: model.Description, IsDefault: model.IsDefault,
+			DefaultReasoningEffort: model.DefaultReasoningEffort,
+			InputModalities:        append([]string(nil), model.InputModalities...),
+		})
+	}
+	return views, nil
 }
 
 func (b *Bridge) CodexLogout() (CodexLogoutView, error) {

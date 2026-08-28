@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
 import { isOnboardingComplete, onboardingStepIndex, onboardingSteps, validateOnboardingProvider, type OnboardingStep } from '../lib/onboarding'
-import type { CodexAccount, ProviderSettings, YuriClient } from '../lib/contracts'
+import type { CodexAccount, CodexModel, ProviderSettings, YuriClient } from '../lib/contracts'
 import { Icon } from './Icon'
 
 type OnboardingViewProps = {
@@ -50,6 +50,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
   const [settings, setSettings] = useState<ProviderSettings>(defaultSettings)
   const [apiKey, setApiKey] = useState('')
   const [codex, setCodex] = useState<CodexAccount>({ connected: false })
+  const [codexModels, setCodexModels] = useState<CodexModel[]>([])
   const [busy, setBusy] = useState<BusyState>('loading')
   const [loadError, setLoadError] = useState<string>()
   const [feedback, setFeedback] = useState<Feedback>()
@@ -64,6 +65,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
       ])
       setSettings(snapshot.settings)
       setCodex(snapshot.codex)
+      setCodexModels(snapshot.codex.connected ? await client.getCodexModels().catch(() => []) : [])
       if (isOnboardingComplete(onboarding)) {
         onComplete()
         return
@@ -117,7 +119,8 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
       const account = await client.loginCodex()
       setCodex(account)
       if (account.connected) {
-        setSettings((current) => ({ ...current, kind: 'codex-app-server' }))
+        setSettings((current) => ({ ...current, kind: 'codex-app-server', model: current.kind === 'codex-app-server' ? current.model : '' }))
+        setCodexModels(await client.getCodexModels().catch(() => []))
         setFeedback({ kind: 'success', text: 'Codex App Server подключён. Теперь выполните проверку.' })
       } else if (account.loginUrl) {
         setFeedback({ kind: 'success', text: account.userCode ? `OAuth открыт. Введите код ${account.userCode}, затем повторите проверку.` : 'OAuth открыт в браузере. Завершите вход, затем повторите проверку.' })
@@ -187,7 +190,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
                     </div>
                     <div aria-label="Выбор провайдера" className="onboarding-provider-tabs" role="tablist">
                       <button aria-selected={settings.kind === 'openai-compatible'} className={settings.kind === 'openai-compatible' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => updateSettings('kind', 'openai-compatible')} role="tab" type="button"><span className="provider-tab__logo">O</span><span><strong>OpenAI-compatible</strong><small>API key · streaming</small></span></button>
-                      <button aria-selected={settings.kind === 'codex-app-server'} className={settings.kind === 'codex-app-server' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => updateSettings('kind', 'codex-app-server')} role="tab" type="button"><span className="provider-tab__logo provider-tab__logo--codex">C</span><span><strong>Codex App Server</strong><small>ChatGPT OAuth</small></span></button>
+                      <button aria-selected={settings.kind === 'codex-app-server'} className={settings.kind === 'codex-app-server' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => setSettings((current) => ({ ...current, kind: 'codex-app-server', model: current.kind === 'codex-app-server' ? current.model : '' }))} role="tab" type="button"><span className="provider-tab__logo provider-tab__logo--codex">C</span><span><strong>Codex App Server</strong><small>ChatGPT OAuth</small></span></button>
                       <button aria-selected={settings.kind === 'antigravity'} className={settings.kind === 'antigravity' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => updateSettings('kind', 'antigravity')} role="tab" type="button"><span className="provider-tab__logo">A</span><span><strong>Antigravity</strong><small>OAuth unavailable</small></span></button>
                     </div>
                     {settings.kind === 'openai-compatible' ? (
@@ -203,6 +206,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
                     ) : settings.kind === 'codex-app-server' ? (
                       <div className="onboarding-codex">
                         <div className="codex-account__row"><div className="codex-account__avatar">{codex.connected ? '✓' : 'C'}</div><div><strong>{codex.connected ? codex.email : 'Аккаунт ChatGPT не подключён'}</strong><small>{codex.connected ? `${codex.plan ?? 'ChatGPT'} · готов к проверке` : 'Для Codex App Server нужен официальный OAuth-поток.'}</small></div></div>
+                        {codex.connected && <label className="codex-model-picker"><span>Модель</span><select aria-label="Модель Codex" onChange={(event) => updateSettings('model', event.target.value)} value={settings.model}><option value="">Автоматически · {codexModels.find((model) => model.isDefault)?.displayName ?? 'модель аккаунта'}</option>{codexModels.map((model) => <option key={model.id} value={model.model}>{model.displayName}{model.isDefault ? ' · default' : ''}</option>)}</select><small>{settings.model ? codexModels.find((model) => model.model === settings.model)?.description : 'Codex выберет модель по умолчанию для вашего аккаунта.'}</small></label>}
                         <p className="onboarding-panel__hint">OAuth остаётся явным действием пользователя. Yuri не получает и не показывает токен, а backend сам выполняет probe после подключения.</p>
                         {!codex.connected && <button className="button button--quiet button--wide" disabled={busy === 'oauth' || busy === 'testing'} onClick={() => void handleLogin()} type="button"><Icon name="command" width={15} height={15} />{busy === 'oauth' ? 'Открываю OAuth…' : 'Войти через ChatGPT'}</button>}
                         <div className="onboarding-form__actions"><button className="button button--quiet" onClick={() => { setFeedback(undefined); setStep('welcome') }} type="button">Назад</button><button className="button button--accent" disabled={!codex.connected || busy === 'testing' || busy === 'oauth'} onClick={() => void handleProbe()} type="button">{busy === 'testing' ? 'Проверяю…' : 'Проверить Codex'} <Icon name="arrow-up" width={14} height={14} /></button></div>

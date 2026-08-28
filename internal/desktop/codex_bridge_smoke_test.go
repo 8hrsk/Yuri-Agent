@@ -69,6 +69,10 @@ func TestCodexBridgeAccountLifecycleSmoke(t *testing.T) {
 	if err != nil || limits.RateLimits == nil || limits.RateLimits.Primary == nil || limits.RateLimits.Primary.UsedPercent != 25 {
 		t.Fatalf("Codex rate limits = %#v err=%v", limits, err)
 	}
+	models, err := bridge.CodexModels()
+	if err != nil || len(models) != 1 || models[0].Model != "gpt-test-default" || !models[0].IsDefault {
+		t.Fatalf("Codex models = %#v err=%v", models, err)
+	}
 	probe := bridge.ProbeProvider(ProviderProbeInput{ProviderID: "codex", Kind: config.ProviderCodexAppServer})
 	if !probe.OK || !probe.Onboarding.Completed || !probe.Onboarding.ProviderTested {
 		t.Fatalf("Codex provider probe = %#v", probe)
@@ -113,7 +117,7 @@ func TestCodexBridgeAccountLifecycleSmoke(t *testing.T) {
 	}
 	waitForCodexMethods(t, markerPath, []string{
 		"initialize", "initialized", "account/login/start", "account/read",
-		"account/rateLimits/read", "account/logout",
+		"account/rateLimits/read", "model/list", "account/logout",
 	}, 2*time.Second)
 }
 

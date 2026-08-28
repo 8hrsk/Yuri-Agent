@@ -50,6 +50,27 @@ func (client *Client) ReadRateLimits(ctx context.Context) (RateLimitsResult, err
 	return result, err
 }
 
+func (client *Client) ListModels(ctx context.Context) ([]Model, error) {
+	models := make([]Model, 0, 16)
+	cursor := ""
+	for page := 0; page < 10; page++ {
+		params := map[string]any{"includeHidden": false, "limit": 100}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		var result ModelListResult
+		if err := client.Request(ctx, "model/list", params, &result); err != nil {
+			return nil, err
+		}
+		models = append(models, result.Data...)
+		if result.NextCursor == "" || result.NextCursor == cursor {
+			break
+		}
+		cursor = result.NextCursor
+	}
+	return models, nil
+}
+
 func (client *Client) StartThread(ctx context.Context, model string) (Thread, error) {
 	return client.StartThreadWithOptions(ctx, ThreadOptions{Model: model})
 }

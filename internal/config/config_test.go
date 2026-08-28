@@ -106,6 +106,25 @@ func TestLoadClearsLegacyCodexOAuthModel(t *testing.T) {
 	}
 }
 
+func TestLoadPreservesCodexModelPickerSelection(t *testing.T) {
+	paths := testPaths(t)
+	value := Default(paths)
+	value.Providers = []ProviderConfig{{
+		ID: "codex", Kind: ProviderCodexAppServer, DisplayName: "Codex App Server",
+		Model: "gpt-current", Binary: "codex", Enabled: true,
+	}}
+	if err := Save(paths, value); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Providers[0].Model != "gpt-current" {
+		t.Fatalf("loaded Codex model = %q, want picker selection", loaded.Providers[0].Model)
+	}
+}
+
 func TestConfigRejectsPartialOnboardingTransition(t *testing.T) {
 	paths := testPaths(t)
 	value := Default(paths)

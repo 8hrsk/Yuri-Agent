@@ -503,6 +503,16 @@ export interface CodexAccount {
   userCode?: string
 }
 
+export interface CodexModel {
+  id: string
+  model: string
+  displayName: string
+  description?: string
+  isDefault: boolean
+  defaultReasoningEffort?: string
+  inputModalities: string[]
+}
+
 export interface CodexLogoutResult {
   disconnected: boolean
   onboarding: OnboardingState
@@ -596,6 +606,7 @@ export interface YuriClient {
   completeOnboarding(settings: ProviderSettings, apiKey?: string): Promise<OnboardingResult>
   loginCodex(): Promise<CodexAccount>
   logoutCodex(): Promise<CodexLogoutResult>
+  getCodexModels(): Promise<CodexModel[]>
   refreshCodexLimits(): Promise<UsageLimits | undefined>
   createEncryptedBackup(input: EncryptedBackupInput): Promise<EncryptedBackupInfo | undefined>
   validateEncryptedBackup(input: EncryptedBackupInspectInput): Promise<EncryptedBackupInfo | undefined>

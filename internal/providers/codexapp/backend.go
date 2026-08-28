@@ -45,7 +45,7 @@ func (backend *Backend) Start(ctx context.Context, request agent.ModelRequest) (
 	}
 	release := func() { <-backend.turns }
 	model := request.Model
-	if model == "codex-default" || model == "gpt-5-codex" {
+	if model == "codex-default" || model == "gpt-5-codex" || model == "gpt-4o-mini" {
 		model = ""
 	}
 	thread, err := backend.Client.StartThreadWithOptions(ctx, ThreadOptions{

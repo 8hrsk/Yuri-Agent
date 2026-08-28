@@ -183,6 +183,76 @@ describe('Yuri client contract', () => {
     }
   })
 
+  it('lists Codex account models through the Wails bridge', async () => {
+    const bridge = {
+      ListConversations: () => [],
+      CodexModels: () => [{
+        id: 'model-1', model: 'gpt-current', display_name: 'GPT Current',
+        description: 'Current account model', is_default: true,
+        default_reasoning_effort: 'medium', input_modalities: ['text', 'image'],
+      }],
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      await expect(createYuriClient().getCodexModels()).resolves.toEqual([{
+        id: 'model-1', model: 'gpt-current', displayName: 'GPT Current',
+        description: 'Current account model', isDefault: true,
+        defaultReasoningEffort: 'medium', inputModalities: ['text', 'image'],
+      }])
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
+  it('preserves repeated live streaming deltas while suppressing returned replay events', async () => {
+    const listeners = new Map<string, (value: unknown) => void>()
+    const streamed = [
+      { type: 'run.started', runId: 'run-1' },
+      { type: 'assistant.delta', runId: 'run-1', messageId: 'message-1', delta: 'Я' },
+      { type: 'assistant.delta', runId: 'run-1', messageId: 'message-1', delta: ' ' },
+      { type: 'assistant.delta', runId: 'run-1', messageId: 'message-1', delta: ' ' },
+      { type: 'assistant.delta', runId: 'run-1', messageId: 'message-1', delta: 'здесь' },
+      { type: 'assistant.completed', runId: 'run-1', messageId: 'message-1' },
+      { type: 'run.completed', runId: 'run-1', status: 'complete' },
+    ]
+    const bridge = {
+      ListConversations: () => [],
+      SendMessage: () => {
+        streamed.forEach((event) => listeners.get('yuri:chat')?.(event))
+        return { runId: 'run-1', status: 'complete', events: streamed }
+      },
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        go: { main: { Bridge: bridge } },
+        runtime: {
+          EventsOn: (name: string, callback: (value: unknown) => void) => { listeners.set(name, callback) },
+          EventsOff: (name: string) => { listeners.delete(name) },
+        },
+      },
+    })
+    resetYuriClientForTests()
+
+    try {
+      const deltas: string[] = []
+      await createYuriClient().sendMessage({ conversationId: 'conversation-1', text: 'Привет' }, (event) => {
+        if (event.type === 'assistant.delta') deltas.push(event.delta)
+      })
+      expect(deltas).toEqual(['Я', ' ', ' ', 'здесь'])
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
   it('holds a side effect at approval until the user resolves it', async () => {
     const client = createYuriClient()
     const events: string[] = []

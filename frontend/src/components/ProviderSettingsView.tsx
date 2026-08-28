@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
-import type { CodexAccount, ProviderSettings, UsageLimits } from '../lib/contracts'
+import type { CodexAccount, CodexModel, ProviderSettings, UsageLimits } from '../lib/contracts'
 import { EncryptedBackupCard } from './EncryptedBackupCard'
 import { Icon } from './Icon'
 
@@ -43,6 +43,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
   const [apiKey, setApiKey] = useState('')
   const [allowedDirectories, setAllowedDirectories] = useState('')
   const [codex, setCodex] = useState<CodexAccount>({ connected: false })
+  const [codexModels, setCodexModels] = useState<CodexModel[]>([])
   const [limits, setLimits] = useState<UsageLimits>()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -60,6 +61,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
       setLimits(snapshot.codex.limits)
       setAllowedDirectories(directories.join('\n'))
       setLoading(false)
+      if (snapshot.codex.connected) void client.getCodexModels().then(setCodexModels).catch(() => setCodexModels([]))
     }).catch(() => {
       if (mounted) {
         setFeedback({ kind: 'error', text: 'Не удалось загрузить настройки провайдеров.' })
@@ -111,7 +113,8 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
       setCodex(account)
       setLimits(account.limits)
       if (account.connected) {
-        setSettings((current) => ({ ...current, kind: 'codex-app-server' }))
+        setSettings((current) => ({ ...current, kind: 'codex-app-server', model: current.kind === 'codex-app-server' ? current.model : '' }))
+        setCodexModels(await client.getCodexModels().catch(() => []))
         setFeedback({ kind: 'success', text: 'Codex App Server подключён через OAuth.' })
       } else if (account.loginUrl) {
         setFeedback({ kind: 'success', text: account.userCode ? `OAuth открыт. Введите код ${account.userCode} в окне браузера, затем обновите аккаунт.` : 'OAuth открыт в браузере. Завершите вход, затем обновите аккаунт.' })
@@ -167,7 +170,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
         <button aria-selected={settings.kind === 'openai-compatible'} className={settings.kind === 'openai-compatible' ? 'provider-tab provider-tab--active' : 'provider-tab'} onClick={() => updateSettings('kind', 'openai-compatible')} role="tab" type="button">
           <span className="provider-tab__logo">O</span><span><strong>OpenAI-compatible</strong><small>API key · streaming</small></span>
         </button>
-        <button aria-selected={settings.kind === 'codex-app-server'} className={settings.kind === 'codex-app-server' ? 'provider-tab provider-tab--active' : 'provider-tab'} onClick={() => updateSettings('kind', 'codex-app-server')} role="tab" type="button">
+        <button aria-selected={settings.kind === 'codex-app-server'} className={settings.kind === 'codex-app-server' ? 'provider-tab provider-tab--active' : 'provider-tab'} onClick={() => setSettings((current) => ({ ...current, kind: 'codex-app-server', model: current.kind === 'codex-app-server' ? current.model : '' }))} role="tab" type="button">
           <span className="provider-tab__logo provider-tab__logo--codex">C</span><span><strong>Codex App Server</strong><small>ChatGPT OAuth · work limits</small></span>
         </button>
         <button aria-selected={settings.kind === 'antigravity'} className={settings.kind === 'antigravity' ? 'provider-tab provider-tab--active' : 'provider-tab'} onClick={() => updateSettings('kind', 'antigravity')} role="tab" type="button">
@@ -195,6 +198,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
             ) : settings.kind === 'codex-app-server' ? (
               <div className="codex-account">
                 <div className="codex-account__row"><div className="codex-account__avatar">{codex.connected ? '✓' : 'C'}</div><div><strong>{codex.connected ? codex.email : 'Аккаунт ChatGPT не подключён'}</strong><small>{codex.connected ? `${codex.plan ?? 'ChatGPT'} · авторизован ${codex.authenticatedAt ? new Date(codex.authenticatedAt).toLocaleDateString('ru-RU') : ''}` : 'Для Codex App Server нужен официальный OAuth-поток.'}</small></div></div>
+                {codex.connected && <label className="codex-model-picker"><span>Модель</span><select aria-label="Модель Codex" onChange={(event) => updateSettings('model', event.target.value)} value={settings.model}><option value="">Автоматически · {codexModels.find((model) => model.isDefault)?.displayName ?? 'модель аккаунта'}</option>{codexModels.map((model) => <option key={model.id} value={model.model}>{model.displayName}{model.isDefault ? ' · default' : ''}</option>)}</select><small>{settings.model ? codexModels.find((model) => model.model === settings.model)?.description : 'Codex выберет модель по умолчанию для вашего аккаунта.'}</small></label>}
                 <button className="button button--accent button--wide" disabled={loggingIn || loggingOut} onClick={() => void handleLogin()} type="button"><Icon name="command" width={15} height={15} />{loggingIn ? 'Открываю OAuth…' : codex.connected ? 'Переподключить через OAuth' : 'Войти через ChatGPT'}</button>
                 {codex.connected && <button className="button button--quiet button--wide" disabled={loggingIn || loggingOut} onClick={() => void handleLogout()} type="button"><Icon name="lock" width={14} height={14} />{loggingOut ? 'Завершаю сессию…' : 'Выйти из ChatGPT'}</button>}
                 <p className="settings-footnote"><Icon name="lock" width={13} height={13} /> Yuri использует только официальный Codex App Server интерфейс. Токен не показывается модели и не сохраняется в SQLite.</p>
