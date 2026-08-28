@@ -4,7 +4,7 @@
 
 | # | Критерий | Статус | Текущее доказательство | Что требуется закрыть |
 | ---: | --- | --- | --- | --- |
-| 1 | Чистая установка, onboarding, тест провайдера | Partial | Clean-profile first-run gate, typed `CompleteOnboarding` Save→Probe, fake provider success/failure и restart persistence | Wails/WebKit launch smoke на чистом data root |
+| 1 | Чистая установка, onboarding, тест провайдера | Partial | Clean-profile first-run gate, typed `CompleteOnboarding` Save→Probe, fake provider success/failure, restart persistence и Wails `OnDomReady` smoke на изолированном profile root | WebKit DOM interaction остаётся ручной до появления стабильного UI harness |
 | 2 | Streaming, cancel, понятная provider error | Partial | Agent/provider contract tests, frontend mock streaming | Реальный Wails bridge smoke с cancel/error |
 | 3 | Read-only файл внутри root, отказ снаружи | Automated | `internal/tools/filesystem_read_test.go` | Включить в общий MVP smoke |
 | 4 | Изменение файла через approval и audit | Missing | Risk/approval policy существует | Bounded filesystem write tool и сквозной approval/audit test |
@@ -20,16 +20,16 @@
 | 14 | Dormant исключён из recall, deliberate search находит эпизод | Automated | Memory engine и desktop archive tests | Включить в общий MVP smoke |
 | 15 | Codex login/logout, plan/rate limits, no token persistence | Partial | Codex app-server protocol/account tests и backend logout | UI logout и Wails bridge smoke с fake app-server |
 | 16 | Antigravity безопасно сообщает unsupported | Missing | Только documented policy boundary | Явный disabled adapter/error contract без OAuth piggyback |
-| 17 | Обязательные macOS E2E smoke проходят | Missing | Universal app build/validation существует | Автоматизированный first-run Wails smoke |
+| 17 | Обязательные macOS E2E smoke проходят | Partial | Universal app build/validation и Wails `OnDomReady`/clean-shutdown smoke выполняются в CI | Автоматизированный WebKit UI interaction, если появится стабильный macOS harness |
 
 ## Порядок закрытия Stage 7
 
 1. Расширить существующий offline MVP lifecycle smoke единым leak scan.
-2. Добавить Wails/WebKit launch smoke для реализованного first-run onboarding на временном data root.
+2. Поддерживать Wails `OnDomReady` launch smoke для реализованного first-run onboarding на временном profile root; UI WebKit interaction остаётся отдельным manual/harness-dependent слоем.
 3. Bounded filesystem write через существующий approval/policy boundary.
 4. Явный unsupported Antigravity contract и Codex logout UI.
 5. Fake-provider voice/chat smoke без сети и повторный acceptance audit.
 
 Реальные OAuth credentials, платные provider calls, Developer ID, notarization и публикация артефактов не являются условиями локального OSS smoke-набора.
 
-Текущий первый срез запускается командой `make mvp-smoke`. Он использует один временный SQLite-профиль и последовательно проходит conversation/archive, memory/provenance/recall, versioned persona/relationship/affect, durable one-shot job, реальный reference plugin process и encrypted backup/restore. Это backend integration smoke, а не Wails/WebKit E2E.
+Текущий первый срез запускается командами `make mvp-smoke` и на macOS `make macos-launch-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app`. Первый использует один временный SQLite-профиль и последовательно проходит conversation/archive, memory/provenance/recall, versioned persona/relationship/affect, durable one-shot job, реальный reference plugin process и encrypted backup/restore. Второй открывает собранный `.app` с изолированным profile root, ждёт Wails `OnDomReady` marker и проверяет clean shutdown; это ещё не interaction-level Wails/WebKit E2E.

@@ -18,6 +18,14 @@ import (
 const (
 	appDirectoryName = "Yuri"
 	configFileName   = "config.json"
+
+	// TestModeEnv and TestProfileRootEnv are intentionally a paired,
+	// test-only escape hatch for launch smoke tests. A profile root is never
+	// honored unless the caller opts into the exact test mode value, so a
+	// stray environment variable cannot redirect a normal owner profile.
+	TestModeEnv        = "YURI_TEST_MODE"
+	TestProfileRootEnv = "YURI_TEST_PROFILE_ROOT"
+	testModeValue      = "1"
 )
 
 // Config contains process-level settings that are safe to persist as JSON.
@@ -125,6 +133,9 @@ func (p Paths) WithDataDirectory(directory string) Paths {
 
 // DefaultPaths resolves platform-standard per-user directories.
 func DefaultPaths() (Paths, error) {
+	if paths, enabled, err := testPathsFromEnvironment(); enabled || err != nil {
+		return paths, err
+	}
 	configRoot, err := os.UserConfigDir()
 	if err != nil {
 		return Paths{}, fmt.Errorf("resolve user config directory: %w", err)
@@ -137,6 +148,38 @@ func DefaultPaths() (Paths, error) {
 
 	configDirectory := filepath.Join(configRoot, appDirectoryName)
 	dataDirectory := filepath.Join(dataRoot, appDirectoryName)
+	return pathsForDirectories(configDirectory, dataDirectory), nil
+}
+
+func testPathsFromEnvironment() (Paths, bool, error) {
+	mode, modeSet := os.LookupEnv(TestModeEnv)
+	root, rootSet := os.LookupEnv(TestProfileRootEnv)
+	mode = strings.TrimSpace(mode)
+	root = strings.TrimSpace(root)
+
+	if !modeSet && !rootSet {
+		return Paths{}, false, nil
+	}
+	if mode != testModeValue {
+		return Paths{}, true, fmt.Errorf("%s must be %q when test profile paths are configured", TestModeEnv, testModeValue)
+	}
+	if !rootSet || root == "" {
+		return Paths{}, true, fmt.Errorf("%s is required when %s=%q", TestProfileRootEnv, TestModeEnv, testModeValue)
+	}
+	if !filepath.IsAbs(root) {
+		return Paths{}, true, fmt.Errorf("%s must be an absolute path", TestProfileRootEnv)
+	}
+	root = filepath.Clean(root)
+	if filepath.Dir(root) == root {
+		return Paths{}, true, fmt.Errorf("%s must name an isolated profile directory", TestProfileRootEnv)
+	}
+
+	configDirectory := filepath.Join(root, "config")
+	dataDirectory := filepath.Join(root, "data")
+	return pathsForDirectories(configDirectory, dataDirectory), true, nil
+}
+
+func pathsForDirectories(configDirectory, dataDirectory string) Paths {
 	return Paths{
 		ConfigDirectory: configDirectory,
 		ConfigFile:      filepath.Join(configDirectory, configFileName),
@@ -146,7 +189,7 @@ func DefaultPaths() (Paths, error) {
 		BlobDirectory:   filepath.Join(dataDirectory, "blobs"),
 		LogDirectory:    filepath.Join(dataDirectory, "logs"),
 		PluginDirectory: filepath.Join(dataDirectory, "plugins"),
-	}, nil
+	}
 }
 
 func userDataRoot() (string, error) {

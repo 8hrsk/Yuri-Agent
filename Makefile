@@ -1,6 +1,6 @@
 .PHONY: fmt fmt-check vet test build frontend-install frontend-check frontend-build check \
 	wails-install wails-version wails-doctor macos-build macos-validate macos-package \
-	macos-checksum macos-verify macos-smoke mvp-smoke bench-baseline
+	macos-checksum macos-verify macos-launch-smoke macos-smoke mvp-smoke bench-baseline
 
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
@@ -20,6 +20,8 @@ MACOS_ARTIFACT ?= $(MACOS_DIST_DIR)/yuri-$(YURI_VERSION)-macos-universal.zip
 MACOS_CHECKSUM ?= $(MACOS_ARTIFACT).sha256
 MACOS_VALIDATOR ?= $(ROOT_DIR)/scripts/validate-macos-oss.sh
 CHECKSUM_TOOL ?= $(ROOT_DIR)/scripts/checksum-artifact.sh
+MACOS_LAUNCH_SMOKE ?= $(ROOT_DIR)/scripts/macos-launch-smoke.sh
+MACOS_LAUNCH_TIMEOUT ?= 20
 
 fmt:
 	gofmt -w $$(find cmd internal sdk plugins -name '*.go' -type f)
@@ -94,6 +96,9 @@ macos-checksum: macos-package
 
 macos-verify: macos-validate macos-checksum
 	@"$(CHECKSUM_TOOL)" --verify "$(MACOS_ARTIFACT)" "$(MACOS_CHECKSUM)"
+
+macos-launch-smoke: macos-validate
+	@"$(MACOS_LAUNCH_SMOKE)" --app "$(MACOS_APP)" --timeout "$(MACOS_LAUNCH_TIMEOUT)"
 
 macos-smoke: macos-verify
 	@echo "macOS universal OSS artifact: $(MACOS_ARTIFACT)"

@@ -8,6 +8,54 @@ import (
 	"testing"
 )
 
+func TestDefaultPathsUsesExplicitIsolatedTestProfile(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(TestModeEnv, testModeValue)
+	t.Setenv(TestProfileRootEnv, root)
+
+	paths, err := DefaultPaths()
+	if err != nil {
+		t.Fatalf("DefaultPaths() error = %v", err)
+	}
+	if paths.ConfigDirectory != filepath.Join(root, "config") || paths.DataDirectory != filepath.Join(root, "data") {
+		t.Fatalf("DefaultPaths() = %#v, want isolated config/data roots under %q", paths, root)
+	}
+	if paths.ConfigFile != filepath.Join(root, "config", configFileName) || paths.DatabaseFile != filepath.Join(root, "data", "yuri.sqlite3") {
+		t.Fatalf("DefaultPaths() store paths = %#v", paths)
+	}
+}
+
+func TestDefaultPathsRejectsProfileOverrideWithoutTestMode(t *testing.T) {
+	t.Setenv(TestModeEnv, "")
+	t.Setenv(TestProfileRootEnv, t.TempDir())
+
+	if _, err := DefaultPaths(); err == nil {
+		t.Fatal("DefaultPaths() accepted a profile override outside explicit test mode")
+	}
+}
+
+func TestDefaultPathsRejectsIncompleteOrRelativeTestProfile(t *testing.T) {
+	t.Setenv(TestModeEnv, testModeValue)
+	t.Setenv(TestProfileRootEnv, "")
+	if _, err := DefaultPaths(); err == nil {
+		t.Fatal("DefaultPaths() accepted test mode without a profile root")
+	}
+
+	t.Setenv(TestProfileRootEnv, "relative-profile")
+	if _, err := DefaultPaths(); err == nil {
+		t.Fatal("DefaultPaths() accepted a relative test profile root")
+	}
+}
+
+func TestDefaultPathsRejectsFilesystemRootAsTestProfile(t *testing.T) {
+	t.Setenv(TestModeEnv, testModeValue)
+	t.Setenv(TestProfileRootEnv, string(filepath.Separator))
+
+	if _, err := DefaultPaths(); err == nil {
+		t.Fatal("DefaultPaths() accepted the filesystem root as an isolated profile")
+	}
+}
+
 func TestLoadMissingReturnsDefaults(t *testing.T) {
 	paths := testPaths(t)
 	value, err := Load(paths)

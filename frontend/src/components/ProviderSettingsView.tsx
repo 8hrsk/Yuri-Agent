@@ -138,7 +138,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
     <div className="settings-view">
       <div className="settings-view__topline">
         <button className="back-button" onClick={onBackToChat} type="button"><Icon name="chevron-right" width={14} height={14} /> Вернуться в Chat</button>
-        <span className="stage-pill">SECURE LOCAL DATA · STAGE 6</span>
+        <span className="stage-pill">SECURE LOCAL DATA · STAGE 7</span>
       </div>
       <div className="settings-view__hero">
         <span className="welcome-card__eyebrow"><span className="eyebrow-dot" /> CONFIGURATION</span>

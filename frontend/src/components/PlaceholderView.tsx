@@ -91,7 +91,7 @@ export function PlaceholderView({ item }: PlaceholderViewProps) {
     <div className="placeholder-view">
       <div className="placeholder-view__topline">
         <span className="welcome-card__eyebrow"><span className="eyebrow-dot" /> {copy.overline.toUpperCase()}</span>
-        <span className="stage-pill">STAGE 0 · SHELL</span>
+        <span className="stage-pill">STAGE 7 · MVP STABILIZATION</span>
       </div>
       <div className="placeholder-view__hero">
         <div className="placeholder-view__icon"><Icon name={iconName(item.icon)} width={23} height={23} /></div>

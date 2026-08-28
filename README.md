@@ -43,7 +43,7 @@ Engineering foundation, conversational vertical slice, storage/memory, plugin ru
 - Personality/Relationship UI с историей версий и простым 2D-аватаром; push-to-talk поддерживает barge-in, автоозвучка является явным opt-in и не включает микрофон.
 - first-run onboarding с OpenAI-compatible и Codex OAuth вариантами; durable completion устанавливается backend только после успешного provider probe.
 
-CI проверяет core, scheduler/proactivity, reflection/persona storage, Plugin SDK/reference plugin, frontend и отдельный macOS universal OSS smoke-путь с checksum manifest. Подробности упаковки находятся в [`docs/MACOS_RELEASE.md`](docs/MACOS_RELEASE.md).
+CI проверяет core, scheduler/proactivity, reflection/persona storage, Plugin SDK/reference plugin, frontend, macOS universal OSS artifact/checksum и отдельный Wails app launch/clean-shutdown smoke. Подробности упаковки находятся в [`docs/MACOS_RELEASE.md`](docs/MACOS_RELEASE.md).
 
 Важно: Этап 3 изолирует сбой плагина отдельным процессом, но ещё не превращает сторонний executable в полностью недоверенный код. До OS sandbox и process hardening устанавливать следует только проверенные пакеты; unsigned package требует явного dev mode.
 

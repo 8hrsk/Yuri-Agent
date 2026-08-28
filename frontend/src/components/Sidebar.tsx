@@ -25,7 +25,7 @@ export function Sidebar({ activeId, connectionStatus, onNavigate }: SidebarProps
           <span className="brand-copy__name">Yuri</span>
           <span className="brand-copy__meta">Personal AI</span>
         </div>
-        <span className="brand-version">0.1</span>
+        <span className="brand-version">0.7</span>
       </div>
 
       <div className="sidebar__profile">
@@ -71,7 +71,7 @@ export function Sidebar({ activeId, connectionStatus, onNavigate }: SidebarProps
 
       <div className="sidebar__footer">
         <ConnectionBadge compact label={connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'connecting' ? 'Connecting' : 'Shell mode'} status={connectionStatus} />
-        <span className="sidebar__footer-copy">Этап 0 · foundation</span>
+        <span className="sidebar__footer-copy">Этап 7 · OSS readiness</span>
       </div>
     </aside>
   )

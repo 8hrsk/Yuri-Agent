@@ -124,8 +124,8 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Build and validate universal OSS artifact
-        run: make macos-smoke YURI_VERSION=0.7.0
+      - name: Build, validate, and launch universal OSS app
+        run: make macos-smoke macos-launch-smoke YURI_VERSION=0.7.0 MACOS_LAUNCH_TIMEOUT=20
 
       - name: Upload universal OSS archive and checksum as CI artifact
         uses: actions/upload-artifact@v4
