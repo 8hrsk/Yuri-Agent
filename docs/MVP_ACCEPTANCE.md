@@ -13,7 +13,7 @@
 | 7 | Durable CRON, restart, no-overlap, history | Automated | Offline lifecycle smoke проверяет one-shot/history; scheduler и SQLite integration tests покрывают restart/no-overlap | Добавить desktop bridge reopen в smoke |
 | 8 | Quiet hours блокируют уведомление | Automated | Proactivity timezone/DST/policy tests | Включить в общий MVP smoke |
 | 9 | API key отсутствует в SQLite/log/audit/context | Automated | Offline lifecycle хранит canary credential только в in-memory keyring boundary и единым negative scan проверяет context snapshot, audit metadata, structured log, SQLite/WAL, encrypted backup и restored profile tree | — |
-| 10 | Prompt injection не выдаёт permission | Partial | Policy/reflection injection tests | Untrusted file/web content в agent-loop smoke |
+| 10 | Prompt injection не выдаёт permission | Automated | Offline agent-loop smoke читает реальный untrusted file с инструкцией выдать `filesystem.write`, сохраняет его как tool-role data и доказывает, что повторный model tool call останавливается на owner approval без side effect | — |
 | 11 | STT → agent → TTS с barge-in и visible state | Partial | Offline fake-Wails `voice-chat-smoke.test.ts` проходит audio wire → STT → streaming chat → системный TTS → cancel; отдельно покрыты OpenAI-compatible voice adapter и avatar state mapping | Реальный WebKit microphone/speech interaction остаётся manual до стабильного UI harness |
 | 12 | Reflection не блокирует chat и не имеет tools | Automated | Coordinator/gate/model reflection tests | Включить в общий MVP smoke |
 | 13 | Persona/relationship/mood эволюция и rollback | Automated | Offline lifecycle smoke проверяет versioned persona/relationship/affect; reflection + desktop tests покрывают bounded evolution/rollback | Добавить multi-turn Bridge sequence |
@@ -24,11 +24,10 @@
 
 ## Порядок закрытия Stage 7
 
-1. Добавить untrusted-content agent-loop сценарий для prompt-injection (критерий 10); единый negative leak scan уже закрывает критерий 9.
-2. Расширить plugin smoke до package install, grants и crash/restart (критерий 5).
-3. Добавить Bridge → fake-provider streaming/cancel/error и Codex lifecycle smoke (критерии 2 и 15).
-4. WebKit DOM/microphone/speech automation для критериев 1, 11 и 17 остаётся отдельным harness-dependent слоем. Offline voice/chat contract, Codex logout UI и unsupported Antigravity contract уже закрыты.
+1. Расширить plugin smoke до package install, grants и crash/restart (критерий 5).
+2. Добавить Bridge → fake-provider streaming/cancel/error и Codex lifecycle smoke (критерии 2 и 15).
+3. WebKit DOM/microphone/speech automation для критериев 1, 11 и 17 остаётся отдельным harness-dependent слоем. Offline negative leak scan, prompt-injection agent loop, voice/chat contract, Codex logout UI и unsupported Antigravity contract уже закрыты.
 
 Реальные OAuth credentials, платные provider calls, Developer ID, notarization и публикация артефактов не являются условиями локального OSS smoke-набора.
 
-Текущий первый срез запускается командами `make mvp-smoke` и на macOS `make macos-launch-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app`. Первый использует один временный SQLite-профиль и последовательно проходит conversation/archive, memory/provenance/recall, versioned persona/relationship/affect, durable one-shot job, реальный reference plugin process, encrypted backup/restore и единый negative leak scan по context/audit/log/storage/profile artifacts. Второй открывает собранный `.app` с изолированным profile root, ждёт Wails `OnDomReady` marker и проверяет clean shutdown; это ещё не interaction-level Wails/WebKit E2E.
+Текущий первый срез запускается командами `make mvp-smoke` и на macOS `make macos-launch-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app`. Первый использует один временный SQLite-профиль и последовательно проходит conversation/archive, memory/provenance/recall, versioned persona/relationship/affect, untrusted-file prompt injection через agent loop, durable one-shot job, реальный reference plugin process, encrypted backup/restore и единый negative leak scan по context/audit/log/storage/profile artifacts. Второй открывает собранный `.app` с изолированным profile root, ждёт Wails `OnDomReady` marker и проверяет clean shutdown; это ещё не interaction-level Wails/WebKit E2E.
