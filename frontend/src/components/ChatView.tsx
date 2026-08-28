@@ -10,8 +10,11 @@ import type {
   RunStatus,
   ToolCall,
 } from '../lib/contracts'
+import { mapAvatarState } from '../lib/personality'
+import { loadAutoSpeakPreference, saveAutoSpeakPreference } from '../lib/voice'
 import { useTTS, useVoice } from '../hooks/useVoice'
 import { Icon } from './Icon'
+import { YuriAvatar } from './YuriAvatar'
 
 type ChatViewProps = {
   backend: BackendConnection
@@ -196,12 +199,19 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(true)
   const [transcribing, setTranscribing] = useState(false)
+  const [autoSpeak, setAutoSpeak] = useState(loadAutoSpeakPreference)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const transcribedBlobRef = useRef<Blob>()
+  const autoSpeakRunRef = useRef<string>()
+  const spokenAutoRunRef = useRef<string>()
+  const autoSpeakEnabledRef = useRef(autoSpeak)
   const voice = useVoice()
   const voiceBlob = voice.blob
   const clearVoice = voice.clear
   const tts = useTTS()
+  const speakTTS = tts.speak
+  const ttsSupported = tts.supported
+  const avatarState = mapAvatarState(runStatus, voice.state === 'recording', Boolean(tts.speakingId))
 
   const selectedConversation = conversations.find((conversation) => conversation.id === selectedId)
   const lastMessageContent = selectedConversation?.messages.at(-1)?.content
@@ -249,6 +259,23 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
     })
     return () => { active = false }
   }, [clearVoice, client, voiceBlob])
+
+  useEffect(() => {
+    autoSpeakEnabledRef.current = autoSpeak
+  }, [autoSpeak])
+
+  useEffect(() => {
+    if (!autoSpeak || !ttsSupported) return
+    const runId = autoSpeakRunRef.current
+    if (!runId) return
+    const message = [...(selectedConversation?.messages ?? [])]
+      .reverse()
+      .find((candidate) => candidate.role === 'assistant' && candidate.status === 'complete' && candidate.runId === runId && candidate.content.trim())
+    if (!message || spokenAutoRunRef.current === runId) return
+    spokenAutoRunRef.current = runId
+    autoSpeakRunRef.current = undefined
+    speakTTS(message.id, message.content)
+  }, [autoSpeak, selectedConversation?.messages, speakTTS, ttsSupported])
 
   const handleEvent = useCallback((conversationId: string, event: ChatEvent) => {
     if (event.type === 'run.started') {
@@ -333,6 +360,8 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
       setRunStatus(event.status === 'complete' ? 'idle' : event.status)
       setRunLabel(event.status === 'complete' ? statusCopy.idle : event.status === 'cancelled' ? statusCopy.cancelled : event.error ?? statusCopy.error)
       if (event.status === 'error') setError(event.error ?? 'Запуск завершился ошибкой.')
+      if (event.status === 'complete' && autoSpeakEnabledRef.current) autoSpeakRunRef.current = event.runId
+      else autoSpeakRunRef.current = undefined
     }
   }, [])
 
@@ -418,13 +447,30 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
   }
 
   const handleVoice = () => {
+    if (voice.starting) return
     if (voice.state === 'recording') voice.stop()
     else if (voice.state === 'ready' || voice.state === 'error') {
+      // Barge-in is intentional: pressing the microphone always stops local
+      // speech before requesting permission or opening the input stream.
+      tts.stop()
       voice.clear()
       void voice.start()
     } else {
+      // Do this before getUserMedia so a permission prompt cannot leave Yuri
+      // speaking over the user's first words.
+      tts.stop()
       void voice.start()
     }
+  }
+
+  const toggleAutoSpeak = () => {
+    setAutoSpeak((current) => {
+      const next = !current
+      autoSpeakEnabledRef.current = next
+      if (!next) autoSpeakRunRef.current = undefined
+      saveAutoSpeakPreference(next)
+      return next
+    })
   }
 
   return (
@@ -474,9 +520,12 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
 
         <section aria-label="Текущий диалог" className="chat-main">
           <header className="chat-main__header">
-            <div>
-              <span className="section-heading__overline">Conversation · local</span>
-              <h2>{selectedConversation?.title ?? 'Новый диалог'}</h2>
+            <div className="chat-main__header-persona">
+              <YuriAvatar label={`Yuri · ${runLabel}`} size="sm" state={avatarState} />
+              <div>
+                <span className="section-heading__overline">Conversation · local</span>
+                <h2>{selectedConversation?.title ?? 'Новый диалог'}</h2>
+              </div>
             </div>
             <div className="chat-main__header-meta">
               <span className={`run-state run-state--${runStatus}`} role="status"><i /> {runLabel}</span>
@@ -487,7 +536,7 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
           <div aria-live="polite" className="messages" role="log">
             {selectedConversation?.messages.length === 0 && (
               <div className="empty-conversation">
-                <div className="empty-conversation__orb">Y</div>
+                <YuriAvatar label="Yuri · готова к диалогу" size="md" state="idle" />
                 <h3>С чего начнём?</h3>
                 <p>Напишите Yuri задачу. Ответ появится потоково, а рискованные действия будут показаны до выполнения.</p>
               </div>
@@ -539,13 +588,26 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
                   {voice.error && <span className="voice-error" role="alert">{voice.error}</span>}
                 </div>
                 <div className="composer__actions">
+                  {tts.supported && (
+                    <button
+                      aria-label={autoSpeak ? 'Выключить автоматическую озвучку ответов' : 'Включить автоматическую озвучку ответов'}
+                      aria-pressed={autoSpeak}
+                      className={`voice-autospeak${autoSpeak ? ' voice-autospeak--active' : ''}`}
+                      onClick={toggleAutoSpeak}
+                      title="Автоматически озвучивать новые ответы. Микрофон не включается автоматически."
+                      type="button"
+                    >
+                      <Icon name="volume" width={14} height={14} />
+                      <span>Авто</span>
+                    </button>
+                  )}
                   <button
                     aria-label={voice.state === 'recording' ? 'Остановить запись' : 'Записать голосовое сообщение'}
                     aria-pressed={voice.state === 'recording'}
                     className={`voice-button${voice.state === 'recording' ? ' voice-button--recording' : ''}`}
-                    disabled={Boolean(runId) || transcribing}
+                    disabled={Boolean(runId) || transcribing || voice.starting}
                     onClick={handleVoice}
-                    title="Push-to-talk: запись с микрофона"
+                    title={voice.starting ? 'Запрашиваю доступ к микрофону…' : 'Push-to-talk: запись с микрофона. Постоянное прослушивание выключено.'}
                     type="button"
                   >
                     <Icon name="mic" width={16} height={16} />

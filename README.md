@@ -2,7 +2,7 @@
 
 Yuri — локальный desktop-first AI-агент для одного владельца. Первый публичный релиз ориентирован на macOS; архитектура остаётся переносимой на Windows и Linux.
 
-Engineering foundation, conversational vertical slice, storage/memory, plugin runtime и scheduler/proactivity реализованы. Основные решения и границы находятся в следующих документах:
+Engineering foundation, conversational vertical slice, storage/memory, plugin runtime, scheduler/proactivity и reflection/personality vertical slice реализованы. Основные решения и границы находятся в следующих документах:
 
 - [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — техническое задание и roadmap;
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — компоненты, context assembly, storage и trust boundaries;
@@ -35,8 +35,12 @@ Engineering foundation, conversational vertical slice, storage/memory, plugin ru
 - scheduled runs автоматически используют только low-risk read tools; изменяющие и внешние действия остаются интерактивными до появления durable idempotency contract у tools;
 - explainable proactivity policy с global switch, overnight/DST-aware quiet hours, durable daily/idempotency ledger, per-type cooldown и дедуплицированной отложенной доставкой;
 - in-app/macOS notification flow, append-only Activity UI и medium-risk `scheduler.create` tool с обязательным подтверждением.
+- отдельные versioned mutable persona, relationship opinions и affect snapshots с evidence, optimistic concurrency, atomic multi-state commit, rollback/reset и закреплением traits;
+- bounded post-turn reflection без tools: строгий JSON contract, cooldown, max-delta/range guards, запрет внешнего неподтверждённого evidence и последовательный запуск для единственного локального профиля;
+- следующий диалог получает persona и явно субъективную relationship/affect модель отдельными слоями ниже immutable policy и identity seed;
+- Personality/Relationship UI с историей версий и простым 2D-аватаром; push-to-talk поддерживает barge-in, автоозвучка является явным opt-in и не включает микрофон.
 
-CI проверяет core, scheduler/proactivity, Plugin SDK/reference plugin, frontend и отдельный macOS smoke-путь. Reflection/persona evolution реализуется следующей отдельной вехой roadmap.
+CI проверяет core, scheduler/proactivity, reflection/persona storage, Plugin SDK/reference plugin, frontend и отдельный macOS smoke-путь. Следующей отдельной вехой roadmap остаётся release hardening.
 
 Важно: Этап 3 изолирует сбой плагина отдельным процессом, но ещё не превращает сторонний executable в полностью недоверенный код. До OS sandbox/notarization/trust-store hardening устанавливать следует только проверенные пакеты; unsigned package требует явного dev mode.
 

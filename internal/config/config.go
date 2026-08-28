@@ -32,6 +32,7 @@ type Config struct {
 	Voice              VoiceConfig       `json:"voice,omitempty"`
 	PluginDevMode      bool              `json:"plugin_dev_mode,omitempty"`
 	Proactivity        ProactivityConfig `json:"proactivity"`
+	Persona            PersonaConfig     `json:"persona"`
 }
 
 type ProviderKind string
@@ -75,6 +76,15 @@ type ProactivityConfig struct {
 	DailyLimit              int    `json:"daily_limit"`
 	CooldownMinutes         int    `json:"cooldown_minutes"`
 	AllowLocalNotifications bool   `json:"allow_local_notifications"`
+}
+
+// PersonaConfig contains owner-controlled switches for the mutable persona.
+// ProfileID is a local logical identifier, not a user or account identifier:
+// Yuri is intentionally a single-owner application.
+type PersonaConfig struct {
+	ProfileID                 string `json:"profile_id"`
+	AutoEvolution             bool   `json:"auto_evolution"`
+	ReflectionCooldownMinutes int    `json:"reflection_cooldown_minutes"`
 }
 
 // Paths contains all local roots owned by the single-user Yuri installation.
@@ -146,6 +156,9 @@ func Default(paths Paths) Config {
 			Enabled: false, QuietHoursEnabled: true, QuietHoursStart: "23:00", QuietHoursEnd: "07:00",
 			Timezone: "UTC", DailyLimit: 5, CooldownMinutes: 30, AllowLocalNotifications: true,
 		},
+		Persona: PersonaConfig{
+			ProfileID: "owner", AutoEvolution: true, ReflectionCooldownMinutes: 60,
+		},
 	}
 }
 
@@ -166,6 +179,12 @@ func Load(paths Paths) (Config, error) {
 	// backward compatibility while keeping new installations deny-by-default.
 	if strings.TrimSpace(value.Proactivity.Timezone) == "" {
 		value.Proactivity = Default(paths).Proactivity
+	}
+	// Stage 4 and older config files have no persona object. An empty local
+	// profile ID is reserved as the migration signal so an explicit false
+	// AutoEvolution setting is preserved on subsequent loads.
+	if strings.TrimSpace(value.Persona.ProfileID) == "" {
+		value.Persona = Default(paths).Persona
 	}
 	if err := value.Validate(); err != nil {
 		return Config{}, err
@@ -268,6 +287,20 @@ func (c Config) Validate() error {
 	}
 	if err := c.Proactivity.Validate(); err != nil {
 		return err
+	}
+	if err := c.Persona.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c PersonaConfig) Validate() error {
+	profileID := strings.TrimSpace(c.ProfileID)
+	if profileID == "" || strings.ContainsAny(profileID, " /\\") {
+		return fmt.Errorf("invalid local persona profile id %q", c.ProfileID)
+	}
+	if c.ReflectionCooldownMinutes < 0 || c.ReflectionCooldownMinutes > 30*24*60 {
+		return errors.New("persona reflection_cooldown_minutes must be between 0 and 43200")
 	}
 	return nil
 }

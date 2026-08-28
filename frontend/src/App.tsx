@@ -7,6 +7,7 @@ import { MemoryView } from './components/MemoryView'
 import { NotificationCenter } from './components/NotificationCenter'
 import { PluginView } from './components/PluginView'
 import { PlaceholderView } from './components/PlaceholderView'
+import { PersonaRelationshipView } from './components/PersonaRelationshipView'
 import { ProviderSettingsView } from './components/ProviderSettingsView'
 import { TasksView } from './components/TasksView'
 import { Sidebar } from './components/Sidebar'
@@ -39,6 +40,8 @@ function App() {
             <MemoryView />
           ) : activeId === 'activity' ? (
             <ActivityView />
+          ) : activeId === 'relationship' || activeId === 'personality' ? (
+            <PersonaRelationshipView key={activeId} section={activeId} />
           ) : activeId === 'plugins' ? (
             <PluginView />
           ) : activeId === 'settings' ? (

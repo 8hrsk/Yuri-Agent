@@ -311,9 +311,22 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
+	persona, err := b.repositories.Persona.Get(runContext, b.personaProfileID())
+	if err != nil {
+		return b.failChatRun(runContext, &run, emitter, err), nil
+	}
+	relationship, err := b.repositories.Relationship.Get(runContext, b.personaProfileID())
+	if err != nil {
+		return b.failChatRun(runContext, &run, emitter, err), nil
+	}
+	affect, err := b.repositories.Affect.Get(runContext, b.personaProfileID())
+	if err != nil {
+		return b.failChatRun(runContext, &run, emitter, err), nil
+	}
 	snapshot, err := assembler.Assemble(runContext, contextbuilder.Input{
 		ConversationID: conversationID, Query: request.Text,
 		ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: identitySeedSystemPrompt,
+		MutablePersona: formatMutablePersonaContext(persona), Relationship: formatRelationshipContext(relationship, affect),
 		Transcript: currentTranscript,
 	})
 	if err != nil {
@@ -340,7 +353,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	}
 	_ = b.touchConversation(runContext, conversationID, finishedAt)
 	emitter.emit(ChatEvent{Type: "run.completed", ConversationID: string(conversationID), RunID: string(runID), Status: "complete"})
-	b.reviewTurnInBackground(memoryEngine, memory.Turn{
+	b.reviewTurnInBackground(memoryEngine, backend, model, runKind == domain.RunKindInteractive, memory.Turn{
 		RunID: runID, ConversationID: conversationID, Now: finishedAt,
 		Messages: []memory.TranscriptMessage{
 			{ID: userMessageID, ConversationID: conversationID, Role: string(agent.RoleUser), Content: request.Text, CreatedAt: now},

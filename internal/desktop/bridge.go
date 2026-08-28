@@ -16,12 +16,13 @@ import (
 	"github.com/OrdoAI/yuri-agent/internal/plugins"
 	"github.com/OrdoAI/yuri-agent/internal/proactivity"
 	"github.com/OrdoAI/yuri-agent/internal/providers/codexapp"
+	"github.com/OrdoAI/yuri-agent/internal/reflection"
 	schedulerpkg "github.com/OrdoAI/yuri-agent/internal/scheduler"
 	securitykeyring "github.com/OrdoAI/yuri-agent/internal/security/keyring"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 )
 
-// Bridge is the deliberately small API exposed to the Stage 0 frontend.
+// Bridge exposes the local single-owner application services to Wails.
 type Bridge struct {
 	mu                sync.RWMutex
 	logger            *slog.Logger
@@ -38,6 +39,8 @@ type Bridge struct {
 	backgroundCancel  context.CancelFunc
 	background        sync.WaitGroup
 	modelTurns        chan struct{}
+	reflectionRuns    *reflection.Coordinator
+	reflectionGate    chan struct{}
 	shuttingDown      bool
 	pluginSupervisors map[string]*plugins.Supervisor
 	proactivity       *proactivity.Service
@@ -91,7 +94,11 @@ func NewBridge(ctx context.Context) (*Bridge, error) {
 		logger: logger, database: database, repositories: repositories, paths: paths,
 		config: value, keyring: securitykeyring.New(), activeRuns: make(map[string]context.CancelFunc),
 		approvals: make(map[string]chan bool), backgroundCtx: backgroundCtx, backgroundCancel: backgroundCancel,
-		modelTurns: make(chan struct{}, 1), pluginSupervisors: make(map[string]*plugins.Supervisor),
+		modelTurns: make(chan struct{}, 1), reflectionRuns: reflection.NewCoordinator(), reflectionGate: make(chan struct{}, 1), pluginSupervisors: make(map[string]*plugins.Supervisor),
+	}
+	if err := bridge.ensurePersonaState(ctx); err != nil {
+		database.Close()
+		return nil, fmt.Errorf("initialize persona state: %w", err)
 	}
 	service, err := proactivity.NewService(proactivitySettings(value.Proactivity), proactivity.FuncNotifier(bridge.emitNotification))
 	if err != nil {
@@ -167,9 +174,9 @@ func (b *Bridge) Shutdown(ctx context.Context) {
 	}
 }
 
-// Health is the Stage 0 bridge smoke endpoint.
+// Health is the lightweight bridge smoke endpoint.
 func (b *Bridge) Health() Status {
-	return Status{State: "ready", Version: "0.5.0-stage4", Platform: runtime.GOOS + "/" + runtime.GOARCH}
+	return Status{State: "ready", Version: "0.6.0-stage5", Platform: runtime.GOOS + "/" + runtime.GOARCH}
 }
 
 func (b *Bridge) context() (context.Context, context.CancelFunc) {

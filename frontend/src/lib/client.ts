@@ -18,6 +18,8 @@ import type {
   MemoryRecord,
   MemorySource,
   MemoryUpdate,
+  PersonaVersion,
+  PersonalitySnapshot,
   DeliveryChannel,
   JobRun,
   JobRunListOptions,
@@ -46,6 +48,21 @@ import type {
   UsageLimits,
   YuriClient,
 } from './contracts'
+import {
+  clonePersonalitySnapshot,
+  createStarterPersonalitySnapshot,
+  normalizePersonalitySnapshot,
+} from './personality'
+
+export {
+  clonePersonalitySnapshot,
+  createStarterPersonalitySnapshot,
+  defaultAffectiveState,
+  dominantAffectMood,
+  mapAvatarState,
+  normalizePersonalitySnapshot,
+  normalizeAvatarState,
+} from './personality'
 
 type UnknownRecord = Record<string, unknown>
 type BridgeMethod = (...args: unknown[]) => unknown
@@ -141,6 +158,16 @@ function subscribeRuntimeEvent(name: string, callback: (value: unknown) => void)
 export function subscribeMemoryUpdates(callback: () => void): () => void {
   return subscribeRuntimeEvent('yuri:memory', () => callback()) ?? (() => undefined)
 }
+
+/** Reflection emits a fresh, already-versioned snapshot; the renderer never mutates it locally. */
+export function subscribePersonaUpdates(callback: (snapshot: PersonalitySnapshot) => void): () => void {
+  const cleanups = ['yuri:persona', 'yuri:personality', 'yuri:relationship'].map((eventName) => subscribeRuntimeEvent(eventName, (value) => {
+    callback(normalizePersonalitySnapshot(value))
+  })).filter((cleanup): cleanup is () => void => Boolean(cleanup))
+  return () => cleanups.forEach((cleanup) => cleanup())
+}
+
+export const subscribePersonalityUpdates = subscribePersonaUpdates
 
 function normalizeNotificationType(value: unknown): YuriNotificationType {
   const type = String(value ?? '').toLowerCase().replace(/[-\s]/g, '_')
@@ -1045,6 +1072,8 @@ class MockYuriClient implements YuriClient {
   private jobRuns: JobRun[] = starterJobRuns()
   private activity: ActivityEvent[] = starterActivity()
   private proactivity: ProactivitySettings = { ...defaultProactivitySettings }
+  private personality: PersonalitySnapshot = createStarterPersonalitySnapshot()
+  private readonly personalitySeed: PersonalitySnapshot = createStarterPersonalitySnapshot()
 
   async listConversations(): Promise<Conversation[]> {
     return [...this.conversations.values()]
@@ -1415,6 +1444,83 @@ class MockYuriClient implements YuriClient {
       .map((event) => ({ ...event }))
   }
 
+  async getPersonaSnapshot(): Promise<PersonalitySnapshot> {
+    return clonePersonalitySnapshot(this.personality)
+  }
+
+  async setPersonaAutoEvolution(enabled: boolean): Promise<PersonalitySnapshot | undefined> {
+    this.personality = { ...this.personality, autoEvolution: Boolean(enabled) }
+    return this.getPersonaSnapshot()
+  }
+
+  async setPersonaTraitPinned(traitId: string, pinned: boolean): Promise<PersonalitySnapshot | undefined> {
+    const trait = this.personality.traits.find((item) => item.id === traitId)
+    if (!trait) return undefined
+    const pinnedTraits = new Set(this.personality.pinnedTraits)
+    if (pinned) pinnedTraits.add(traitId)
+    else pinnedTraits.delete(traitId)
+    this.personality = {
+      ...this.personality,
+      pinnedTraits: [...pinnedTraits],
+      traits: this.personality.traits.map((item) => item.id === traitId ? { ...item, pinned } : { ...item }),
+    }
+    return this.getPersonaSnapshot()
+  }
+
+  async rollbackPersona(versionId: string): Promise<PersonalitySnapshot | undefined> {
+    const version = this.personality.versions.find((item) => item.id === versionId || String(item.version) === versionId)
+    if (!version) return undefined
+    this.personality = {
+      ...this.personality,
+      currentVersion: version.version,
+      currentVersionId: version.id,
+      traits: version.traits.map((trait) => ({ ...trait, pinned: this.personality.pinnedTraits.includes(trait.id) })),
+      lastReflectionAt: nowIso(),
+    }
+    return this.getPersonaSnapshot()
+  }
+
+  async resetPersona(): Promise<PersonalitySnapshot | undefined> {
+    const reset = clonePersonalitySnapshot(this.personalitySeed)
+    // Keep the previous versions visible in the local preview: reset is an
+    // append-only state change, not a deletion of the persona history.
+    const resetVersion: PersonaVersion = {
+      ...reset.versions[0],
+      id: makeId('persona-reset'),
+      reason: 'Сброс к исходному identity seed.',
+      createdAt: nowIso(),
+    }
+    this.personality = {
+      ...reset,
+      versions: [...this.personality.versions, resetVersion],
+      currentVersion: resetVersion.version,
+      currentVersionId: resetVersion.id,
+      autoEvolution: this.personality.autoEvolution,
+      lastReflectionAt: nowIso(),
+    }
+    return this.getPersonaSnapshot()
+  }
+
+  async getPersonalitySnapshot(): Promise<PersonalitySnapshot> {
+    return this.getPersonaSnapshot()
+  }
+
+  async setPersonalityAutoEvolution(enabled: boolean): Promise<PersonalitySnapshot | undefined> {
+    return this.setPersonaAutoEvolution(enabled)
+  }
+
+  async setPersonalityTraitPinned(traitId: string, pinned: boolean): Promise<PersonalitySnapshot | undefined> {
+    return this.setPersonaTraitPinned(traitId, pinned)
+  }
+
+  async rollbackPersonality(versionId: string): Promise<PersonalitySnapshot | undefined> {
+    return this.rollbackPersona(versionId)
+  }
+
+  async resetPersonality(): Promise<PersonalitySnapshot | undefined> {
+    return this.resetPersona()
+  }
+
   private appendActivity(event: ActivityEvent): void {
     this.activity = [event, ...this.activity].slice(0, 100)
   }
@@ -1739,6 +1845,73 @@ class WailsYuriClient implements YuriClient {
 
   async listActivity(options: ActivityListOptions = {}): Promise<ActivityEvent[]> {
     return normalizeActivityList(await callBridge<unknown>(['ListActivity'], [options]))
+  }
+
+  async getPersonaSnapshot(): Promise<PersonalitySnapshot> {
+    const result = await callBridge<unknown>([
+      'GetPersonalitySnapshot',
+      'GetPersonaSnapshot',
+      'GetPersonality',
+      'GetPersona',
+      'GetRelationshipState',
+    ])
+    return normalizePersonalitySnapshot(result)
+  }
+
+  async setPersonaAutoEvolution(enabled: boolean): Promise<PersonalitySnapshot | undefined> {
+    const result = await callBridge<unknown>([
+      'SetPersonaAutoEvolution',
+      'SetPersonalityAutoEvolution',
+      'SavePersonaSettings',
+    ], [{ enabled, autoEvolution: enabled, auto_evolution: enabled }])
+    return result === undefined ? this.getPersonaSnapshot() : normalizePersonalitySnapshot(result)
+  }
+
+  async setPersonaTraitPinned(traitId: string, pinned: boolean): Promise<PersonalitySnapshot | undefined> {
+    const result = await callBridge<unknown>([
+      'SetPersonaTraitPinned',
+      'SetPersonalityTraitPinned',
+      'PinPersonaTrait',
+    ], [{ id: traitId, traitId, trait_id: traitId, pinned, isPinned: pinned, is_pinned: pinned }])
+    return result === undefined ? this.getPersonaSnapshot() : normalizePersonalitySnapshot(result)
+  }
+
+  async rollbackPersona(versionId: string): Promise<PersonalitySnapshot | undefined> {
+    const result = await callBridge<unknown>([
+      'RollbackPersona',
+      'RollbackPersonality',
+      'RollbackPersonaVersion',
+    ], [{ id: versionId, versionId, version_id: versionId }])
+    return result === undefined ? this.getPersonaSnapshot() : normalizePersonalitySnapshot(result)
+  }
+
+  async resetPersona(): Promise<PersonalitySnapshot | undefined> {
+    const result = await callBridge<unknown>([
+      'ResetPersona',
+      'ResetPersonality',
+      'ResetPersonaToSeed',
+    ], [{}])
+    return result === undefined ? this.getPersonaSnapshot() : normalizePersonalitySnapshot(result)
+  }
+
+  async getPersonalitySnapshot(): Promise<PersonalitySnapshot> {
+    return this.getPersonaSnapshot()
+  }
+
+  async setPersonalityAutoEvolution(enabled: boolean): Promise<PersonalitySnapshot | undefined> {
+    return this.setPersonaAutoEvolution(enabled)
+  }
+
+  async setPersonalityTraitPinned(traitId: string, pinned: boolean): Promise<PersonalitySnapshot | undefined> {
+    return this.setPersonaTraitPinned(traitId, pinned)
+  }
+
+  async rollbackPersonality(versionId: string): Promise<PersonalitySnapshot | undefined> {
+    return this.rollbackPersona(versionId)
+  }
+
+  async resetPersonality(): Promise<PersonalitySnapshot | undefined> {
+    return this.resetPersona()
   }
 
   private async runWithBridge(names: string[], request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult> {

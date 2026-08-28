@@ -277,6 +277,151 @@ export interface ActivityListOptions {
   status?: ActivityStatus | 'all'
 }
 
+/**
+ * The renderer only ever receives bounded, versioned persona state.  These
+ * contracts deliberately keep the subjective relationship model separate
+ * from factual memories and from the immutable policy layer.
+ */
+export type AvatarState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'tool_running' | 'error'
+
+export type PersonaTraitId =
+  | 'emotionality'
+  | 'jealousy'
+  | 'tsundere'
+  | 'directness'
+  | 'romance'
+  | 'topic_boundaries'
+  | 'warmth'
+  | 'curiosity'
+  | string
+
+export interface PersonaTrait {
+  id: PersonaTraitId
+  label: string
+  /** Normalized value in the inclusive 0..1 range. */
+  value: number
+  /** Reflection/UI bounds; values outside this interval are rejected by the decoder. */
+  min: number
+  max: number
+  pinned: boolean
+  description?: string
+  updatedAt?: string
+}
+
+export interface PersonaEvidence {
+  id?: string
+  sourceType: string
+  sourceId?: string
+  conversationId?: string
+  conversationTitle?: string
+  messageId?: string
+  runId?: string
+  excerpt?: string
+  excerptHash?: string
+  provenance?: string
+  weight?: number
+  userConfirmed?: boolean
+  createdAt?: string
+}
+
+export type SubjectiveLabel = 'opinion' | 'inference'
+
+export interface SubjectiveOpinion {
+  id: string
+  subject: string
+  content: string
+  /** This label is intentionally explicit so the UI cannot render an opinion as fact. */
+  label: SubjectiveLabel
+  confidence: number
+  evidence: PersonaEvidence[]
+  reason?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type AffectEmotion =
+  | 'sympathy'
+  | 'tenderness'
+  | 'joy'
+  | 'gratitude'
+  | 'boredom'
+  | 'anger'
+  | 'irritation'
+  | 'jealousy'
+  | 'resentment'
+  | 'anxiety'
+  | string
+
+export interface AffectiveDimension {
+  id: AffectEmotion
+  label: string
+  /** Intensity in the inclusive 0..1 range. */
+  value: number
+  /** Optional signed contribution, where negative values are unpleasant. */
+  valence?: number
+}
+
+export interface AffectiveState {
+  id?: string
+  version?: number
+  mood: string
+  valence: number
+  arousal: number
+  intensity: number
+  dimensions: AffectiveDimension[]
+  reason?: string
+  evidence?: PersonaEvidence[]
+  updatedAt?: string
+}
+
+export interface RelationshipDimension {
+  id: string
+  label: string
+  value: number
+}
+
+export interface RelationshipState {
+  id: string
+  version: number
+  summary: string
+  dimensions: RelationshipDimension[]
+  opinions: SubjectiveOpinion[]
+  affect: AffectiveState
+  reason?: string
+  evidence?: PersonaEvidence[]
+  updatedAt?: string
+}
+
+export interface PersonaVersion {
+  id: string
+  version: number
+  parentId?: string
+  traits: PersonaTrait[]
+  diff?: Record<string, unknown>
+  promptText?: string
+  reason: string
+  evidence: PersonaEvidence[]
+  authorRunId?: string
+  createdAt: string
+}
+
+export interface PersonalitySnapshot {
+  id: string
+  currentVersion: number
+  currentVersionId?: string
+  traits: PersonaTrait[]
+  pinnedTraits: string[]
+  opinions: SubjectiveOpinion[]
+  affect: AffectiveState
+  relationship: RelationshipState
+  versions: PersonaVersion[]
+  autoEvolution: boolean
+  lastReflectionAt?: string
+}
+
+/** Alias used by callers that use the domain term rather than the UI label. */
+export type PersonaSnapshot = PersonalitySnapshot
+
 export type YuriNotificationType = 'task.completed' | 'background.completed' | 'plugin.event' | 'rule.triggered' | 'agent.message' | 'unknown'
 
 export interface YuriNotification {
@@ -418,4 +563,15 @@ export interface YuriClient {
   getProactivitySettings(): Promise<ProactivitySettings>
   saveProactivitySettings(input: ProactivitySettings): Promise<void>
   listActivity(options?: ActivityListOptions): Promise<ActivityEvent[]>
+  getPersonaSnapshot(): Promise<PersonalitySnapshot>
+  setPersonaAutoEvolution(enabled: boolean): Promise<PersonalitySnapshot | undefined>
+  setPersonaTraitPinned(traitId: string, pinned: boolean): Promise<PersonalitySnapshot | undefined>
+  rollbackPersona(versionId: string): Promise<PersonalitySnapshot | undefined>
+  resetPersona(): Promise<PersonalitySnapshot | undefined>
+  /** Personality-named aliases keep the bridge ergonomic for external callers. */
+  getPersonalitySnapshot(): Promise<PersonalitySnapshot>
+  setPersonalityAutoEvolution(enabled: boolean): Promise<PersonalitySnapshot | undefined>
+  setPersonalityTraitPinned(traitId: string, pinned: boolean): Promise<PersonalitySnapshot | undefined>
+  rollbackPersonality(versionId: string): Promise<PersonalitySnapshot | undefined>
+  resetPersonality(): Promise<PersonalitySnapshot | undefined>
 }

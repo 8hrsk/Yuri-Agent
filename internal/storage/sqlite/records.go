@@ -81,6 +81,12 @@ type Repositories struct {
 	Audit         *AuditRepository
 	Plugins       *PluginRepository
 	Scheduler     *SchedulerRepository
+	Persona       *PersonaRepository
+	Personas      *PersonaRepository
+	Relationship  *RelationshipRepository
+	Relationships *RelationshipRepository
+	Affect        *AffectiveRepository
+	Affective     *AffectiveRepository
 }
 
 // NewRepositories constructs all repositories over one authoritative SQLite
@@ -100,6 +106,12 @@ func NewRepositories(database *sql.DB) (*Repositories, error) {
 		Audit:         NewAuditRepository(database),
 		Plugins:       NewPluginRepository(database),
 		Scheduler:     NewSchedulerRepository(database),
+		Persona:       NewPersonaRepository(database),
+		Personas:      NewPersonaRepository(database),
+		Relationship:  NewRelationshipRepository(database),
+		Relationships: NewRelationshipRepository(database),
+		Affect:        NewAffectiveRepository(database),
+		Affective:     NewAffectiveRepository(database),
 	}, nil
 }
 

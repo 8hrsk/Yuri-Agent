@@ -125,7 +125,7 @@ func memoryProvenance(sources []domain.MemorySource) string {
 
 var _ contextbuilder.Source = desktopContextSource{}
 
-func (b *Bridge) reviewTurnInBackground(engine *memory.Engine, turn memory.Turn) {
+func (b *Bridge) reviewTurnInBackground(engine *memory.Engine, backend agent.ModelBackend, model string, allowReflection bool, turn memory.Turn) {
 	if engine == nil || turn.ConversationID.Empty() {
 		return
 	}
@@ -142,7 +142,7 @@ func (b *Bridge) reviewTurnInBackground(engine *memory.Engine, turn memory.Turn)
 	b.mu.Unlock()
 	go func() {
 		defer b.background.Done()
-		ctx, cancel := context.WithTimeout(backgroundCtx, 90*time.Second)
+		ctx, cancel := context.WithTimeout(backgroundCtx, 3*time.Minute)
 		defer cancel()
 		decayed, decayErr := engine.ApplyDecay(ctx, turn.Now)
 		if decayErr != nil && b.logger != nil && ctx.Err() == nil {
@@ -166,6 +166,9 @@ func (b *Bridge) reviewTurnInBackground(engine *memory.Engine, turn memory.Turn)
 			if appContext != nil {
 				wailsruntime.EventsEmit(appContext, memoryEventName, map[string]any{"type": "memory.updated", "writes": writes})
 			}
+		}
+		if allowReflection {
+			b.reflectOnTurn(ctx, backend, model, turn)
 		}
 	}()
 }

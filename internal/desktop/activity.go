@@ -89,6 +89,8 @@ func activityKind(action string) string {
 		return "system"
 	case strings.HasPrefix(action, "memory."):
 		return "memory"
+	case strings.HasPrefix(action, "persona."), strings.HasPrefix(action, "relationship."), strings.HasPrefix(action, "affect."):
+		return "memory"
 	case strings.HasPrefix(action, "tool."):
 		return "system"
 	default:
@@ -120,6 +122,22 @@ func activityTitle(action string) string {
 		return "Уведомление отложено"
 	case "notification.suppressed":
 		return "Уведомление подавлено политикой"
+	case "persona.reflection":
+		return "Личность Yuri изменилась после рефлексии"
+	case "persona.update":
+		return "Личность Yuri изменилась"
+	case "relationship.update":
+		return "Представление Yuri об отношениях изменилось"
+	case "affect.update", "affect.event", "affect.decay":
+		return "Эмоциональное состояние Yuri изменилось"
+	case "persona.rollback":
+		return "Версия личности восстановлена"
+	case "persona.reset":
+		return "Личность сброшена к исходному профилю"
+	case "persona.trait_pin", "persona.pin":
+		return "Закрепление черты изменено"
+	case "persona.auto_evolution":
+		return "Режим автоэволюции изменён"
 	default:
 		if action == "" {
 			return "Системное событие"

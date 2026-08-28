@@ -35,6 +35,26 @@ func TestLoadBackfillsStageFourProactivityDefaults(t *testing.T) {
 	if value.Proactivity.Timezone != "UTC" || value.Proactivity.Enabled {
 		t.Fatalf("legacy config proactivity = %#v", value.Proactivity)
 	}
+	if value.Persona.ProfileID != "owner" || !value.Persona.AutoEvolution || value.Persona.ReflectionCooldownMinutes != 60 {
+		t.Fatalf("legacy config persona = %#v", value.Persona)
+	}
+}
+
+func TestPersonaConfigPersistsExplicitDisabledEvolution(t *testing.T) {
+	paths := testPaths(t)
+	value := Default(paths)
+	value.Persona.AutoEvolution = false
+	value.Persona.ReflectionCooldownMinutes = 15
+	if err := Save(paths, value); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Persona.AutoEvolution || loaded.Persona.ReflectionCooldownMinutes != 15 {
+		t.Fatalf("loaded persona = %#v", loaded.Persona)
+	}
 }
 
 func TestSaveAndLoadRoundTrip(t *testing.T) {
@@ -148,6 +168,20 @@ func TestProactivityConfigValidation(t *testing.T) {
 	value.Proactivity.Timezone = "Mars/Phobos"
 	if err := value.Validate(); err == nil {
 		t.Fatal("invalid IANA timezone was accepted")
+	}
+}
+
+func TestPersonaConfigValidation(t *testing.T) {
+	paths := testPaths(t)
+	value := Default(paths)
+	value.Persona.ProfileID = "two owners"
+	if err := value.Validate(); err == nil {
+		t.Fatal("invalid persona profile id was accepted")
+	}
+	value.Persona.ProfileID = "owner"
+	value.Persona.ReflectionCooldownMinutes = 43_201
+	if err := value.Validate(); err == nil {
+		t.Fatal("invalid reflection cooldown was accepted")
 	}
 }
 
