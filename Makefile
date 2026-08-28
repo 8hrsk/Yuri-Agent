@@ -36,7 +36,7 @@ test:
 	go test ./cmd/... ./internal/... ./sdk/... ./plugins/...
 
 mvp-smoke:
-	go test -race ./internal/smoke ./internal/desktop -run '^(TestMVPOfflineLifecycle|TestPluginPackageLifecycleSmoke|TestOpenAIProviderBridgeLifecycleSmoke)$$' -count=1
+	go test -race ./internal/smoke ./internal/desktop -run '^(TestMVPOfflineLifecycle|TestPluginPackageLifecycleSmoke|TestOpenAIProviderBridgeLifecycleSmoke|TestCodexBridgeAccountLifecycleSmoke)$$' -count=1
 
 build:
 	go build -o bin/yuri ./cmd/yuri

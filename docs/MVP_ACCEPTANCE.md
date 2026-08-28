@@ -18,15 +18,14 @@
 | 12 | Reflection не блокирует chat и не имеет tools | Automated | Coordinator/gate/model reflection tests | Включить в общий MVP smoke |
 | 13 | Persona/relationship/mood эволюция и rollback | Automated | Offline lifecycle smoke проверяет versioned persona/relationship/affect; reflection + desktop tests покрывают bounded evolution/rollback | Добавить multi-turn Bridge sequence |
 | 14 | Dormant исключён из recall, deliberate search находит эпизод | Automated | Memory engine и desktop archive tests | Включить в общий MVP smoke |
-| 15 | Codex login/logout, plan/rate limits, no token persistence | Partial | Codex app-server account/logout/rate-limit protocol tests, Settings logout UI, Wails client forwarding и durable onboarding-gate reset | Добавить единый Bridge → fake app-server smoke для login/logout/rate limits |
+| 15 | Codex login/logout, plan/rate limits, no token persistence | Automated | Race-enabled Bridge → executable fake app-server smoke проверяет device-code metadata, account/Plus plan, rate limits, provider probe, logout/onboarding reset и отсутствие unknown OAuth token canary в DTO/config/SQLite | — |
 | 16 | Antigravity безопасно сообщает unsupported | Automated | Fail-closed `internal/providers/antigravity` adapter, typed `unsupported_auth_mode`, bridge/onboarding tests без config/keyring mutation и явное unavailable-состояние UI | Пересматривать только после появления официального разрешённого vendor contract |
 | 17 | Обязательные macOS E2E smoke проходят | Partial | Universal app build/validation и Wails `OnDomReady`/clean-shutdown smoke выполняются в CI | Автоматизированный WebKit UI interaction, если появится стабильный macOS harness |
 
 ## Порядок закрытия Stage 7
 
-1. Добавить Bridge → fake Codex app-server lifecycle smoke (критерий 15); OpenAI-compatible streaming/cancel/error уже закрыт.
-2. WebKit DOM/microphone/speech automation для критериев 1, 11 и 17 остаётся отдельным harness-dependent слоем. Offline plugin lifecycle, negative leak scan, prompt-injection agent loop, voice/chat contract, Codex logout UI и unsupported Antigravity contract уже закрыты.
+1. WebKit DOM/microphone/speech automation для критериев 1, 11 и 17 остаётся отдельным harness-dependent слоем. Offline provider/Codex/plugin lifecycles, negative leak scan, prompt-injection agent loop, voice/chat contract, Codex logout UI и unsupported Antigravity contract уже закрыты.
 
 Реальные OAuth credentials, платные provider calls, Developer ID, notarization и публикация артефактов не являются условиями локального OSS smoke-набора.
 
-Текущий первый срез запускается командами `make mvp-smoke` и на macOS `make macos-launch-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app`. Первый включает race-enabled offline profile lifecycle, production-path plugin package lifecycle и Bridge → local OpenAI-compatible SSE lifecycle со streaming/cancel/error. Второй открывает собранный `.app` с изолированным profile root, ждёт Wails `OnDomReady` marker и проверяет clean shutdown; это ещё не interaction-level Wails/WebKit E2E.
+Текущий первый срез запускается командами `make mvp-smoke` и на macOS `make macos-launch-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app`. Первый включает race-enabled offline profile lifecycle, production-path plugin package lifecycle, Bridge → local OpenAI-compatible SSE lifecycle и Bridge → executable fake Codex app-server account lifecycle. Второй открывает собранный `.app` с изолированным profile root, ждёт Wails `OnDomReady` marker и проверяет clean shutdown; это ещё не interaction-level Wails/WebKit E2E.
