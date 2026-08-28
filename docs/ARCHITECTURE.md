@@ -142,7 +142,7 @@ SQLite хранит все данные, необходимые для восс�
 - schedules, job runs, plugin metadata, permission grants;
 - provider account metadata без секретов и настройки без секретов.
 
-Миграции нумеруются, выполняются транзакционно и имеют backup/rollback policy. Изменения, затрагивающие несколько таблиц (например, memory version + source + audit), коммитятся одной транзакцией.
+Миграции нумеруются, выполняются транзакционно и имеют backup/rollback policy. Перед pending migration `sqlite.Open` выполняет read-only `integrity_check`, затем создаёт owner-only (0600) consistent online snapshot через SQLite backup API. Это эфемерный raw rollback-артефакт: после успешной migration он удаляется вместе с checksum metadata, а при ошибке migration сохраняется для recovery. Такой snapshot имеет тот же at-rest exposure, что и active DB, и не является portable/encrypted backup; для переносимого backup используется отдельный encrypted export flow. Изменения, затрагивающие несколько таблиц (например, memory version + source + audit), коммитятся одной транзакцией.
 
 ### 6.2. PebbleDB и прочие производные данные
 

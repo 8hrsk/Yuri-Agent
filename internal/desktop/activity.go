@@ -87,6 +87,8 @@ func activityKind(action string) string {
 		return "proactive"
 	case strings.HasPrefix(action, "plugin."):
 		return "system"
+	case strings.HasPrefix(action, "backup."):
+		return "system"
 	case strings.HasPrefix(action, "memory."):
 		return "memory"
 	case strings.HasPrefix(action, "persona."), strings.HasPrefix(action, "relationship."), strings.HasPrefix(action, "affect."):
@@ -138,6 +140,12 @@ func activityTitle(action string) string {
 		return "Закрепление черты изменено"
 	case "persona.auto_evolution":
 		return "Режим автоэволюции изменён"
+	case "backup.create":
+		return "Создана зашифрованная резервная копия"
+	case "backup.validate":
+		return "Резервная копия проверена"
+	case "backup.restore":
+		return "Резервная копия восстановлена отдельно"
 	default:
 		if action == "" {
 			return "Системное событие"

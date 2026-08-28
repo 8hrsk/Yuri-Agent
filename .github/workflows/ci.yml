@@ -90,7 +90,7 @@ jobs:
         run: npm run build
 
   macos-foundation:
-    name: macOS foundation smoke
+    name: macOS universal release smoke
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -120,3 +120,16 @@ jobs:
       - name: Build frontend on macOS
         working-directory: frontend
         run: npm run build
+
+      - name: Build and validate unsigned universal development artifact
+        run: make macos-smoke YURI_VERSION=0.7.0
+
+      - name: Upload universal app and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: yuri-macos-universal-${{ github.sha }}
+          path: |
+            dist/macos/*.zip
+            dist/macos/*.sha256
+          if-no-files-found: error
+          retention-days: 7

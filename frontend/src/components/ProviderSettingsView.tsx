@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
 import type { CodexAccount, ProviderSettings, UsageLimits } from '../lib/contracts'
+import { EncryptedBackupCard } from './EncryptedBackupCard'
 import { Icon } from './Icon'
 
 type ProviderSettingsViewProps = {
@@ -137,7 +138,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
     <div className="settings-view">
       <div className="settings-view__topline">
         <button className="back-button" onClick={onBackToChat} type="button"><Icon name="chevron-right" width={14} height={14} /> Вернуться в Chat</button>
-        <span className="stage-pill">PROVIDER ACCESS · STAGE 1</span>
+        <span className="stage-pill">SECURE LOCAL DATA · STAGE 6</span>
       </div>
       <div className="settings-view__hero">
         <span className="welcome-card__eyebrow"><span className="eyebrow-dot" /> CONFIGURATION</span>
@@ -201,6 +202,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
           </aside>
         </div>
       )}
+      {!loading && <EncryptedBackupCard client={client} />}
       {feedback && <div className={`settings-feedback settings-feedback--${feedback.kind}`} role="status"><Icon name={feedback.kind === 'success' ? 'check' : 'warning'} width={15} height={15} /> {feedback.text}</div>}
     </div>
   )

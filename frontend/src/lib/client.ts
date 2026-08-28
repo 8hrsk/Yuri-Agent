@@ -11,6 +11,10 @@ import type {
   ChatRequest,
   CodexAccount,
   Conversation,
+  EncryptedBackupInfo,
+  EncryptedBackupInput,
+  EncryptedBackupInspectInput,
+  EncryptedBackupRestoreInput,
   MemoryContentKind,
   MemoryKind,
   MemoryLifecycleState,
@@ -97,6 +101,22 @@ const defaultProactivitySettings: ProactivitySettings = {
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+function normalizeEncryptedBackup(value: unknown): EncryptedBackupInfo | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as UnknownRecord
+  const path = optionalString(source, 'path')
+  const createdAt = optionalString(source, 'createdAt', 'created_at')
+  if (!path || !createdAt) return undefined
+  return {
+    path,
+    createdAt,
+    sizeBytes: Math.max(0, optionalNumber(source, 'sizeBytes', 'size_bytes') ?? 0),
+    blobCount: Math.max(0, Math.round(optionalNumber(source, 'blobCount', 'blob_count') ?? 0)),
+    hasConfig: normalizeBoolean(source.hasConfig ?? source.has_config, false),
+    restoredTo: optionalString(source, 'restoredTo', 'restored_to'),
+  }
 }
 
 function makeId(prefix: string): string {
@@ -1164,6 +1184,28 @@ class MockYuriClient implements YuriClient {
     return limits
   }
 
+  async createEncryptedBackup(input: EncryptedBackupInput): Promise<EncryptedBackupInfo | undefined> {
+    if (input.passphrase.length < 12) throw new Error('Пароль backup должен содержать не менее 12 символов.')
+    await sleep(220)
+    return {
+      path: input.path || '/tmp/yuri-preview.yuribackup',
+      createdAt: nowIso(),
+      sizeBytes: 4096,
+      blobCount: input.includeBlobs ? 2 : 0,
+      hasConfig: true,
+    }
+  }
+
+  async validateEncryptedBackup(input: EncryptedBackupInspectInput): Promise<EncryptedBackupInfo | undefined> {
+    if (input.passphrase.length < 12) throw new Error('Пароль backup должен содержать не менее 12 символов.')
+    return { path: input.path || '/tmp/yuri-preview.yuribackup', createdAt: nowIso(), sizeBytes: 4096, blobCount: 0, hasConfig: true }
+  }
+
+  async restoreEncryptedBackup(input: EncryptedBackupRestoreInput): Promise<EncryptedBackupInfo | undefined> {
+    const inspected = await this.validateEncryptedBackup(input)
+    return inspected ? { ...inspected, restoredTo: input.targetDirectory || '/tmp/yuri-restored-preview' } : undefined
+  }
+
   async transcribeAudio(blob: Blob): Promise<string> {
     if (blob.size === 0) throw new Error('Голосовой фрагмент пуст.')
     await sleep(180)
@@ -1717,6 +1759,18 @@ class WailsYuriClient implements YuriClient {
   async refreshCodexLimits(): Promise<UsageLimits | undefined> {
     const result = await callBridge<unknown>(['CodexRateLimits', 'RefreshCodexLimits', 'GetCodexUsage'])
     return normalizeUsageLimits(result)
+  }
+
+  async createEncryptedBackup(input: EncryptedBackupInput): Promise<EncryptedBackupInfo | undefined> {
+    return normalizeEncryptedBackup(await callBridge<unknown>(['CreateEncryptedBackup'], [input]))
+  }
+
+  async validateEncryptedBackup(input: EncryptedBackupInspectInput): Promise<EncryptedBackupInfo | undefined> {
+    return normalizeEncryptedBackup(await callBridge<unknown>(['ValidateEncryptedBackup'], [input]))
+  }
+
+  async restoreEncryptedBackup(input: EncryptedBackupRestoreInput): Promise<EncryptedBackupInfo | undefined> {
+    return normalizeEncryptedBackup(await callBridge<unknown>(['RestoreEncryptedBackup'], [input]))
   }
 
   async transcribeAudio(blob: Blob): Promise<string> {

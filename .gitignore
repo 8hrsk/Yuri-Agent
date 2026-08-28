@@ -1,5 +1,7 @@
 # Go
 /bin/
+/dist/
+/.tools/
 /plugins/reference/bin/
 /build/
 *.test

@@ -3399,6 +3399,46 @@ kbd {
   background: rgba(255, 159, 185, 0.05);
 }
 
+.backup-card {
+  margin-top: 22px;
+}
+
+.backup-card__intro {
+  max-width: 760px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.backup-card__form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
+  align-items: end;
+}
+
+.backup-card__actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.backup-card__result {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(113, 217, 165, 0.25);
+  border-radius: 12px;
+  background: rgba(113, 217, 165, 0.06);
+}
+
+.backup-card__result span {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.backup-card__result small {
+  color: var(--quiet);
+}
+
 .codex-account {
   display: grid;
   gap: 18px;
@@ -3571,7 +3611,8 @@ kbd {
 
   .provider-tabs,
   .settings-side,
-  .settings-form__row {
+  .settings-form__row,
+  .backup-card__form {
     grid-template-columns: 1fr;
   }
 

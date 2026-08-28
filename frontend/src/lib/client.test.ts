@@ -135,6 +135,45 @@ describe('Yuri client contract', () => {
     }
   })
 
+  it('forwards encrypted backup operations without persisting the passphrase in client state', async () => {
+    const calls: Array<{ name: string; input: unknown }> = []
+    const bridge = {
+      ListConversations: () => [],
+      CreateEncryptedBackup: (input: unknown) => {
+        calls.push({ name: 'create', input })
+        return { path: '/tmp/yuri.yuribackup', created_at: '2026-08-28T06:00:00Z', size_bytes: 8192, blob_count: 3, has_config: true }
+      },
+      ValidateEncryptedBackup: (input: unknown) => {
+        calls.push({ name: 'validate', input })
+        return { path: '/tmp/yuri.yuribackup', createdAt: '2026-08-28T06:00:00Z', sizeBytes: 8192, blobCount: 3, hasConfig: true }
+      },
+      RestoreEncryptedBackup: (input: unknown) => {
+        calls.push({ name: 'restore', input })
+        return { path: '/tmp/yuri.yuribackup', createdAt: '2026-08-28T06:00:00Z', sizeBytes: 8192, blobCount: 3, hasConfig: true, restoredTo: '/tmp/restored' }
+      },
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      const client = createYuriClient()
+      const request = { passphrase: 'correct horse battery staple' }
+      await expect(client.createEncryptedBackup({ ...request, includeBlobs: true })).resolves.toMatchObject({ sizeBytes: 8192, blobCount: 3, hasConfig: true })
+      await expect(client.validateEncryptedBackup(request)).resolves.toMatchObject({ path: '/tmp/yuri.yuribackup' })
+      await expect(client.restoreEncryptedBackup(request)).resolves.toMatchObject({ restoredTo: '/tmp/restored' })
+      expect(calls).toEqual([
+        { name: 'create', input: { passphrase: request.passphrase, includeBlobs: true } },
+        { name: 'validate', input: request },
+        { name: 'restore', input: request },
+      ])
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
   it('exposes durable scheduler and proactivity controls in the offline preview', async () => {
     const client = createYuriClient()
     const schedules = await client.listSchedules()

@@ -52,7 +52,7 @@ function App() {
         </div>
         <footer className="statusbar">
           <span className="statusbar__left"><span className="statusbar__pulse" /> Local-first workspace</span>
-          <span className="statusbar__right">Yuri stage 4 <Icon name="spark" width={12} height={12} /></span>
+          <span className="statusbar__right">Yuri stage 6 · release hardening <Icon name="spark" width={12} height={12} /></span>
         </footer>
       </main>
     </div>

@@ -176,7 +176,7 @@ func (b *Bridge) Shutdown(ctx context.Context) {
 
 // Health is the lightweight bridge smoke endpoint.
 func (b *Bridge) Health() Status {
-	return Status{State: "ready", Version: "0.6.0-stage5", Platform: runtime.GOOS + "/" + runtime.GOARCH}
+	return Status{State: "ready", Version: "0.7.0-stage6", Platform: runtime.GOOS + "/" + runtime.GOARCH}
 }
 
 func (b *Bridge) context() (context.Context, context.CancelFunc) {

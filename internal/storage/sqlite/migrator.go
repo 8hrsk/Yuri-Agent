@@ -76,8 +76,15 @@ func Migrations() ([]Migration, error) {
 }
 
 // Migrate applies pending migrations and rejects modified migrations that were
-// already applied. The caller owns opening the SQLite connection and backups.
+// already applied. Open performs startup integrity checks and pre-migration
+// backups; callers invoking Migrate directly own that lifecycle themselves.
 func Migrate(ctx context.Context, database *sql.DB) error {
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+	if database == nil {
+		return fmt.Errorf("sqlite database is required")
+	}
 	migrations, err := Migrations()
 	if err != nil {
 		return err
@@ -97,6 +104,9 @@ func Migrate(ctx context.Context, database *sql.DB) error {
 		return err
 	}
 	for _, migration := range migrations {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
 		if checksum, ok := applied[migration.Version]; ok {
 			if checksum != migration.Checksum {
 				if !compatibleMigrationChecksum(migration.Version, checksum) {
@@ -121,14 +131,14 @@ func Migrate(ctx context.Context, database *sql.DB) error {
 			return fmt.Errorf("begin migration %d: %w", migration.Version, err)
 		}
 		if _, err := transaction.ExecContext(ctx, migration.SQL); err != nil {
-			transaction.Rollback()
+			_ = transaction.Rollback()
 			return fmt.Errorf("apply migration %d: %w", migration.Version, err)
 		}
 		if _, err := transaction.ExecContext(ctx,
 			"INSERT INTO schema_migrations(version, name, checksum) VALUES (?, ?, ?)",
 			migration.Version, migration.Name, migration.Checksum,
 		); err != nil {
-			transaction.Rollback()
+			_ = transaction.Rollback()
 			return fmt.Errorf("record migration %d: %w", migration.Version, err)
 		}
 		if err := transaction.Commit(); err != nil {

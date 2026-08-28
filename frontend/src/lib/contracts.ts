@@ -508,6 +508,33 @@ export interface ProviderSnapshot {
   codex: CodexAccount
 }
 
+export interface EncryptedBackupInput {
+  /** Empty in Wails to request the native save dialog. */
+  path?: string
+  passphrase: string
+  includeBlobs?: boolean
+}
+
+export interface EncryptedBackupInspectInput {
+  /** Empty in Wails to request the native open dialog. */
+  path?: string
+  passphrase: string
+}
+
+export interface EncryptedBackupRestoreInput extends EncryptedBackupInspectInput {
+  /** Empty in Wails to request a separate target directory. */
+  targetDirectory?: string
+}
+
+export interface EncryptedBackupInfo {
+  path: string
+  createdAt: string
+  sizeBytes: number
+  blobCount: number
+  hasConfig: boolean
+  restoredTo?: string
+}
+
 export type ChatEvent =
   | { type: 'run.started'; runId: string }
   | { type: 'assistant.delta'; runId: string; messageId: string; delta: string }
@@ -536,6 +563,9 @@ export interface YuriClient {
   testProvider(settings: ProviderSettings): Promise<{ ok: boolean; message: string }>
   loginCodex(): Promise<CodexAccount>
   refreshCodexLimits(): Promise<UsageLimits | undefined>
+  createEncryptedBackup(input: EncryptedBackupInput): Promise<EncryptedBackupInfo | undefined>
+  validateEncryptedBackup(input: EncryptedBackupInspectInput): Promise<EncryptedBackupInfo | undefined>
+  restoreEncryptedBackup(input: EncryptedBackupRestoreInput): Promise<EncryptedBackupInfo | undefined>
   transcribeAudio(blob: Blob): Promise<string>
   getAllowedDirectories(): Promise<string[]>
   saveAllowedDirectories(directories: string[]): Promise<void>
