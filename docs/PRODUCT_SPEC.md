@@ -454,7 +454,7 @@ Cross-platform packaging, updates, backup/export, security review, fault injecti
 
 ### Этап 7. MVP stabilization and dogfooding
 
-Честная acceptance-матрица, единый offline lifecycle smoke, first-run onboarding, native Wails/WebKit interaction smoke, сквозные approval/audit проверки, завершение voice pipeline и Wails/macOS dogfooding. OSS packaging остаётся локальным/CI-путём: закреплённый Wails toolchain, universal macOS build для `arm64` + `x86_64`, проверка metadata/архитектур и SHA-256 manifest. Внешние distribution channels и credential-dependent release operations не входят в scope.
+Честная acceptance-матрица, единый offline lifecycle smoke, first-run onboarding, native Wails/WebKit onboarding/voice interaction smoke, сквозные approval/audit проверки, завершение voice pipeline и Wails/macOS dogfooding. OSS packaging остаётся локальным/CI-путём: закреплённый Wails toolchain, universal macOS build для `arm64` + `x86_64`, проверка metadata/архитектур и SHA-256 manifest. Внешние distribution channels и credential-dependent release operations не входят в scope.
 
 ## 11. Решения, которые нужно принять до реализации
 

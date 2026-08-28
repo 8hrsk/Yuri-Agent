@@ -18,6 +18,9 @@ var assets embed.FS
 //go:embed ui_smoke_onboarding.js
 var uiSmokeOnboardingScript string
 
+//go:embed ui_smoke_voice.js
+var uiSmokeVoiceScript string
+
 func main() {
 	launchSmoke, err := launchSmokeOptionsFromEnvironment()
 	if err != nil {
@@ -62,7 +65,7 @@ func main() {
 			readyResult <- launchSmoke.writeReady(bridge.Health())
 			if uiSmokeReporter != nil {
 				uiSmokeReporter.attach(ctx)
-				wailsruntime.WindowExecJS(ctx, uiSmokeOnboardingScript)
+				wailsruntime.WindowExecJS(ctx, launchSmoke.uiScript())
 			} else if launchSmoke.autoExit {
 				wailsruntime.Quit(ctx)
 			}

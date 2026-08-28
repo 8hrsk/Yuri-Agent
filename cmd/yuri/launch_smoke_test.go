@@ -72,6 +72,32 @@ func TestLaunchSmokeEnvironmentAcceptsIsolatedOnboardingUIFlow(t *testing.T) {
 	}
 }
 
+func TestLaunchSmokeEnvironmentAcceptsVoiceUIFlow(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(config.TestModeEnv, "1")
+	t.Setenv(config.TestProfileRootEnv, root)
+	t.Setenv(launchSmokeReadyFileEnv, filepath.Join(root, "ready.json"))
+	t.Setenv(uiSmokeFlowEnv, uiSmokeFlowVoice)
+	t.Setenv(uiSmokeResultFileEnv, filepath.Join(root, "ui-result.json"))
+
+	options, err := launchSmokeOptionsFromEnvironment()
+	if err != nil {
+		t.Fatalf("launchSmokeOptionsFromEnvironment() error = %v", err)
+	}
+	if options.uiFlow != uiSmokeFlowVoice || options.uiScript() != uiSmokeVoiceScript {
+		t.Fatalf("voice UI smoke options = %#v", options)
+	}
+}
+
+func TestLaunchSmokeUIScriptSelectionFailsClosed(t *testing.T) {
+	if script := (launchSmokeOptions{uiFlow: uiSmokeFlowOnboarding}).uiScript(); script != uiSmokeOnboardingScript {
+		t.Fatal("onboarding UI script was not selected")
+	}
+	if script := (launchSmokeOptions{uiFlow: "unknown"}).uiScript(); script != "" {
+		t.Fatal("unknown UI flow selected a script")
+	}
+}
+
 func TestLaunchSmokeEnvironmentRejectsIncompleteOrEscapingUIFlow(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv(config.TestModeEnv, "1")

@@ -3,13 +3,24 @@
   const steps = []
   const deadline = Date.now() + 15000
 
+  const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+
   const waitFor = async (description, predicate) => {
     while (Date.now() < deadline) {
       const value = predicate()
       if (value) return value
-      await new Promise((resolve) => window.setTimeout(resolve, 50))
+      await wait(50)
     }
     throw new Error(`Timed out waiting for ${description}`)
+  }
+  const waitForAttempt = async (predicate, milliseconds) => {
+    const attemptDeadline = Date.now() + milliseconds
+    while (Date.now() < attemptDeadline) {
+      const value = predicate()
+      if (value) return value
+      await wait(50)
+    }
+    return undefined
   }
 
   const findButton = (label) => Array.from(document.querySelectorAll('button'))
@@ -27,6 +38,19 @@
     const reporter = window.go?.main?.UISmokeReporter
     if (!reporter?.Report) throw new Error('UI smoke reporter binding is unavailable')
     await reporter.Report({ flow, state, steps, error })
+  }
+
+  const enterStableProviderStep = async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const welcome = await waitFor('welcome screen', () => findButton('Настроить провайдера'))
+      welcome.click()
+      const providerInput = await waitForAttempt(() => document.querySelector('#onboarding-base-url'), 1000)
+      if (!(providerInput instanceof HTMLInputElement)) continue
+      await wait(200)
+      const stableInput = document.querySelector('#onboarding-base-url')
+      if (stableInput instanceof HTMLInputElement) return stableInput
+    }
+    throw new Error('Provider screen did not become stable')
   }
 
   const run = async () => {
@@ -50,11 +74,9 @@
     }
 
     try {
-      const welcome = await waitFor('welcome screen', () => findButton('Настроить провайдера'))
+      await waitFor('welcome screen', () => findButton('Настроить провайдера'))
       steps.push('welcome-visible')
-      welcome.click()
-
-      const baseURL = await waitFor('provider form', () => document.querySelector('#onboarding-base-url'))
+      const baseURL = await enterStableProviderStep()
       const model = document.querySelector('#onboarding-model')
       const apiKey = document.querySelector('#onboarding-api-key')
       if (!(baseURL instanceof HTMLInputElement) || !(model instanceof HTMLInputElement) || !(apiKey instanceof HTMLInputElement)) {
@@ -65,12 +87,27 @@
       setInputValue(model, 'ui-smoke-model')
       setInputValue(apiKey, 'ui-smoke-secret-canary')
 
+      // React controlled inputs commit on the next render. Submitting in the
+      // same event-loop tick would intermittently exercise the old closure.
+      await wait(100)
+
       const submit = findButton('Сохранить и проверить')
-      if (!submit) throw new Error('Provider submit button is unavailable')
+      if (!submit) {
+        const labels = Array.from(document.querySelectorAll('button')).map((button) => button.textContent?.trim()).filter(Boolean).join(' | ')
+        throw new Error(`Provider submit button is unavailable; visible actions: ${labels}`)
+      }
       submit.click()
       steps.push('provider-submit-dispatched')
 
-      const openChat = await waitFor('onboarding success screen', () => findButton('Открыть Chat'))
+      const outcome = await waitFor('onboarding outcome', () => {
+        const openChat = findButton('Открыть Chat')
+        if (openChat) return { openChat }
+        const error = document.querySelector('.onboarding-feedback--error span')
+        return error?.textContent ? { error: error.textContent } : undefined
+      })
+      if (outcome.error) throw new Error(`Onboarding rejected the UI payload: ${outcome.error}`)
+      const openChat = outcome.openChat
+      if (!openChat) throw new Error('Onboarding success action is unavailable')
       steps.push('success-visible')
       openChat.click()
       await waitFor('chat screen', () => document.querySelector('[aria-label="Текущий диалог"]'))

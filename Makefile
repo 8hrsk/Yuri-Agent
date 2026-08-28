@@ -1,6 +1,6 @@
 .PHONY: fmt fmt-check vet test build frontend-install frontend-check frontend-build check \
 	wails-install wails-version wails-doctor macos-build macos-validate macos-package \
-	macos-checksum macos-verify macos-launch-smoke macos-ui-smoke macos-smoke mvp-smoke bench-baseline
+	macos-checksum macos-verify macos-launch-smoke macos-ui-smoke macos-voice-smoke macos-smoke mvp-smoke bench-baseline
 
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
@@ -102,6 +102,9 @@ macos-launch-smoke: macos-validate
 
 macos-ui-smoke: macos-validate
 	@"$(MACOS_LAUNCH_SMOKE)" --app "$(MACOS_APP)" --timeout "$(MACOS_LAUNCH_TIMEOUT)" --ui-flow onboarding
+
+macos-voice-smoke: macos-validate
+	@"$(MACOS_LAUNCH_SMOKE)" --app "$(MACOS_APP)" --timeout "$(MACOS_LAUNCH_TIMEOUT)" --ui-flow voice
 
 macos-smoke: macos-verify
 	@echo "macOS universal OSS artifact: $(MACOS_ARTIFACT)"

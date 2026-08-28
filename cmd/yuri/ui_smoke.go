@@ -15,12 +15,25 @@ import (
 
 const uiSmokeSecretCanary = "ui-smoke-secret-canary"
 
-var onboardingUISmokeSteps = []string{
-	"welcome-visible",
-	"provider-form-visible",
-	"provider-submit-dispatched",
-	"success-visible",
-	"chat-visible",
+var uiSmokeSteps = map[string][]string{
+	uiSmokeFlowOnboarding: {
+		"welcome-visible",
+		"provider-form-visible",
+		"provider-submit-dispatched",
+		"success-visible",
+		"chat-visible",
+	},
+	uiSmokeFlowVoice: {
+		"chat-visible",
+		"voice-boundaries-ready",
+		"recording-visible",
+		"transcribing-visible",
+		"transcript-visible",
+		"agent-thinking-visible",
+		"assistant-response-visible",
+		"tts-speaking-visible",
+		"barge-in-visible",
+	},
 }
 
 // UISmokeResult is deliberately narrow: the injected WebKit flow may report
@@ -65,21 +78,22 @@ func (reporter *UISmokeReporter) Report(result UISmokeResult) error {
 	if reporter.reported {
 		return fmt.Errorf("UI smoke result was already reported")
 	}
-	if result.Flow != reporter.flow || result.Flow != uiSmokeFlowOnboarding {
+	expectedSteps, knownFlow := uiSmokeSteps[result.Flow]
+	if result.Flow != reporter.flow || !knownFlow {
 		return fmt.Errorf("unexpected UI smoke flow %q", result.Flow)
 	}
 	if result.State != "passed" && result.State != "failed" {
 		return fmt.Errorf("unexpected UI smoke state %q", result.State)
 	}
-	if len(result.Steps) > len(onboardingUISmokeSteps) {
+	if len(result.Steps) > len(expectedSteps) {
 		return fmt.Errorf("unexpected UI smoke checkpoint count")
 	}
 	for index, step := range result.Steps {
-		if step != onboardingUISmokeSteps[index] {
+		if step != expectedSteps[index] {
 			return fmt.Errorf("unexpected UI smoke checkpoint %q", step)
 		}
 	}
-	if result.State == "passed" && len(result.Steps) != len(onboardingUISmokeSteps) {
+	if result.State == "passed" && len(result.Steps) != len(expectedSteps) {
 		return fmt.Errorf("passed UI smoke is missing checkpoints")
 	}
 	if result.State == "failed" && strings.TrimSpace(result.Error) == "" {

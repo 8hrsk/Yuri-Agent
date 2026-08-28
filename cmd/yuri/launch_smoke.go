@@ -17,6 +17,7 @@ const (
 	uiSmokeFlowEnv          = "YURI_TEST_UI_FLOW"
 	uiSmokeResultFileEnv    = "YURI_TEST_UI_RESULT_FILE"
 	uiSmokeFlowOnboarding   = "onboarding"
+	uiSmokeFlowVoice        = "voice"
 )
 
 // launchSmokeOptions is deliberately only available behind config.TestModeEnv.
@@ -38,6 +39,17 @@ func (options launchSmokeOptions) writeReady(status desktop.Status) error {
 		return nil
 	}
 	return writeLaunchSmokeReady(options.readyFile, status)
+}
+
+func (options launchSmokeOptions) uiScript() string {
+	switch options.uiFlow {
+	case uiSmokeFlowOnboarding:
+		return uiSmokeOnboardingScript
+	case uiSmokeFlowVoice:
+		return uiSmokeVoiceScript
+	default:
+		return ""
+	}
 }
 
 func launchSmokeOptionsFromEnvironment() (launchSmokeOptions, error) {
@@ -97,8 +109,8 @@ func launchSmokeOptionsFromEnvironment() (launchSmokeOptions, error) {
 		return launchSmokeOptions{}, fmt.Errorf("%s requires %s", launchSmokeAutoExitEnv, launchSmokeReadyFileEnv)
 	}
 	if uiFlowSet || uiResultSet {
-		if uiFlow != uiSmokeFlowOnboarding {
-			return launchSmokeOptions{}, fmt.Errorf("%s must be %q", uiSmokeFlowEnv, uiSmokeFlowOnboarding)
+		if uiFlow != uiSmokeFlowOnboarding && uiFlow != uiSmokeFlowVoice {
+			return launchSmokeOptions{}, fmt.Errorf("%s must be %q or %q", uiSmokeFlowEnv, uiSmokeFlowOnboarding, uiSmokeFlowVoice)
 		}
 		if uiResultFile == "" {
 			return launchSmokeOptions{}, fmt.Errorf("%s requires %s", uiSmokeFlowEnv, uiSmokeResultFileEnv)

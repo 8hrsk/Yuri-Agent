@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-  echo "usage: $0 --app PATH.app [--timeout SECONDS] [--ui-flow onboarding]" >&2
+  echo "usage: $0 --app PATH.app [--timeout SECONDS] [--ui-flow onboarding|voice]" >&2
   exit 2
 }
 
@@ -39,7 +39,7 @@ case "$timeout" in
   ''|*[!0-9]*) usage ;;
 esac
 [ "$timeout" -gt 0 ] || usage
-[ -z "$ui_flow" ] || [ "$ui_flow" = "onboarding" ] || usage
+[ -z "$ui_flow" ] || [ "$ui_flow" = "onboarding" ] || [ "$ui_flow" = "voice" ] || usage
 
 app_directory=$(cd "$(dirname "$app")" && pwd -P)
 app="$app_directory/$(basename "$app")"
@@ -157,7 +157,7 @@ if [ -n "$ui_flow" ]; then
     echo "WebKit UI flow did not finish within ${timeout}s" >&2
     exit 1
   }
-  grep -q '"flow":"onboarding"' "$ui_result_file" || {
+  grep -q "\"flow\":\"$ui_flow\"" "$ui_result_file" || {
     echo "unexpected WebKit UI flow result" >&2
     exit 1
   }
@@ -165,7 +165,12 @@ if [ -n "$ui_flow" ]; then
     echo "WebKit UI flow failed: $(sed -n '1p' "$ui_result_file")" >&2
     exit 1
   }
-  for checkpoint in welcome-visible provider-form-visible provider-submit-dispatched success-visible chat-visible; do
+  if [ "$ui_flow" = "voice" ]; then
+    checkpoints="chat-visible voice-boundaries-ready recording-visible transcribing-visible transcript-visible agent-thinking-visible assistant-response-visible tts-speaking-visible barge-in-visible"
+  else
+    checkpoints="welcome-visible provider-form-visible provider-submit-dispatched success-visible chat-visible"
+  fi
+  for checkpoint in $checkpoints; do
     grep -q "\"$checkpoint\"" "$ui_result_file" || {
       echo "WebKit UI flow is missing checkpoint: $checkpoint" >&2
       exit 1
@@ -213,7 +218,7 @@ fi
 
 echo "macOS Wails launch smoke passed: $app"
 if [ -n "$ui_flow" ]; then
-  echo "WebKit onboarding interacted successfully, Chat opened, and the application shut down cleanly"
+  echo "WebKit $ui_flow interaction passed and the application shut down cleanly"
 else
   echo "DOM ready, isolated profile created, and application shut down cleanly"
 fi

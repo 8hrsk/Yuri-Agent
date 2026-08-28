@@ -125,7 +125,7 @@ jobs:
         run: npm run build
 
       - name: Build, validate, launch, and interact with universal OSS app
-        run: make macos-smoke macos-launch-smoke macos-ui-smoke YURI_VERSION=0.7.0 MACOS_LAUNCH_TIMEOUT=20
+        run: make macos-smoke macos-launch-smoke macos-ui-smoke macos-voice-smoke YURI_VERSION=0.7.0 MACOS_LAUNCH_TIMEOUT=25
 
       - name: Upload universal OSS archive and checksum as CI artifact
         uses: actions/upload-artifact@v4

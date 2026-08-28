@@ -17,7 +17,7 @@ func TestUISmokeReporterPublishesPassedOnboardingFlow(t *testing.T) {
 	result := UISmokeResult{
 		Flow:  uiSmokeFlowOnboarding,
 		State: "passed",
-		Steps: append([]string(nil), onboardingUISmokeSteps...),
+		Steps: append([]string(nil), uiSmokeSteps[uiSmokeFlowOnboarding]...),
 	}
 	if err := reporter.Report(result); err != nil {
 		t.Fatalf("Report() error = %v", err)
@@ -31,7 +31,7 @@ func TestUISmokeReporterPublishesPassedOnboardingFlow(t *testing.T) {
 	if err := json.Unmarshal(content, &stored); err != nil {
 		t.Fatalf("decode UI result: %v", err)
 	}
-	if stored.State != "passed" || len(stored.Steps) != len(onboardingUISmokeSteps) {
+	if stored.State != "passed" || len(stored.Steps) != len(uiSmokeSteps[uiSmokeFlowOnboarding]) {
 		t.Fatalf("stored UI result = %#v", stored)
 	}
 	if strings.Contains(string(content), uiSmokeSecretCanary) {
@@ -46,6 +46,28 @@ func TestUISmokeReporterPublishesPassedOnboardingFlow(t *testing.T) {
 	}
 	if err := reporter.Report(result); err == nil {
 		t.Fatal("reporter accepted a second terminal result")
+	}
+}
+
+func TestUISmokeReporterPublishesPassedVoiceFlow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ui-result.json")
+	reporter := newUISmokeReporter(launchSmokeOptions{
+		uiFlow:       uiSmokeFlowVoice,
+		uiResultFile: path,
+	})
+	if err := reporter.Report(UISmokeResult{
+		Flow:  uiSmokeFlowVoice,
+		State: "passed",
+		Steps: append([]string(nil), uiSmokeSteps[uiSmokeFlowVoice]...),
+	}); err != nil {
+		t.Fatalf("Report() error = %v", err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), `"flow":"voice"`) || !strings.Contains(string(content), `"barge-in-visible"`) {
+		t.Fatalf("voice UI result is incomplete: %s", content)
 	}
 }
 

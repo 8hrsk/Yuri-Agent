@@ -31,13 +31,14 @@ Job `macos-foundation` в `.github/workflows/ci.yml` запускает тот �
 ```text
 make macos-launch-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app
 make macos-ui-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app
+make macos-voice-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app
 ```
 
 Оба target запускают bundle через `/usr/bin/open -n -W`, поэтому проверяется именно macOS application lifecycle, а не отдельный executable. Launch Services явно получает закрытые тестовые переменные окружения: приложение использует временный profile root, после загрузки WebKit DOM атомарно публикует readiness marker и само вызывает штатный quit. Скрипт проверяет marker, создание изолированной SQLite БД, завершение процесса и `PRAGMA query_only=ON; PRAGMA integrity_check`. Временный root удаляется после успешного и аварийного завершения; при ошибке выводится launch diagnostics.
 
-`macos-launch-smoke` остаётся быстрым lifecycle smoke с границей `OnDomReady`. `macos-ui-smoke` дополнительно подключает bridge, который существует только при явном `YURI_TEST_MODE=1` и изолированном profile root. Встроенный WebKit-сценарий ждёт React UI, нажимает welcome, заполняет provider form, отправляет typed payload, проверяет success screen и открывает Chat. Reporter принимает только фиксированную последовательность checkpoint, записывает результат с правами `0600`, маскирует canary и завершает приложение. В production launch этот bridge не bind-ится.
+`macos-launch-smoke` остаётся быстрым lifecycle smoke с границей `OnDomReady`. UI targets дополнительно подключают bridge, который существует только при явном `YURI_TEST_MODE=1` и изолированном profile root. Onboarding-сценарий ждёт React UI, нажимает welcome, заполняет provider form, отправляет typed payload, проверяет success screen и открывает Chat. Voice-сценарий проходит видимые recording/transcribing states, STT transcript, agent response, системный TTS и barge-in с повторным открытием push-to-talk. Reporter принимает только фиксированную последовательность checkpoint, записывает результат с правами `0600`, маскирует canary и завершает приложение. В production launch этот bridge не bind-ится.
 
-Provider response в UI-smoke детерминированно подменяется на renderer bridge boundary, поэтому тест не требует сети или credentials. Реальный Bridge → OpenAI-compatible HTTP/SSE lifecycle отдельно проверяется race-enabled `make mvp-smoke`. Вместе эти проверки покрывают UI interaction и production backend path без нестабильного внешнего сервиса. Smoke требует macOS interactive GUI session.
+Provider response и browser media/speech ports в UI-smoke детерминированно подменяются на test-mode boundary, поэтому тест не требует сети, credentials или доступа к реальному микрофону. Реальные Bridge → OpenAI-compatible HTTP/SSE и STT adapter lifecycles отдельно проверяются race-enabled/contract tests. Вместе эти проверки покрывают UI interaction и production backend paths без нестабильного внешнего сервиса. Smoke требует macOS interactive GUI session.
 
 Для локальной проверки уже собранного bundle можно вызвать валидатор напрямую:
 
@@ -65,3 +66,4 @@ scripts/checksum-artifact.sh --verify \
 - SHA-256 manifest создан автоматически и проходит повторную проверку.
 - Проверены onboarding, text/voice, approvals, memory, plugin crash recovery, scheduler restart и quiet hours.
 - Native WebKit onboarding smoke проходит welcome → provider → success → Chat без утечки test canary.
+- Native WebKit voice smoke проходит recording → STT → agent response → TTS → barge-in без обращения к реальному микрофону.
