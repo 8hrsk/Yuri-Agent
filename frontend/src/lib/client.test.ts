@@ -687,4 +687,75 @@ describe('Yuri client contract', () => {
       resetYuriClientForTests()
     }
   })
+
+  it('exposes bounded peer dialogues in the offline preview and can cancel a live one', async () => {
+    const client = createYuriClient()
+    const dialogues = await client.listPeerDialogues()
+
+    expect(dialogues).toHaveLength(2)
+    expect(dialogues[0]).toMatchObject({
+      id: 'peer-dialogue-briefing',
+      initiatorName: 'Юри',
+      peerName: 'Мира',
+      status: 'completed',
+      maxTurns: 1,
+      maxTokens: 1200,
+    })
+    expect(dialogues[0]?.messages[1]).toMatchObject({ senderName: 'Мира', recipientName: 'Юри' })
+
+    await client.cancelPeerDialogue('peer-dialogue-research')
+    await expect(client.listPeerDialogues()).resolves.toMatchObject([{ id: 'peer-dialogue-briefing' }, { id: 'peer-dialogue-research', status: 'cancelled' }])
+  })
+
+  it('normalizes and forwards bounded peer dialogue methods through Wails', async () => {
+    const calls: Array<{ name: string; args: unknown[] }> = []
+    const bridge = {
+      ListConversations: () => [],
+      ListPeerDialogues: (input: unknown) => {
+        calls.push({ name: 'ListPeerDialogues', args: [input] })
+        return {
+          items: [{
+            dialogue_id: 'peer-1',
+            initiator_agent_id: 'agent-yuri', initiator_name: 'Юри',
+            peer_agent_id: 'agent-mira', peer_name: 'Мира',
+            purpose: 'Сверить план.', state: 'running',
+            turn_count: 0, max_turns: 1, tokens_used: 0, max_tokens: 1200,
+            created_at: '2026-08-29T09:00:00.000Z',
+            messages: [{
+              id: 'message-1', sequence: 0, sender_agent_id: 'agent-yuri', sender_name: 'Юри',
+              recipient_agent_id: 'agent-mira', recipient_name: 'Мира', content: 'Готова?', created_at: '2026-08-29T09:00:00.000Z',
+            }],
+          }],
+        }
+      },
+      CancelPeerDialogue: (input: unknown) => { calls.push({ name: 'CancelPeerDialogue', args: [input] }) },
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      const client = createYuriClient()
+      await expect(client.listPeerDialogues({ limit: 17 })).resolves.toEqual([{
+        id: 'peer-1',
+        initiatorAgentId: 'agent-yuri', initiatorName: 'Юри',
+        peerAgentId: 'agent-mira', peerName: 'Мира', purpose: 'Сверить план.', status: 'running',
+        turnCount: 0, maxTurns: 1, tokensUsed: 0, maxTokens: 1200,
+        createdAt: '2026-08-29T09:00:00.000Z', finishedAt: undefined, failure: undefined,
+        messages: [{
+          id: 'message-1', sequence: 0, senderAgentId: 'agent-yuri', senderName: 'Юри',
+          recipientAgentId: 'agent-mira', recipientName: 'Мира', content: 'Готова?', createdAt: '2026-08-29T09:00:00.000Z',
+        }],
+      }])
+      await client.cancelPeerDialogue('peer-1')
+      expect(calls).toEqual([
+        { name: 'ListPeerDialogues', args: [{ limit: 17 }] },
+        { name: 'CancelPeerDialogue', args: [{ id: 'peer-1' }] },
+      ])
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
 })

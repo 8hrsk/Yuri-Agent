@@ -34,6 +34,7 @@ type Bridge struct {
 	appCtx            context.Context
 	codex             *codexapp.Client
 	activeRuns        map[string]context.CancelFunc
+	peerDialogueRuns  map[string]context.CancelFunc
 	approvals         map[string]chan bool
 	backgroundCtx     context.Context
 	backgroundCancel  context.CancelFunc
@@ -89,10 +90,14 @@ func NewBridge(ctx context.Context) (*Bridge, error) {
 		database.Close()
 		return nil, err
 	}
+	if err := repositories.PeerDialogues.RecoverInterrupted(ctx, time.Now().UTC(), "interrupted by application restart"); err != nil {
+		database.Close()
+		return nil, fmt.Errorf("recover peer dialogues: %w", err)
+	}
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	bridge := &Bridge{
 		logger: logger, database: database, repositories: repositories, paths: paths,
-		config: value, keyring: securitykeyring.New(), activeRuns: make(map[string]context.CancelFunc),
+		config: value, keyring: securitykeyring.New(), activeRuns: make(map[string]context.CancelFunc), peerDialogueRuns: make(map[string]context.CancelFunc),
 		approvals: make(map[string]chan bool), backgroundCtx: backgroundCtx, backgroundCancel: backgroundCancel,
 		modelTurns: make(chan struct{}, 1), reflectionRuns: reflection.NewCoordinator(), reflectionGate: make(chan struct{}, 1), pluginSupervisors: make(map[string]*plugins.Supervisor),
 	}
@@ -149,6 +154,10 @@ func (b *Bridge) Shutdown(ctx context.Context) {
 		cancel()
 	}
 	b.activeRuns = make(map[string]context.CancelFunc)
+	for _, cancel := range b.peerDialogueRuns {
+		cancel()
+	}
+	b.peerDialogueRuns = make(map[string]context.CancelFunc)
 	b.mu.Unlock()
 	if backgroundCancel != nil {
 		backgroundCancel()

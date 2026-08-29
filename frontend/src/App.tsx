@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChatView } from './components/ChatView'
 import { ActivityView } from './components/ActivityView'
 import { AgentProfileForm } from './components/AgentProfileForm'
+import { CollaborationView } from './components/CollaborationView'
 import { Icon } from './components/Icon'
 import { MemoryView } from './components/MemoryView'
 import { NotificationCenter } from './components/NotificationCenter'
@@ -132,6 +133,8 @@ function App() {
             <MemoryView key={activeAgent?.id ?? 'no-active-agent'} />
           ) : activeId === 'activity' ? (
             <ActivityView />
+          ) : activeId === 'collaboration' ? (
+            <CollaborationView key={activeAgent?.id ?? 'no-active-agent'} activeAgentId={activeAgent?.id} />
           ) : activeId === 'relationship' || activeId === 'personality' ? (
             <PersonaRelationshipView key={`${activeId}:${activeAgent?.id ?? 'no-active-agent'}`} section={activeId} />
           ) : activeId === 'plugins' ? (

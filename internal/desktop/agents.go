@@ -207,7 +207,7 @@ func agentIdentitySeed(profile domain.AgentProfile, roster []domain.AgentProfile
 		if peer.ID == profile.ID {
 			continue
 		}
-		peers = append(peers, fmt.Sprintf("- %s (%s, возраст %s)", peer.Name, peer.Gender, agentAgeLabel(peer.Age)))
+		peers = append(peers, fmt.Sprintf("- %s [agent_id=%s] (%s, возраст %s)", peer.Name, peer.ID, peer.Gender, agentAgeLabel(peer.Age)))
 	}
 	sort.Strings(peers)
 	if len(peers) == 0 {

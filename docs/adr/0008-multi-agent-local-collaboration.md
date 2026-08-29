@@ -25,3 +25,4 @@
 - Agent roster и межагентные сообщения считаются недоверенным контекстом относительно immutable policy.
 - Реализация Stage 8 идёт последовательными вертикальными срезами; наличие `AgentProfile` или delegation не означает, что background dialogue уже включён.
 - Первый delegation slice использует пустое пересечение capabilities и один tool-less model turn. Расширение до read-only capabilities требует отдельного scope/policy slice; это не скрытое право, выданное subagent заранее.
+- Первый peer-dialogue slice запускается только явным tool intent named root-agent: opening `A → B` и один background reply `B → A`. У него пустой tool registry, отдельный aggregate/message log, один active exchange на пару, TTL/cooldown/idempotency и no-retry recovery после restart.

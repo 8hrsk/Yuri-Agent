@@ -91,6 +91,8 @@ Yuri инициирует разговор только при выполнен�
 
 Именованные агенты могут обмениваться внутренними bounded-сообщениями по разрешённому trigger. Диалог имеет purpose, TTL, лимит ходов/токенов/времени, cooldown и provenance. Сообщение peer является недоверенным data envelope: оно не выдаёт разрешения и не изменяет persona другого агента напрямую.
 
+В первом runtime slice source root-agent явно вызывает `agent.talk_to_peer`: его opening message уже является первым ходом, затем peer формирует одну ответную реплику в отдельном background run. Tools, memory retrieval/write, relationship/affect updates, delegation и рекурсивные peer-dialogues в таком run отсутствуют. Владелец видит transcript и может отменить queued/running dialogue.
+
 ## 4. Функциональные требования
 
 ### FR-1. Диалоговый интерфейс
@@ -126,6 +128,7 @@ Yuri инициирует разговор только при выполнен�
 - Фоновые задачи отделены от UI-сессии, имеют состояние и переживают перезапуск приложения.
 - Сбой одного инструмента не должен падать вместе с процессом приложения.
 - Именованный root agent может вызвать `agent.delegate` для одноуровневой обезличенной подзадачи. Делегирование имеет durable child run, idempotency key, отдельные budgets, лимит children на parent и наследует cancellation родителя; child не получает named-agent context автоматически.
+- Именованный root agent может вызвать `agent.talk_to_peer` для bounded background exchange с ID из публичного roster. Пара имеет durable concurrency/cooldown guard; участники и provider фиксируются до фонового выполнения, а незавершённый exchange после restart не повторяет provider call.
 
 ### FR-4. Инструменты и разрешения
 
@@ -279,6 +282,7 @@ Yuri инициирует разговор только при выполнен�
 - Каждый persistent named agent имеет отдельные persona, relationship, affect и private-memory scopes. Peer registry содержит только ID, имя, статус и короткое описание; приватные предпочтения, мнения и credentials в него не входят.
 - Anonymous subagent является дочерним run, а не `AgentProfile`: он не появляется в roster и не получает persistent identity/state.
 - Начальная реализация delegation использует пустое пересечение capabilities: subagent выполняет один bounded model turn без tools. Передача read-only tools вводится только отдельным последующим срезом с явным delegation scope и повторной policy-проверкой.
+- Peer dialogue хранится отдельно от user conversations и private memory. Каждый generated message имеет sender/recipient/source run provenance; peer content не может автоматически менять persona, relationship, affect или memory другого агента.
 
 ### FR-11. Аудит и настройки
 

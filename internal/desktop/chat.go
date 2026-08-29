@@ -292,6 +292,12 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 		}); err != nil {
 			return b.failChatRun(runContext, &run, emitter, err), nil
 		}
+		if err := registry.Register(peerDialogueAgentTool{
+			bridge: b, backend: backend, model: model,
+			initiatorAgentID: agentID, triggerRunID: runID,
+		}); err != nil {
+			return b.failChatRun(runContext, &run, emitter, err), nil
+		}
 	}
 	runtime, err := agent.NewRuntime(backend, registry)
 	if err != nil {
@@ -952,6 +958,9 @@ func redactedToolArguments(toolID string, arguments json.RawMessage, maxBytes in
 	if toolID == delegationToolID {
 		return redactedDelegationArguments(arguments, maxBytes)
 	}
+	if toolID == peerDialogueToolID {
+		return redactedPeerDialogueArguments(arguments, maxBytes)
+	}
 	if toolID != builtintools.FilesystemWriteToolID {
 		return boundedJSONObject(arguments, maxBytes)
 	}
@@ -995,6 +1004,9 @@ func (emitter *chatEmitter) finishToolRecord(ctx context.Context, event agent.Ev
 	if event.ToolResult != nil && event.ToolResult.Metadata != nil {
 		if delegationID, ok := event.ToolResult.Metadata["delegation_id"].(string); ok && strings.TrimSpace(delegationID) != "" {
 			record.ResultRef = "delegation:" + truncateRunes(strings.TrimSpace(delegationID), 200)
+		}
+		if dialogueID, ok := event.ToolResult.Metadata["dialogue_id"].(string); ok && strings.TrimSpace(dialogueID) != "" {
+			record.ResultRef = "peer-dialogue:" + truncateRunes(strings.TrimSpace(dialogueID), 200)
 		}
 	}
 	record.Version++

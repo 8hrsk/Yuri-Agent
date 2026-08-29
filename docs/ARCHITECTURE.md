@@ -132,6 +132,8 @@ Application services открывают use cases: создать run, прин�
 
 Anonymous subagent — отдельный `RunKindSubagent` с обязательным root parent, глубиной 1 и без conversation/profile/memory namespace. `agent.delegate` передаёт ему только bounded task/context в отдельном prompt envelope. В первом срезе tool registry ребёнка пуст; durable delegation хранит principal agent, parent/child IDs, request hash, budget, lifecycle и bounded result, но не исходный prompt.
 
+Peer dialogue — отдельный aggregate между двумя существующими `AgentProfile`, а не пользовательский `Conversation`. Opening message принадлежит root run инициатора; единственная ответная реплика создаётся отдельным background run peer. Runtime не вызывает общий context assembler: получает immutable policy, identity/persona отвечающего агента, публичную identity peer и bounded transcript как untrusted data. Tool registry пуст, а запись сообщения и advancement dialogue counters выполняются атомарно.
+
 ## 6. Хранилища и восстановление
 
 ### 6.1. SQLite как authoritative store
@@ -140,7 +142,7 @@ SQLite хранит все данные, необходимые для восс�
 
 - conversations, messages и исходные transcripts;
 - именованные agent profiles и их активный selection;
-- runs, anonymous delegations, tool calls, approvals и audit metadata;
+- runs, anonymous delegations, peer dialogues/messages, tool calls, approvals и audit metadata;
 - memory versions, sources, lifecycle state и retrieval metadata;
 - relationship/affect events и persona/reflection versions;
 - schedules, job runs, plugin metadata, permission grants;

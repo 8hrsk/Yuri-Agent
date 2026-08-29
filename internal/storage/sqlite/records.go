@@ -79,17 +79,21 @@ type Repositories struct {
 	Archive       *ArchiveRepository
 	Runs          *RunRepository
 	Delegations   *DelegationRepository
-	Approvals     *ApprovalRepository
-	ToolCalls     *ToolCallRepository
-	Audit         *AuditRepository
-	Plugins       *PluginRepository
-	Scheduler     *SchedulerRepository
-	Persona       *PersonaRepository
-	Personas      *PersonaRepository
-	Relationship  *RelationshipRepository
-	Relationships *RelationshipRepository
-	Affect        *AffectiveRepository
-	Affective     *AffectiveRepository
+	PeerDialogues *PeerDialogueRepository
+	// PeerDialogueMessages is kept separate from the dialogue aggregate so
+	// callers can read bounded turns without gaining an unscoped write path.
+	PeerDialogueMessages *PeerDialogueMessageRepository
+	Approvals            *ApprovalRepository
+	ToolCalls            *ToolCallRepository
+	Audit                *AuditRepository
+	Plugins              *PluginRepository
+	Scheduler            *SchedulerRepository
+	Persona              *PersonaRepository
+	Personas             *PersonaRepository
+	Relationship         *RelationshipRepository
+	Relationships        *RelationshipRepository
+	Affect               *AffectiveRepository
+	Affective            *AffectiveRepository
 }
 
 // NewRepositories constructs all repositories over one authoritative SQLite
@@ -99,24 +103,26 @@ func NewRepositories(database *sql.DB) (*Repositories, error) {
 		return nil, fmt.Errorf("%w: database is required", domain.ErrInvalidArgument)
 	}
 	return &Repositories{
-		Agents:        NewAgentRepository(database),
-		Conversations: NewConversationRepository(database),
-		Messages:      NewMessageRepository(database),
-		Memories:      NewMemoryRepository(database),
-		Archive:       NewArchiveRepository(database),
-		Runs:          NewRunRepository(database),
-		Delegations:   NewDelegationRepository(database),
-		Approvals:     NewApprovalRepository(database),
-		ToolCalls:     NewToolCallRepository(database),
-		Audit:         NewAuditRepository(database),
-		Plugins:       NewPluginRepository(database),
-		Scheduler:     NewSchedulerRepository(database),
-		Persona:       NewPersonaRepository(database),
-		Personas:      NewPersonaRepository(database),
-		Relationship:  NewRelationshipRepository(database),
-		Relationships: NewRelationshipRepository(database),
-		Affect:        NewAffectiveRepository(database),
-		Affective:     NewAffectiveRepository(database),
+		Agents:               NewAgentRepository(database),
+		Conversations:        NewConversationRepository(database),
+		Messages:             NewMessageRepository(database),
+		Memories:             NewMemoryRepository(database),
+		Archive:              NewArchiveRepository(database),
+		Runs:                 NewRunRepository(database),
+		Delegations:          NewDelegationRepository(database),
+		PeerDialogues:        NewPeerDialogueRepository(database),
+		PeerDialogueMessages: NewPeerDialogueMessageRepository(database),
+		Approvals:            NewApprovalRepository(database),
+		ToolCalls:            NewToolCallRepository(database),
+		Audit:                NewAuditRepository(database),
+		Plugins:              NewPluginRepository(database),
+		Scheduler:            NewSchedulerRepository(database),
+		Persona:              NewPersonaRepository(database),
+		Personas:             NewPersonaRepository(database),
+		Relationship:         NewRelationshipRepository(database),
+		Relationships:        NewRelationshipRepository(database),
+		Affect:               NewAffectiveRepository(database),
+		Affective:            NewAffectiveRepository(database),
 	}, nil
 }
 
@@ -206,6 +212,9 @@ func translateSQLError(err error) error {
 		return domain.ErrNotFound
 	}
 	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "peer dialogue pair is in cooldown") {
+		return domain.ErrConflict
+	}
 	if strings.Contains(message, "unique constraint") ||
 		strings.Contains(message, "constraint failed") && strings.Contains(message, "unique") {
 		return domain.ErrConflict

@@ -261,6 +261,46 @@ export interface JobRunListOptions {
   limit?: number
 }
 
+/**
+ * A bounded background conversation between two named agents. The backend
+ * keeps this separate from user-facing chat transcripts so the UI can show
+ * provenance without exposing private context or hidden reasoning.
+ */
+export type PeerDialogueStatus = 'queued' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled' | 'expired' | 'unknown'
+
+export interface PeerDialogueMessage {
+  id: string
+  sequence: number
+  senderAgentId: string
+  senderName: string
+  recipientAgentId: string
+  recipientName: string
+  content: string
+  createdAt: string
+}
+
+export interface PeerDialogue {
+  id: string
+  initiatorAgentId: string
+  initiatorName: string
+  peerAgentId: string
+  peerName: string
+  purpose: string
+  status: PeerDialogueStatus
+  turnCount: number
+  maxTurns: number
+  tokensUsed: number
+  maxTokens: number
+  createdAt: string
+  finishedAt?: string
+  failure?: string
+  messages: PeerDialogueMessage[]
+}
+
+export interface PeerDialogueListOptions {
+  limit?: number
+}
+
 export interface ProactivitySettings {
   enabled: boolean
   quietHoursEnabled: boolean
@@ -661,6 +701,8 @@ export interface YuriClient {
   cancelJobRun(runId: string): Promise<JobRun | undefined>
   deleteSchedule(scheduleId: string): Promise<void>
   listJobRuns(options?: JobRunListOptions): Promise<JobRun[]>
+  listPeerDialogues(options?: PeerDialogueListOptions): Promise<PeerDialogue[]>
+  cancelPeerDialogue(dialogueId: string): Promise<void>
   getProactivitySettings(): Promise<ProactivitySettings>
   saveProactivitySettings(input: ProactivitySettings): Promise<void>
   listActivity(options?: ActivityListOptions): Promise<ActivityEvent[]>

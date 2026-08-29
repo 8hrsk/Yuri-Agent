@@ -46,6 +46,10 @@ import type {
   ProviderSettings,
   ProviderSnapshot,
   ProviderTestResult,
+  PeerDialogue,
+  PeerDialogueListOptions,
+  PeerDialogueMessage,
+  PeerDialogueStatus,
   RunResult,
   Schedule,
   ScheduleBudget,
@@ -903,6 +907,83 @@ function normalizeJobRunList(value: unknown): JobRun[] {
     : []
 }
 
+function normalizePeerDialogueStatus(value: unknown): PeerDialogueStatus {
+  const status = String(value ?? '').toLowerCase().replace(/[-\s]/g, '_')
+  if (status === 'queued' || status === 'pending') return 'queued'
+  if (status === 'running' || status === 'started' || status === 'active') return 'running'
+  if (status === 'cancelling' || status === 'canceling' || status === 'stopping') return 'cancelling'
+  if (status === 'completed' || status === 'complete' || status === 'success' || status === 'succeeded') return 'completed'
+  if (status === 'failed' || status === 'error' || status === 'failure') return 'failed'
+  if (status === 'cancelled' || status === 'canceled' || status === 'aborted') return 'cancelled'
+  if (status === 'expired' || status === 'timeout' || status === 'timed_out') return 'expired'
+  return 'unknown'
+}
+
+function normalizePeerDialogueMessage(value: unknown): PeerDialogueMessage | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as UnknownRecord
+  const id = optionalString(raw, 'id', 'messageId', 'message_id')
+  if (!id) return undefined
+  return {
+    id,
+    sequence: Math.max(0, Math.round(optionalNumber(raw, 'sequence', 'index', 'turn') ?? 0)),
+    senderAgentId: optionalString(raw, 'senderAgentId', 'sender_agent_id', 'senderId', 'sender_id') ?? '',
+    senderName: optionalString(raw, 'senderName', 'sender_name') ?? 'Агент',
+    recipientAgentId: optionalString(raw, 'recipientAgentId', 'recipient_agent_id', 'recipientId', 'recipient_id') ?? '',
+    recipientName: optionalString(raw, 'recipientName', 'recipient_name') ?? 'Агент',
+    content: String(raw.content ?? raw.text ?? raw.message ?? ''),
+    createdAt: optionalString(raw, 'createdAt', 'created_at', 'timestamp') ?? nowIso(),
+  }
+}
+
+function normalizePeerDialogue(value: unknown): PeerDialogue | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const rawValue = value as UnknownRecord
+  const source = rawValue.dialogue && typeof rawValue.dialogue === 'object'
+    ? rawValue.dialogue as UnknownRecord
+    : rawValue
+  const id = optionalString(source, 'id', 'dialogueId', 'dialogue_id')
+  const initiatorAgentId = optionalString(source, 'initiatorAgentId', 'initiator_agent_id', 'initiatorId', 'initiator_id')
+  const peerAgentId = optionalString(source, 'peerAgentId', 'peer_agent_id', 'peerId', 'peer_id')
+  if (!id || !initiatorAgentId || !peerAgentId) return undefined
+  const rawMessages = source.messages ?? source.transcript
+  const messages = Array.isArray(rawMessages)
+    ? rawMessages.map(normalizePeerDialogueMessage).filter((item): item is PeerDialogueMessage => Boolean(item)).sort((a, b) => a.sequence - b.sequence)
+    : []
+  return {
+    id,
+    initiatorAgentId,
+    initiatorName: optionalString(source, 'initiatorName', 'initiator_name') ?? 'Агент',
+    peerAgentId,
+    peerName: optionalString(source, 'peerName', 'peer_name') ?? 'Агент',
+    purpose: optionalString(source, 'purpose', 'goal', 'summary') ?? 'Внутренний диалог',
+    status: normalizePeerDialogueStatus(source.status ?? source.state),
+    turnCount: Math.max(0, Math.round(optionalNumber(source, 'turnCount', 'turn_count', 'turns') ?? messages.length)),
+    maxTurns: Math.max(0, Math.round(optionalNumber(source, 'maxTurns', 'max_turns', 'turnLimit', 'turn_limit') ?? 0)),
+    tokensUsed: Math.max(0, Math.round(optionalNumber(source, 'tokensUsed', 'tokens_used', 'usedTokens', 'used_tokens') ?? 0)),
+    maxTokens: Math.max(0, Math.round(optionalNumber(source, 'maxTokens', 'max_tokens', 'tokenLimit', 'token_limit') ?? 0)),
+    createdAt: optionalString(source, 'createdAt', 'created_at', 'timestamp') ?? nowIso(),
+    finishedAt: optionalString(source, 'finishedAt', 'finished_at', 'completedAt', 'completed_at'),
+    failure: optionalString(source, 'failure', 'error', 'lastError', 'last_error'),
+    messages,
+  }
+}
+
+function normalizePeerDialogueList(value: unknown): PeerDialogue[] {
+  const rawItems = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object'
+      ? ((value as UnknownRecord).items
+        ?? (value as UnknownRecord).dialogues
+        ?? (value as UnknownRecord).peerDialogues
+        ?? (value as UnknownRecord).peer_dialogues
+        ?? (value as UnknownRecord).results)
+      : undefined
+  return Array.isArray(rawItems)
+    ? rawItems.map(normalizePeerDialogue).filter((item): item is PeerDialogue => Boolean(item))
+    : []
+}
+
 function normalizeActivityType(value: unknown): ActivityType {
   const type = String(value ?? '').toLowerCase().replace(/[-\s]/g, '_')
   if (type === 'job' || type === 'job_run' || type === 'schedule' || type === 'scheduler') return 'job'
@@ -1029,6 +1110,13 @@ function cloneConversation(conversation: Conversation): Conversation {
   }
 }
 
+function clonePeerDialogue(dialogue: PeerDialogue): PeerDialogue {
+  return {
+    ...dialogue,
+    messages: dialogue.messages.map((message) => ({ ...message })),
+  }
+}
+
 function starterConversation(): Conversation {
   const createdAt = nowIso()
   return {
@@ -1139,6 +1227,75 @@ function starterActivity(): ActivityEvent[] {
   ]
 }
 
+function starterPeerDialogues(): PeerDialogue[] {
+  const now = Date.now()
+  return [
+    {
+      id: 'peer-dialogue-briefing',
+      initiatorAgentId: 'agent-yuri',
+      initiatorName: 'Юри',
+      peerAgentId: 'agent-mira',
+      peerName: 'Мира',
+      purpose: 'Проверить, как лучше структурировать утреннюю сводку.',
+      status: 'completed',
+      turnCount: 1,
+      maxTurns: 1,
+      tokensUsed: 486,
+      maxTokens: 1200,
+      createdAt: new Date(now - 1000 * 60 * 18).toISOString(),
+      finishedAt: new Date(now - 1000 * 60 * 17).toISOString(),
+      messages: [
+        {
+          id: 'peer-dialogue-briefing-message-0',
+          sequence: 0,
+          senderAgentId: 'agent-yuri',
+          senderName: 'Юри',
+          recipientAgentId: 'agent-mira',
+          recipientName: 'Мира',
+          content: 'Как лучше подать пользователю короткую утреннюю сводку?',
+          createdAt: new Date(now - 1000 * 60 * 18).toISOString(),
+        },
+        {
+          id: 'peer-dialogue-briefing-message-1',
+          sequence: 1,
+          senderAgentId: 'agent-mira',
+          senderName: 'Мира',
+          recipientAgentId: 'agent-yuri',
+          recipientName: 'Юри',
+          content: 'Сначала три самых важных пункта, затем задачи с дедлайнами и отдельный блок для того, что требует решения пользователя.',
+          createdAt: new Date(now - 1000 * 60 * 17).toISOString(),
+        },
+      ],
+    },
+    {
+      id: 'peer-dialogue-research',
+      initiatorAgentId: 'agent-yuri',
+      initiatorName: 'Юри',
+      peerAgentId: 'agent-mira',
+      peerName: 'Мира',
+      purpose: 'Сверить план небольшого исследования.',
+      status: 'running',
+      turnCount: 0,
+      maxTurns: 1,
+      tokensUsed: 0,
+      maxTokens: 1200,
+      createdAt: new Date(now - 1000 * 32).toISOString(),
+      messages: [
+        {
+          id: 'peer-dialogue-research-message-0',
+          sequence: 0,
+          senderAgentId: 'agent-yuri',
+          senderName: 'Юри',
+          recipientAgentId: 'agent-mira',
+          recipientName: 'Мира',
+          content: 'Проверь, не слишком ли широкая цель исследования и какие источники лучше взять первыми.',
+          createdAt: new Date(now - 1000 * 32).toISOString(),
+        },
+      ],
+    },
+  ]
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, ms))
 }
@@ -1169,6 +1326,7 @@ class MockYuriClient implements YuriClient {
   private schedules: Schedule[] = [starterSchedule()]
   private jobRuns: JobRun[] = starterJobRuns()
   private activity: ActivityEvent[] = starterActivity()
+  private peerDialogues: PeerDialogue[] = starterPeerDialogues()
   private proactivity: ProactivitySettings = { ...defaultProactivitySettings }
   private personality: PersonalitySnapshot = createStarterPersonalitySnapshot()
   private readonly personalitySeed: PersonalitySnapshot = createStarterPersonalitySnapshot()
@@ -1628,6 +1786,37 @@ class MockYuriClient implements YuriClient {
       .filter((run) => !options.scheduleId || run.scheduleId === options.scheduleId)
       .slice(0, limit)
       .map((run) => ({ ...run }))
+  }
+
+  async listPeerDialogues(options: PeerDialogueListOptions = {}): Promise<PeerDialogue[]> {
+    const limit = Math.max(1, Math.min(100, Math.round(options.limit ?? 50)))
+    const active = this.activeAgentId ? this.agents.get(this.activeAgentId) : undefined
+    const dialogues = this.peerDialogues.map((dialogue) => {
+      if (!active) return clonePeerDialogue(dialogue)
+      return {
+        ...dialogue,
+        initiatorAgentId: active.id,
+        initiatorName: active.name,
+        messages: dialogue.messages.map((message) => ({
+          ...message,
+          senderAgentId: message.senderAgentId === dialogue.initiatorAgentId ? active.id : message.senderAgentId,
+          senderName: message.senderAgentId === dialogue.initiatorAgentId ? active.name : message.senderName,
+          recipientAgentId: message.recipientAgentId === dialogue.initiatorAgentId ? active.id : message.recipientAgentId,
+          recipientName: message.recipientAgentId === dialogue.initiatorAgentId ? active.name : message.recipientName,
+        })),
+      }
+    })
+    return dialogues.slice(0, limit).map(clonePeerDialogue)
+  }
+
+  async cancelPeerDialogue(dialogueId: string): Promise<void> {
+    const current = this.peerDialogues.find((dialogue) => dialogue.id === dialogueId)
+    if (!current) throw new Error('Диалог агентов не найден.')
+    if (current.status !== 'queued' && current.status !== 'running') return
+    const finishedAt = nowIso()
+    this.peerDialogues = this.peerDialogues.map((dialogue) => dialogue.id === dialogueId
+      ? { ...dialogue, status: 'cancelled', finishedAt, failure: 'Остановлено пользователем.' }
+      : dialogue)
   }
 
   async getProactivitySettings(): Promise<ProactivitySettings> {
@@ -2149,6 +2338,14 @@ class WailsYuriClient implements YuriClient {
 
   async listJobRuns(options: JobRunListOptions = {}): Promise<JobRun[]> {
     return normalizeJobRunList(await callBridge<unknown>(['ListJobRuns'], [options]))
+  }
+
+  async listPeerDialogues(options: PeerDialogueListOptions = {}): Promise<PeerDialogue[]> {
+    return normalizePeerDialogueList(await callBridge<unknown>(['ListPeerDialogues'], [options]))
+  }
+
+  async cancelPeerDialogue(dialogueId: string): Promise<void> {
+    await callBridge(['CancelPeerDialogue'], [{ id: dialogueId }])
   }
 
   async getProactivitySettings(): Promise<ProactivitySettings> {

@@ -8,6 +8,7 @@ describe('navigation shell', () => {
       'chat',
       'tasks',
       'memory',
+      'collaboration',
       'relationship',
       'personality',
       'plugins',
@@ -18,7 +19,7 @@ describe('navigation shell', () => {
 
   it('groups workspace and system destinations', () => {
     expect(navGroups.map((group) => [group.id, group.items.length])).toEqual([
-      ['workspace', 5],
+      ['workspace', 6],
       ['system', 3],
     ])
   })

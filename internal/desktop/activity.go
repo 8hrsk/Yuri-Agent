@@ -85,6 +85,8 @@ func activityKind(action string) string {
 		return "job"
 	case strings.HasPrefix(action, "delegation."):
 		return "job"
+	case strings.HasPrefix(action, "peer_dialogue."):
+		return "job"
 	case strings.HasPrefix(action, "notification."), strings.HasPrefix(action, "proactivity."):
 		return "proactive"
 	case strings.HasPrefix(action, "plugin."):
@@ -130,6 +132,18 @@ func activityTitle(action string) string {
 		return "Субагент завершился с ошибкой"
 	case "delegation.cancelled":
 		return "Субагент остановлен"
+	case "peer_dialogue.queued":
+		return "Межагентный диалог поставлен в очередь"
+	case "peer_dialogue.started":
+		return "Агенты начали внутренний диалог"
+	case "peer_dialogue.completed":
+		return "Внутренний диалог агентов завершён"
+	case "peer_dialogue.failed":
+		return "Внутренний диалог завершился с ошибкой"
+	case "peer_dialogue.cancelled":
+		return "Внутренний диалог остановлен"
+	case "peer_dialogue.expired":
+		return "Время внутреннего диалога истекло"
 	case "notification.sent":
 		return "Отправлено уведомление"
 	case "notification.deferred":
@@ -174,20 +188,32 @@ func activityStatus(action, decision string) string {
 		return "running"
 	case "delegation.created":
 		return "queued"
+	case "peer_dialogue.queued":
+		return "queued"
 	case "delegation.started":
+		return "running"
+	case "peer_dialogue.started":
 		return "running"
 	case "job.completed", "notification.sent":
 		return "completed"
 	case "delegation.completed":
 		return "completed"
+	case "peer_dialogue.completed":
+		return "completed"
 	case "job.failed", "notification.failed":
 		return "failed"
 	case "delegation.failed":
+		return "failed"
+	case "peer_dialogue.failed":
 		return "failed"
 	case "job.cancelled":
 		return "cancelled"
 	case "delegation.cancelled":
 		return "cancelled"
+	case "peer_dialogue.cancelled":
+		return "cancelled"
+	case "peer_dialogue.expired":
+		return "skipped"
 	case "job.skipped", "notification.deferred", "notification.suppressed":
 		return "skipped"
 	}

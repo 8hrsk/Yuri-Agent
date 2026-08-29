@@ -40,6 +40,14 @@ const viewCopy: Record<NavItem['id'], ViewCopy> = {
     metric: '—',
     metricLabel: 'сохранённых записей',
   },
+  collaboration: {
+    overline: 'Workspace',
+    title: 'Collaboration',
+    description: 'Фоновые диалоги между именованными агентами появятся здесь после запуска collaboration backend.',
+    detail: 'Peer dialogue service · planned',
+    metric: '—',
+    metricLabel: 'диалогов агентов',
+  },
   relationship: {
     overline: 'Workspace',
     title: 'Relationship',
