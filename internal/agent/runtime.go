@@ -215,7 +215,7 @@ func (r *Runtime) consumeInteractiveStream(
 		case ModelEventStarted, ModelEventCompleted:
 		case ModelEventTextDelta:
 			textBuilder.WriteString(event.Delta)
-			if err := emit(ctx, input.Sink, Event{Type: EventModelTextDelta, RunID: input.RunID, Step: step, Text: event.Delta, Usage: event.Usage}); err != nil {
+			if err := emit(ctx, input.Sink, Event{Type: EventModelTextDelta, RunID: input.RunID, Step: step, ResponseID: event.ResponseID, Text: event.Delta, Usage: event.Usage}); err != nil {
 				return "", executed, usage, err
 			}
 		case ModelEventToolCallStarted, ModelEventToolCallDelta, ModelEventToolCallDone:
@@ -316,7 +316,7 @@ func (r *Runtime) consumeStream(ctx context.Context, input RunRequest, stream Mo
 		case ModelEventStarted:
 		case ModelEventTextDelta:
 			textBuilder.WriteString(event.Delta)
-			if err := emit(ctx, input.Sink, Event{Type: EventModelTextDelta, RunID: input.RunID, Step: step, Text: event.Delta, Usage: event.Usage}); err != nil {
+			if err := emit(ctx, input.Sink, Event{Type: EventModelTextDelta, RunID: input.RunID, Step: step, ResponseID: event.ResponseID, Text: event.Delta, Usage: event.Usage}); err != nil {
 				return "", nil, usage, err
 			}
 		case ModelEventToolCallStarted:

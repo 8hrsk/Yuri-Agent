@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   aggregateChatEvent,
   normalizeRunTrace,
+  splitRunTraceForTimeline,
   sortRunTraces,
 } from './chat-trace'
 import type { RunTrace } from './contracts'
@@ -83,5 +84,22 @@ describe('chat execution trace', () => {
       makeTrace('earlier', '2026-08-29T10:00:00Z'),
     ])
     expect(sorted.map((trace) => trace.id)).toEqual(['earlier', 'same-second-b', 'same-second-a', 'later'])
+  })
+
+  it('splits a run into one thinking block and one block per tool call', () => {
+    const trace = normalizeRunTrace({
+      id: 'trace-1', runId: 'run-1', status: 'completed',
+      startedAt: '2026-08-29T03:00:00Z', finishedAt: '2026-08-29T03:00:05Z',
+      toolCalls: [
+        { id: 'call-1', name: 'filesystem.read', status: 'completed', startedAt: '2026-08-29T03:00:02Z', finishedAt: '2026-08-29T03:00:03Z' },
+        { id: 'call-2', name: 'filesystem.read', status: 'completed', startedAt: '2026-08-29T03:00:04Z', finishedAt: '2026-08-29T03:00:05Z' },
+      ],
+    })
+    const fragments = splitRunTraceForTimeline(trace!)
+    expect(fragments).toHaveLength(3)
+    expect(fragments.map((fragment) => fragment.steps.some((step) => step.kind === 'tool'))).toEqual([false, true, true])
+    expect(fragments.map((fragment) => fragment.startedAt)).toEqual([
+      '2026-08-29T03:00:00Z', '2026-08-29T03:00:02Z', '2026-08-29T03:00:04Z',
+    ])
   })
 })

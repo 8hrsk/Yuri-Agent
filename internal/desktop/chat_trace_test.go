@@ -7,11 +7,51 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OrdoAI/yuri-agent/internal/agent"
 	"github.com/OrdoAI/yuri-agent/internal/config"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 	builtintools "github.com/OrdoAI/yuri-agent/internal/tools"
 )
+
+func TestChatEmitterSplitsAssistantMessagesByProviderItemAndToolBoundary(t *testing.T) {
+	emitter := newChatEmitter(&Bridge{}, "conversation", "run", "message-first")
+	if err := emitter.Sink(context.Background(), agent.Event{
+		Type: agent.EventModelTextDelta, ResponseID: "item-1", Text: "Сначала посмотрю.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if completed := emitter.closeAssistantSegment(); completed != "message-first" {
+		t.Fatalf("completed message = %q", completed)
+	}
+	if err := emitter.Sink(context.Background(), agent.Event{
+		Type: agent.EventModelTextDelta, ResponseID: "item-2", Text: "Нашла файл.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := emitter.Sink(context.Background(), agent.Event{
+		Type: agent.EventModelTextDelta, ResponseID: "item-3", Text: "Вот содержимое.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	segments := emitter.AssistantSegments()
+	if len(segments) != 3 {
+		t.Fatalf("segments = %#v", segments)
+	}
+	if segments[0].Content != "Сначала посмотрю." || segments[1].Content != "Нашла файл." || segments[2].Content != "Вот содержимое." {
+		t.Fatalf("segment contents = %#v", segments)
+	}
+	events := emitter.Events()
+	completed := 0
+	for _, event := range events {
+		if event.Type == "assistant.completed" {
+			completed++
+		}
+	}
+	if completed != 1 {
+		t.Fatalf("automatic completion events = %d, want one provider item transition", completed)
+	}
+}
 
 func TestRunTraceViewRestoresRedactedToolHistory(t *testing.T) {
 	ctx := context.Background()

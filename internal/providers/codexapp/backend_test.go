@@ -43,6 +43,24 @@ func TestCodexModelStreamIgnoresRetryableError(t *testing.T) {
 	}
 }
 
+func TestCodexModelStreamPreservesAgentMessageItemID(t *testing.T) {
+	events := make(chan Event, 1)
+	stream := &codexModelStream{events: events, threadID: "thread", turnID: "turn"}
+	events <- Event{
+		Method: "item/agentMessage/delta",
+		Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","itemId":"message-item-2","delta":"После tool call"}`),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	event, err := stream.Recv(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != agent.ModelEventTextDelta || event.ResponseID != "message-item-2" || event.Delta != "После tool call" {
+		t.Fatalf("model event = %#v", event)
+	}
+}
+
 func TestCodexModelStreamNormalizesDynamicToolCallAndResponds(t *testing.T) {
 	events := make(chan Event, 1)
 	writer := &recordingWriteCloser{}

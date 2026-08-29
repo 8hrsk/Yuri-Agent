@@ -271,6 +271,7 @@ type Event struct {
 	Type       EventType   `json:"type"`
 	RunID      domain.ID   `json:"run_id,omitempty"`
 	Step       int         `json:"step,omitempty"`
+	ResponseID string      `json:"response_id,omitempty"`
 	Text       string      `json:"text,omitempty"`
 	ToolCall   *ToolCall   `json:"tool_call,omitempty"`
 	ToolResult *ToolResult `json:"tool_result,omitempty"`

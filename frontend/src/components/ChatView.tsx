@@ -13,7 +13,7 @@ import type {
   RunStatus,
   ToolCall,
 } from '../lib/contracts'
-import { aggregateChatEvent, approvalStatusLabel, runStatusLabel, toolStatusLabel } from '../lib/chat-trace'
+import { aggregateChatEvent, approvalStatusLabel, runStatusLabel, splitRunTraceForTimeline, toolStatusLabel } from '../lib/chat-trace'
 import { mapAvatarState } from '../lib/personality'
 import { loadAutoSpeakPreference, saveAutoSpeakPreference } from '../lib/voice'
 import { useTTS, useVoice } from '../hooks/useVoice'
@@ -159,13 +159,14 @@ function TraceStepCard({ step }: { step: RunTraceStep }) {
 function ExecutionTrace({ trace }: { trace: RunTrace }) {
   const toolCount = trace.steps.filter((step) => step.kind === 'tool').length
   const waiting = trace.status === 'waiting_approval'
+  const thinkingOnly = toolCount === 0 && trace.steps.every((step) => step.kind === 'thinking')
   return (
     <details className={`run-trace run-trace--${trace.status}`}>
       <summary className="run-trace__summary">
         <span className="run-trace__mark"><Icon name={waiting ? 'shield' : 'activity'} width={14} height={14} /></span>
         <span className="run-trace__heading">
-          <strong>Выполнение</strong>
-          <small>{toolCount > 0 ? `${toolCount} ${toolCount === 1 ? 'tool-вызов' : 'tool-вызова'}` : 'Без вызовов tools'}</small>
+          <strong>{thinkingOnly ? 'Thinking' : 'Выполнение'}</strong>
+          <small>{thinkingOnly ? 'Обработка запроса' : `${toolCount} ${toolCount === 1 ? 'tool-вызов' : 'tool-вызова'}`}</small>
         </span>
         <span className="run-trace__status">{traceStatusCopy(trace)}</span>
         <Icon name="chevron-right" width={14} height={14} />
@@ -346,13 +347,14 @@ export function ChatView({ agentName, backend, onOpenSettings }: ChatViewProps) 
 
   const selectedConversation = conversations.find((conversation) => conversation.id === selectedId)
   const lastMessageContent = selectedConversation?.messages.at(-1)?.content
+  const lastTraceUpdate = selectedConversation?.traces?.at(-1)?.updatedAt
   const timeline = useMemo<ChatTimelineEntry[]>(() => {
     if (!selectedConversation) return []
     const entries: ChatTimelineEntry[] = [
       ...selectedConversation.messages
         .filter((message) => message.role !== 'tool')
         .map((message) => ({ kind: 'message' as const, message })),
-      ...(selectedConversation.traces ?? []).map((trace) => ({ kind: 'trace' as const, trace })),
+      ...(selectedConversation.traces ?? []).flatMap(splitRunTraceForTimeline).map((trace) => ({ kind: 'trace' as const, trace })),
     ]
     return entries.sort((left, right) => timelineTime(left) - timelineTime(right) || timelinePriority(left) - timelinePriority(right))
   }, [selectedConversation])
@@ -399,7 +401,7 @@ export function ChatView({ agentName, backend, onOpenSettings }: ChatViewProps) 
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [selectedConversation?.messages.length, selectedConversation?.traces?.length, lastMessageContent])
+  }, [selectedConversation?.messages.length, selectedConversation?.traces?.length, lastMessageContent, lastTraceUpdate])
 
   useEffect(() => {
     const blob = voiceBlob

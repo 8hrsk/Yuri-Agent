@@ -395,6 +395,68 @@ export function sortRunTraces(traces: RunTrace[]): RunTrace[] {
     .map(({ trace }) => trace)
 }
 
+/**
+ * Turn one run-wide audit trace into the small chronological blocks rendered
+ * between assistant response segments. Every tool call gets its own block;
+ * the terminal marker is omitted because the final response already conveys
+ * completion in the conversation flow.
+ */
+export function splitRunTraceForTimeline(trace: RunTrace): RunTrace[] {
+  const fragments: RunTrace[] = []
+  const initialThinking = trace.steps.find((step): step is ThinkingTraceStep => step.kind === 'thinking')
+  if (initialThinking) {
+    fragments.push({
+      ...trace,
+      id: `${trace.id}:thinking`,
+      startedAt: initialThinking.createdAt,
+      updatedAt: initialThinking.finishedAt ?? trace.updatedAt,
+      finishedAt: initialThinking.finishedAt,
+      status: initialThinking.status === 'running'
+        ? 'running'
+        : initialThinking.status === 'failed'
+          ? 'error'
+          : initialThinking.status === 'cancelled'
+            ? 'cancelled'
+            : 'complete',
+      toolCalls: undefined,
+      steps: [cloneStep(initialThinking)],
+    })
+  }
+  const toolSteps = trace.steps.filter((step): step is ToolTraceStep => step.kind === 'tool')
+  for (const tool of toolSteps) {
+    const approvals = trace.steps.filter((step): step is ApprovalTraceStep => step.kind === 'approval' && step.approval.toolCallId === tool.toolCall.id)
+    const waiting = approvals.some((step) => step.status === 'waiting')
+    const status: RunTraceStatus = waiting
+      ? 'waiting_approval'
+      : tool.status === 'running' || tool.status === 'pending'
+        ? 'running'
+        : tool.status === 'cancelled' || tool.status === 'denied'
+          ? 'cancelled'
+          : tool.status === 'failed'
+            ? 'error'
+            : 'complete'
+    const preparation: ThinkingTraceStep = {
+      id: `${trace.runId}:thinking:${tool.toolCall.id}`,
+      kind: 'thinking',
+      status: 'completed',
+      label: 'Обработка завершена',
+      createdAt: tool.createdAt,
+      finishedAt: tool.createdAt,
+    }
+    fragments.push({
+      ...trace,
+      id: `${trace.id}:tool:${tool.toolCall.id}`,
+      startedAt: tool.createdAt,
+      updatedAt: tool.finishedAt ?? trace.updatedAt,
+      finishedAt: tool.finishedAt,
+      status,
+      toolCalls: [cloneToolCall(tool.toolCall)],
+      steps: [preparation, cloneStep(tool), ...approvals.map(cloneStep)],
+    })
+  }
+  return sortRunTraces(fragments)
+}
+
 export function normalizeRunTraceStep(value: unknown, index: number, runId: string, fallbackAt: string): RunTraceStep | undefined {
   if (!isRecord(value)) return undefined
   const kindValue = String(value.kind ?? value.type ?? '').toLowerCase().replace(/[-\s]/g, '_')

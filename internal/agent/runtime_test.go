@@ -59,7 +59,7 @@ func (backend *interactiveBackend) Start(_ context.Context, request ModelRequest
 	backend.request = request
 	backend.stream = &interactiveStream{events: []ModelEvent{
 		{Type: ModelEventToolCallDone, ToolCallID: "dynamic-1", ToolName: "echo", Arguments: `{"value":"from codex"}`},
-		{Type: ModelEventTextDelta, Delta: "Файл прочитан."},
+		{Type: ModelEventTextDelta, ResponseID: "message-after-tool", Delta: "Файл прочитан."},
 		{Type: ModelEventCompleted},
 	}}
 	return backend.stream, nil
@@ -226,6 +226,9 @@ func TestRuntimeExecutesInteractiveToolInsideOneProviderTurn(t *testing.T) {
 		if events[index].Type != want[index] {
 			t.Fatalf("event[%d] = %s, want %s", index, events[index].Type, want[index])
 		}
+	}
+	if events[4].ResponseID != "message-after-tool" {
+		t.Fatalf("text response id = %q", events[4].ResponseID)
 	}
 }
 

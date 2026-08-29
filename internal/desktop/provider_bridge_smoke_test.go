@@ -72,7 +72,8 @@ func TestOpenAIProviderBridgeLifecycleSmoke(t *testing.T) {
 		}
 		conversations, err := bridge.ListConversations()
 		if err != nil || len(conversations) != 1 || len(conversations[0].Messages) != 2 ||
-			conversations[0].Messages[1].Content != "Привет, хозяин." {
+			conversations[0].Messages[1].Content != "Привет, хозяин." ||
+			conversations[0].Messages[1].RunID != result.RunID {
 			t.Fatalf("durable Bridge transcript = %#v err=%v", conversations, err)
 		}
 	})

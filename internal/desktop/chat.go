@@ -150,6 +150,7 @@ func (b *Bridge) ListConversations() ([]ConversationView, error) {
 			view.Messages = append(view.Messages, ChatMessageView{
 				ID: string(message.ID), Role: message.Role, Content: message.Content,
 				Status: message.Status, CreatedAt: message.CreatedAt.UTC().Format(time.RFC3339Nano),
+				RunID: messageRunID(message.ProviderMeta),
 			})
 			if message.Content != "" {
 				view.Preview = truncateRunes(message.Content, 100)
@@ -235,6 +236,16 @@ func toolCallStatus(status string) string {
 	default:
 		return status
 	}
+}
+
+func messageRunID(providerMeta string) string {
+	var metadata struct {
+		RunID string `json:"run_id"`
+	}
+	if json.Unmarshal([]byte(providerMeta), &metadata) != nil {
+		return ""
+	}
+	return strings.TrimSpace(metadata.RunID)
 }
 
 // ListChatTools reports only tools currently available to a new foreground
@@ -483,23 +494,43 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 		return b.failChatRun(runContext, &run, emitter, runErr), nil
 	}
 	finishedAt := time.Now().UTC()
-	if err := b.repositories.Messages.Create(runContext, storage.Message{
-		ID: assistantMessageID, ConversationID: conversationID, Role: string(agent.RoleAssistant),
-		Content: result.Message.Content, Status: "complete", ProviderMeta: "{}", CreatedAt: finishedAt,
-	}); err != nil {
-		return b.failChatRun(runContext, &run, emitter, err), nil
+	segments := emitter.AssistantSegments()
+	if len(segments) == 0 {
+		segments = []assistantMessageSegment{{
+			ID: string(assistantMessageID), Content: result.Message.Content, CreatedAt: finishedAt,
+		}}
+	}
+	assistantTurnMessages := make([]memory.TranscriptMessage, 0, len(segments))
+	for index, segment := range segments {
+		providerMeta, err := json.Marshal(map[string]any{
+			"run_id": string(runID), "response_id": segment.ResponseID, "segment_index": index,
+		})
+		if err != nil {
+			return b.failChatRun(runContext, &run, emitter, err), nil
+		}
+		if err := b.repositories.Messages.Create(runContext, storage.Message{
+			ID: domain.ID(segment.ID), ConversationID: conversationID, Role: string(agent.RoleAssistant),
+			Content: segment.Content, Status: "complete", ProviderMeta: string(providerMeta), CreatedAt: segment.CreatedAt,
+		}); err != nil {
+			return b.failChatRun(runContext, &run, emitter, err), nil
+		}
+		assistantTurnMessages = append(assistantTurnMessages, memory.TranscriptMessage{
+			ID: domain.ID(segment.ID), ConversationID: conversationID, Role: string(agent.RoleAssistant),
+			Content: segment.Content, CreatedAt: segment.CreatedAt,
+		})
 	}
 	if err := transitionAndSave(runContext, b.repositories.Runs, &run, domain.RunStateCompleted); err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
 	_ = b.touchConversation(runContext, conversationID, finishedAt, agentID)
 	emitter.emit(ChatEvent{Type: "run.completed", ConversationID: string(conversationID), RunID: string(runID), Status: "complete"})
+	turnMessages := []memory.TranscriptMessage{
+		{ID: userMessageID, ConversationID: conversationID, Role: string(agent.RoleUser), Content: request.Text, CreatedAt: now},
+	}
+	turnMessages = append(turnMessages, assistantTurnMessages...)
 	b.reviewTurnInBackground(memoryEngine, backend, model, runKind == domain.RunKindInteractive, memory.Turn{
 		RunID: runID, AgentID: profileID, ConversationID: conversationID, Now: finishedAt,
-		Messages: []memory.TranscriptMessage{
-			{ID: userMessageID, ConversationID: conversationID, Role: string(agent.RoleUser), Content: request.Text, CreatedAt: now},
-			{ID: assistantMessageID, ConversationID: conversationID, Role: string(agent.RoleAssistant), Content: result.Message.Content, CreatedAt: finishedAt},
-		},
+		Messages: turnMessages,
 	}, agentID)
 	return ChatRunResult{RunID: string(runID), Status: "complete", Events: emitter.Events()}, nil
 }
@@ -769,15 +800,25 @@ type chatEmitter struct {
 	messageID       string
 	mu              sync.Mutex
 	events          []ChatEvent
+	segments        []assistantMessageSegment
+	activeSegment   int
 	toolRecords     map[string]storage.ToolCall
 	approvalRecords map[string]domain.ID
 	tools           *agent.ToolRegistry
 }
 
+type assistantMessageSegment struct {
+	ID         string
+	ResponseID string
+	Content    string
+	CreatedAt  time.Time
+}
+
 func newChatEmitter(b *Bridge, conversationID, runID, messageID string) *chatEmitter {
 	return &chatEmitter{
 		b: b, conversationID: conversationID, runID: runID, messageID: messageID,
-		toolRecords: make(map[string]storage.ToolCall), approvalRecords: make(map[string]domain.ID),
+		activeSegment: -1,
+		toolRecords:   make(map[string]storage.ToolCall), approvalRecords: make(map[string]domain.ID),
 	}
 }
 
@@ -788,8 +829,24 @@ func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
 	case agent.EventRunStarted:
 		view.Type = "run.started"
 	case agent.EventModelTextDelta:
-		view.Type, view.MessageID, view.Delta = "assistant.delta", emitter.messageID, event.Text
+		messageID, completedID, err := emitter.appendAssistantDelta(event.ResponseID, event.Text, now)
+		if err != nil {
+			return err
+		}
+		if completedID != "" {
+			emitter.emit(ChatEvent{
+				Type: "assistant.completed", ConversationID: emitter.conversationID,
+				RunID: emitter.runID, MessageID: completedID, CreatedAt: view.CreatedAt,
+			})
+		}
+		view.Type, view.MessageID, view.Delta = "assistant.delta", messageID, event.Text
 	case agent.EventToolCallStarted:
+		if completedID := emitter.closeAssistantSegment(); completedID != "" {
+			emitter.emit(ChatEvent{
+				Type: "assistant.completed", ConversationID: emitter.conversationID,
+				RunID: emitter.runID, MessageID: completedID, CreatedAt: view.CreatedAt,
+			})
+		}
 		view.Type = "tool.started"
 		view.ToolCall = toolCallView(event.ToolCall, "pending", "", now)
 		emitter.applyToolRisk(view.ToolCall)
@@ -831,14 +888,72 @@ func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
 		view.Type, view.Approval = "approval.required", approval
 		view.Status, view.Label = "waiting_approval", "Ожидается разрешение пользователя"
 	case agent.EventRunCompleted:
-		view.Type, view.MessageID = "assistant.completed", emitter.messageID
+		if completedID := emitter.closeAssistantSegment(); completedID != "" {
+			emitter.emit(ChatEvent{
+				Type: "assistant.completed", ConversationID: emitter.conversationID,
+				RunID: emitter.runID, MessageID: completedID, CreatedAt: view.CreatedAt,
+			})
+		}
+		return nil
 	case agent.EventRunFailed:
+		if completedID := emitter.closeAssistantSegment(); completedID != "" {
+			emitter.emit(ChatEvent{
+				Type: "assistant.completed", ConversationID: emitter.conversationID,
+				RunID: emitter.runID, MessageID: completedID, CreatedAt: view.CreatedAt,
+			})
+		}
 		view.Type, view.Status, view.Error = "run.completed", "error", safeError(event.Error)
 	default:
 		return nil
 	}
 	emitter.emit(view)
 	return nil
+}
+
+func (emitter *chatEmitter) appendAssistantDelta(responseID, delta string, now time.Time) (string, string, error) {
+	emitter.mu.Lock()
+	defer emitter.mu.Unlock()
+	completedID := ""
+	if emitter.activeSegment >= 0 {
+		active := emitter.segments[emitter.activeSegment]
+		if responseID != "" && active.ResponseID != "" && responseID != active.ResponseID {
+			completedID = active.ID
+			emitter.activeSegment = -1
+		}
+	}
+	if emitter.activeSegment < 0 {
+		messageID := emitter.messageID
+		if len(emitter.segments) > 0 {
+			id, err := domain.NewID("message")
+			if err != nil {
+				return "", "", err
+			}
+			messageID = string(id)
+		}
+		emitter.segments = append(emitter.segments, assistantMessageSegment{
+			ID: messageID, ResponseID: responseID, CreatedAt: now,
+		})
+		emitter.activeSegment = len(emitter.segments) - 1
+	}
+	emitter.segments[emitter.activeSegment].Content += delta
+	return emitter.segments[emitter.activeSegment].ID, completedID, nil
+}
+
+func (emitter *chatEmitter) closeAssistantSegment() string {
+	emitter.mu.Lock()
+	defer emitter.mu.Unlock()
+	if emitter.activeSegment < 0 {
+		return ""
+	}
+	completedID := emitter.segments[emitter.activeSegment].ID
+	emitter.activeSegment = -1
+	return completedID
+}
+
+func (emitter *chatEmitter) AssistantSegments() []assistantMessageSegment {
+	emitter.mu.Lock()
+	defer emitter.mu.Unlock()
+	return append([]assistantMessageSegment(nil), emitter.segments...)
 }
 
 type desktopToolAuthorizer struct{}

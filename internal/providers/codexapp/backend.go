@@ -100,7 +100,9 @@ func encodeConversation(messages []agent.Message) (string, error) {
 	return "Produce the assistant response for the final user request in this structured transcript. " +
 		"Preserve role boundaries and do not reveal hidden reasoning. Use only the supplied dynamic Yuri tools for actions; " +
 		"never claim that an action succeeded until its tool result confirms it. Writes, deletion, network sends, and other side effects " +
-		"must go through a Yuri tool so the local policy layer can request approval or deny them.\n" +
+		"must go through a Yuri tool so the local policy layer can request approval or deny them. Every agent message is shown to the user " +
+		"as a chronological response segment: keep progress messages concise, continue after each tool result, and give the final answer " +
+		"exactly once without repeating content already emitted.\n" +
 		"<conversation-json>" + string(encoded) + "</conversation-json>", nil
 }
 
@@ -165,6 +167,7 @@ func (stream *codexModelStream) Recv(ctx context.Context) (agent.ModelEvent, err
 				var params struct {
 					ThreadID string `json:"threadId"`
 					TurnID   string `json:"turnId"`
+					ItemID   string `json:"itemId"`
 					Delta    string `json:"delta"`
 				}
 				if err := json.Unmarshal(event.Params, &params); err != nil {
@@ -173,7 +176,7 @@ func (stream *codexModelStream) Recv(ctx context.Context) (agent.ModelEvent, err
 				if !stream.matches(params.ThreadID, params.TurnID) || params.Delta == "" {
 					continue
 				}
-				return agent.ModelEvent{Type: agent.ModelEventTextDelta, Delta: params.Delta}, nil
+				return agent.ModelEvent{Type: agent.ModelEventTextDelta, ResponseID: params.ItemID, Delta: params.Delta}, nil
 			case "turn/completed":
 				var params struct {
 					ThreadID string `json:"threadId"`
