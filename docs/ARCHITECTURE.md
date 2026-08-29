@@ -130,6 +130,8 @@ Application services открывают use cases: создать run, прин�
 
 `RelationshipState` и `AffectiveState` — субъективные, временные данные Yuri. Они могут влиять на тон, инициативность и avatar state, но не на allow/deny, полноту retrieval, доступ к файлам, retention или право на внешний side effect. Opinion о владельце хранится отдельно от фактической памяти, имеет confidence/evidence и не показывается в UI как установленный факт.
 
+Anonymous subagent — отдельный `RunKindSubagent` с обязательным root parent, глубиной 1 и без conversation/profile/memory namespace. `agent.delegate` передаёт ему только bounded task/context в отдельном prompt envelope. В первом срезе tool registry ребёнка пуст; durable delegation хранит principal agent, parent/child IDs, request hash, budget, lifecycle и bounded result, но не исходный prompt.
+
 ## 6. Хранилища и восстановление
 
 ### 6.1. SQLite как authoritative store
@@ -138,7 +140,7 @@ SQLite хранит все данные, необходимые для восс�
 
 - conversations, messages и исходные transcripts;
 - именованные agent profiles и их активный selection;
-- runs, tool calls, approvals и audit metadata;
+- runs, anonymous delegations, tool calls, approvals и audit metadata;
 - memory versions, sources, lifecycle state и retrieval metadata;
 - relationship/affect events и persona/reflection versions;
 - schedules, job runs, plugin metadata, permission grants;

@@ -285,6 +285,14 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
+	if runKind != domain.RunKindSubagent {
+		if err := registry.Register(delegationAgentTool{
+			bridge: b, backend: backend, model: model,
+			principalAgentID: agentID, parentRunID: runID,
+		}); err != nil {
+			return b.failChatRun(runContext, &run, emitter, err), nil
+		}
+	}
 	runtime, err := agent.NewRuntime(backend, registry)
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
@@ -941,6 +949,9 @@ func (emitter *chatEmitter) createToolRecord(ctx context.Context, event agent.Ev
 }
 
 func redactedToolArguments(toolID string, arguments json.RawMessage, maxBytes int) string {
+	if toolID == delegationToolID {
+		return redactedDelegationArguments(arguments, maxBytes)
+	}
 	if toolID != builtintools.FilesystemWriteToolID {
 		return boundedJSONObject(arguments, maxBytes)
 	}
@@ -980,6 +991,11 @@ func (emitter *chatEmitter) finishToolRecord(ctx context.Context, event agent.Ev
 	record.Status = storage.ToolCallSucceeded
 	if status == "failed" {
 		record.Status = storage.ToolCallFailed
+	}
+	if event.ToolResult != nil && event.ToolResult.Metadata != nil {
+		if delegationID, ok := event.ToolResult.Metadata["delegation_id"].(string); ok && strings.TrimSpace(delegationID) != "" {
+			record.ResultRef = "delegation:" + truncateRunes(strings.TrimSpace(delegationID), 200)
+		}
 	}
 	record.Version++
 	record.UpdatedAt = time.Now().UTC()

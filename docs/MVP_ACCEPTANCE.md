@@ -24,7 +24,9 @@
 
 ## Текущий срез Stage 8
 
-Первые три вертикальных среза добавляют persistent `AgentProfile`, обязательное создание агента при чистом запуске, owner-defined identity/traits, roster selector и повторный flow создания дополнительных агентов. Profile/persona/relationship/affect создаются одной SQLite-транзакцией; conversations, runs, transcript archive/FTS и private memory адресуются `agent_id`, а переключение перемонтирует agent-scoped UI. Legacy rows транзакционно привязываются к мигрированному владельцу, background turn захватывает agent ID до запуска, а peer roster не раскрывает private preferences. Shared-memory scopes, anonymous delegation и background inter-agent dialogue остаются следующими последовательными срезами Stage 8 и пока не считаются реализованными.
+Первые четыре вертикальных среза добавляют persistent `AgentProfile`, обязательное создание агента при чистом запуске, owner-defined identity/traits, roster selector, повторный flow создания дополнительных агентов и `agent.delegate`. Profile/persona/relationship/affect создаются одной SQLite-транзакцией; conversations, runs, transcript archive/FTS и private memory адресуются `agent_id`, а переключение перемонтирует agent-scoped UI. Legacy rows транзакционно привязываются к мигрированному владельцу, background turn захватывает agent ID до запуска, а peer roster не раскрывает private preferences.
+
+`agent.delegate` создаёт durable anonymous child run глубины 1 и связанную delegation-запись атомарно. Первый безопасный срез намеренно даёт субагенту пустое пересечение capabilities: только bounded task/context, отдельный immutable prompt, один model turn, не более четырёх children на parent run, фиксированные token/time/output budgets, наследуемую отмену, idempotency и redacted audit. Субагент не получает persona, memory, transcript, roster, credentials или инструменты и не создаёт `AgentProfile`. Shared-memory scopes и background inter-agent dialogue остаются следующими последовательными срезами Stage 8 и пока не считаются реализованными.
 
 ## Состояние Stage 7
 

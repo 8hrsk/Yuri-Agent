@@ -87,3 +87,30 @@ func TestRunForAgentCapturesOwnerAndKeepsLegacyConstructor(t *testing.T) {
 		t.Fatalf("empty agent error = %v, want ErrInvalidArgument", err)
 	}
 }
+
+func TestRunShapeBoundsAnonymousSubagents(t *testing.T) {
+	now := time.Now().UTC()
+	child, err := NewRunForAgent("agent-a", "child", RunKindSubagent, "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.ValidateShape(); err == nil {
+		t.Fatal("subagent without parent unexpectedly passed shape validation")
+	}
+	child.ParentRunID = "parent"
+	if err := child.ValidateShape(); err != nil {
+		t.Fatal(err)
+	}
+	child.ConversationID = "conversation"
+	if err := child.ValidateShape(); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("subagent conversation shape error = %v", err)
+	}
+	root, err := NewRunForAgent("agent-a", "root", RunKindBackground, "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root.ParentRunID = "parent"
+	if err := root.ValidateShape(); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("root parent shape error = %v", err)
+	}
+}

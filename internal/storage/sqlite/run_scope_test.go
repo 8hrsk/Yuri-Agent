@@ -112,7 +112,7 @@ func TestRunRepositoryRejectsCrossAgentOwnership(t *testing.T) {
 	if err := repositories.Runs.Create(ctx, parent); err != nil {
 		t.Fatal(err)
 	}
-	wrongParent, err := domain.NewRunForAgent("agent-a", "run-wrong-parent", domain.RunKindBackground, "conversation-owner-a", now.Add(time.Second))
+	wrongParent, err := domain.NewRunForAgent("agent-a", "run-wrong-parent", domain.RunKindSubagent, "", now.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,5 +147,20 @@ func TestRunAgentDatabaseTriggersRejectMissingAndMismatchedOwners(t *testing.T) 
 		INSERT INTO agent_runs(id, agent_id, kind, conversation_id, state, version, created_at, updated_at)
 		VALUES ('raw-run-wrong-agent', 'agent-b', 'interactive', 'raw-run-conversation-a', 'created', 1, ?, ?)`, now, now); err == nil {
 		t.Fatal("agent_runs trigger accepted mismatched conversation owner")
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO agent_runs(id, agent_id, kind, state, version, created_at, updated_at)
+		VALUES ('raw-run-root', 'agent-a', 'interactive', 'created', 1, ?, ?)`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO agent_runs(id, agent_id, kind, conversation_id, parent_run_id, state, version, created_at, updated_at)
+		VALUES ('raw-run-subagent-conversation', 'agent-a', 'subagent', 'raw-run-conversation-a', 'raw-run-root', 'created', 1, ?, ?)`, now, now); err == nil {
+		t.Fatal("agent_runs trigger accepted subagent conversation")
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO agent_runs(id, agent_id, kind, parent_run_id, state, version, created_at, updated_at)
+		VALUES ('raw-run-non-subagent-child', 'agent-a', 'background', 'raw-run-root', 'created', 1, ?, ?)`, now, now); err == nil {
+		t.Fatal("agent_runs trigger accepted non-subagent parent")
 	}
 }

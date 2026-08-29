@@ -115,6 +115,7 @@ flowchart TB
 | T-24 | Экспорт/backup содержит secrets или восстанавливает слишком широкие grants | High | Secrets excluded by default, encrypted backup, explicit scope, manifest/version validation, restore review and grant expiry | Пользователь может сам выбрать unsafe export |
 | T-25 | Активный агент читает private transcript/memory или продолжает background reflection уже от имени другого агента | High | Durable `agent_id` на conversations/runs/memory versions; scoped repository/FTS queries; ownership check по conversation ID; agent ID захватывается до provider/background work; cross-agent isolation tests | Явно опубликованные shared scopes в будущей версии потребуют отдельной policy и provenance |
 | T-26 | CI-артефакт macOS принимают за доверенный дистрибутив или подменяют archive/manifest | Medium | Явная маркировка OSS, проверка universal bundle metadata, manifest связывает SHA-256 с именем archive, сохранение только в GitHub Actions artifact, отсутствие auto-update/publish path | Checksum подтверждает целостность конкретного файла, но не provenance; ручная загрузка всё равно требует review исходного commit |
+| T-27 | Субагент создаёт рекурсивную делегацию, получает private identity/memory или расходует неограниченный model budget | High | Только root parent; depth 1 enforced domain+SQLite; no conversation/profile; отдельный prompt без persona/memory/roster; пустой tool registry в первом срезе; fixed token/time/output budgets; parent cancellation; durable idempotency и redacted audit | Разрешённый provider всё равно видит явно переданный task/context; качество redaction зависит от вызывающего root agent |
 
 ## 6. Особые правила для автономной памяти и личности
 
@@ -144,7 +145,7 @@ Reflection — отдельный background run с read-only внешним к�
 
 ### 6.3. Cross-session context
 
-Все диалоги принадлежат одному локальному профилю Yuri, но не каждый run получает весь архив. Context assembler сначала использует bounded core snapshot, затем relevance/sensitivity-filtered hybrid retrieval. В retrieved item видны session/source IDs; непонятный фрагмент должен быть обозначен как неопределённый, а не слит с текущим фактом.
+Каждый диалог принадлежит одному именованному локальному агенту, и ни один run не получает весь архив. Context assembler сначала использует bounded core snapshot активного agent scope, затем relevance/sensitivity-filtered hybrid retrieval в том же scope. В retrieved item видны session/source IDs; непонятный фрагмент должен быть обозначен как неопределённый, а не слит с текущим фактом. Доступ к явно shared scopes будет добавляться отдельной policy, а не через fallback к чужому private archive.
 
 ## 7. Provider и OAuth threats
 

@@ -55,6 +55,28 @@ func (r *RunRepository) Create(ctx context.Context, run domain.AgentRun) error {
 	return wrappedSQLError("create run", err)
 }
 
+func insertRunTx(ctx context.Context, tx *sql.Tx, run domain.AgentRun) error {
+	createdAt, err := timeValue(run.CreatedAt)
+	if err != nil {
+		return err
+	}
+	updatedAt, err := timeValue(run.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO agent_runs(
+			id, agent_id, kind, conversation_id, parent_run_id, state,
+			max_steps, max_tokens, max_tool_calls, max_tool_output_bytes, max_duration_seconds,
+			failure, version, created_at, updated_at, started_at, finished_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(run.ID), string(run.AgentID), string(run.Kind), nullableID(run.ConversationID), nullableID(run.ParentRunID),
+		string(run.State), run.Budget.MaxSteps, run.Budget.MaxTokens, run.Budget.MaxToolCalls, run.Budget.MaxToolOutputBytes,
+		run.Budget.MaxDurationSeconds, nullableStringValue(run.Failure), run.Version, createdAt, updatedAt,
+		nullableTimeValue(run.StartedAt), nullableTimeValue(run.FinishedAt))
+	return wrappedSQLError("create run", err)
+}
+
 func (r *RunRepository) Get(ctx context.Context, id domain.ID) (domain.AgentRun, error) {
 	if err := requireDatabase(r.db); err != nil {
 		return domain.AgentRun{}, err
@@ -239,14 +261,17 @@ func validateRun(run domain.AgentRun) error {
 	if run.CreatedAt.IsZero() || run.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: run timestamps are required", domain.ErrInvalidArgument)
 	}
+	if err := run.ValidateShape(); err != nil {
+		return err
+	}
 	return nil
 }
 
 // resolveOwnership fills the agent for legacy NewRun callers from the
 // conversation and checks that explicit ownership cannot cross an agent
 // boundary. Parent runs must remain in the same ownership domain as their
-// child; subagent-specific delegation is represented by a later stage and is
-// deliberately not inferred here.
+// child; subagent ownership is explicit and is never inferred from a
+// conversation because anonymous children do not own one.
 func (r *RunRepository) resolveOwnership(ctx context.Context, run domain.AgentRun) (domain.AgentRun, error) {
 	if run.AgentID.Empty() {
 		if run.ConversationID.Empty() {

@@ -83,6 +83,8 @@ func activityKind(action string) string {
 	switch {
 	case strings.HasPrefix(action, "schedule."), strings.HasPrefix(action, "job."):
 		return "job"
+	case strings.HasPrefix(action, "delegation."):
+		return "job"
 	case strings.HasPrefix(action, "notification."), strings.HasPrefix(action, "proactivity."):
 		return "proactive"
 	case strings.HasPrefix(action, "plugin."):
@@ -118,6 +120,16 @@ func activityTitle(action string) string {
 		return "Фоновая задача завершена"
 	case "job.failed":
 		return "Фоновая задача завершилась с ошибкой"
+	case "delegation.created":
+		return "Субагент создан"
+	case "delegation.started":
+		return "Субагент приступил к задаче"
+	case "delegation.completed":
+		return "Субагент завершил задачу"
+	case "delegation.failed":
+		return "Субагент завершился с ошибкой"
+	case "delegation.cancelled":
+		return "Субагент остановлен"
 	case "notification.sent":
 		return "Отправлено уведомление"
 	case "notification.deferred":
@@ -160,11 +172,21 @@ func activityStatus(action, decision string) string {
 		return "queued"
 	case "job.started":
 		return "running"
+	case "delegation.created":
+		return "queued"
+	case "delegation.started":
+		return "running"
 	case "job.completed", "notification.sent":
+		return "completed"
+	case "delegation.completed":
 		return "completed"
 	case "job.failed", "notification.failed":
 		return "failed"
+	case "delegation.failed":
+		return "failed"
 	case "job.cancelled":
+		return "cancelled"
+	case "delegation.cancelled":
 		return "cancelled"
 	case "job.skipped", "notification.deferred", "notification.suppressed":
 		return "skipped"

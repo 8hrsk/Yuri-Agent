@@ -23,6 +23,7 @@ const (
 	CapabilityMemoryWrite       Capability = "memory.write"
 	CapabilityMemoryDelete      Capability = "memory.delete"
 	CapabilityExternalSend      Capability = "external.send"
+	CapabilityDelegationInvoke  Capability = "delegation.invoke"
 )
 
 func (c Capability) Valid() bool {
@@ -31,7 +32,7 @@ func (c Capability) Valid() bool {
 		CapabilityFilesystemDelete, CapabilityNetworkHTTP, CapabilitySecretsUse,
 		CapabilityNotificationsSend, CapabilitySchedulerManage,
 		CapabilityMemoryRead, CapabilityMemoryWrite, CapabilityMemoryDelete,
-		CapabilityExternalSend:
+		CapabilityExternalSend, CapabilityDelegationInvoke:
 		return true
 	default:
 		return false

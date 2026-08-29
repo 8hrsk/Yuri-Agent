@@ -125,6 +125,7 @@ Yuri инициирует разговор только при выполнен�
 - Защита от повторного выполнения одного и того же действия через idempotency key.
 - Фоновые задачи отделены от UI-сессии, имеют состояние и переживают перезапуск приложения.
 - Сбой одного инструмента не должен падать вместе с процессом приложения.
+- Именованный root agent может вызвать `agent.delegate` для одноуровневой обезличенной подзадачи. Делегирование имеет durable child run, idempotency key, отдельные budgets, лимит children на parent и наследует cancellation родителя; child не получает named-agent context автоматически.
 
 ### FR-4. Инструменты и разрешения
 
@@ -277,6 +278,7 @@ Yuri инициирует разговор только при выполнен�
 - Owner-defined identity (`name`, `age`, `gender`, initial preferences) хранится отдельно от mutable persona и не изменяется автономной рефлексией.
 - Каждый persistent named agent имеет отдельные persona, relationship, affect и private-memory scopes. Peer registry содержит только ID, имя, статус и короткое описание; приватные предпочтения, мнения и credentials в него не входят.
 - Anonymous subagent является дочерним run, а не `AgentProfile`: он не появляется в roster и не получает persistent identity/state.
+- Начальная реализация delegation использует пустое пересечение capabilities: subagent выполняет один bounded model turn без tools. Передача read-only tools вводится только отдельным последующим срезом с явным delegation scope и повторной policy-проверкой.
 
 ### FR-11. Аудит и настройки
 

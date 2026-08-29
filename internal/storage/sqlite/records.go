@@ -78,6 +78,7 @@ type Repositories struct {
 	Memories      *MemoryRepository
 	Archive       *ArchiveRepository
 	Runs          *RunRepository
+	Delegations   *DelegationRepository
 	Approvals     *ApprovalRepository
 	ToolCalls     *ToolCallRepository
 	Audit         *AuditRepository
@@ -104,6 +105,7 @@ func NewRepositories(database *sql.DB) (*Repositories, error) {
 		Memories:      NewMemoryRepository(database),
 		Archive:       NewArchiveRepository(database),
 		Runs:          NewRunRepository(database),
+		Delegations:   NewDelegationRepository(database),
 		Approvals:     NewApprovalRepository(database),
 		ToolCalls:     NewToolCallRepository(database),
 		Audit:         NewAuditRepository(database),

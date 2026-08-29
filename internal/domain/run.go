@@ -14,11 +14,12 @@ const (
 	RunKindInteractive RunKind = "interactive"
 	RunKindBackground  RunKind = "background"
 	RunKindReflection  RunKind = "reflection"
+	RunKindSubagent    RunKind = "subagent"
 )
 
 func (k RunKind) Valid() bool {
 	switch k {
-	case RunKindInteractive, RunKindBackground, RunKindReflection:
+	case RunKindInteractive, RunKindBackground, RunKindReflection, RunKindSubagent:
 		return true
 	default:
 		return false
@@ -94,6 +95,22 @@ type AgentRun struct {
 	FinishedAt     time.Time `json:"finished_at,omitempty"`
 	Failure        string    `json:"failure,omitempty"`
 	Version        uint64    `json:"version"`
+}
+
+// ValidateShape enforces the bounded execution hierarchy used by the
+// delegation layer. Anonymous subagents are always one level below a named
+// root run and never own a conversation of their own.
+func (r AgentRun) ValidateShape() error {
+	if r.Kind == RunKindSubagent {
+		if r.ConversationID != "" || r.ParentRunID.Empty() {
+			return fmt.Errorf("%w: subagent runs require a parent and no conversation", ErrInvalidArgument)
+		}
+		return nil
+	}
+	if !r.ParentRunID.Empty() {
+		return fmt.Errorf("%w: only subagent runs may have a parent", ErrInvalidArgument)
+	}
+	return nil
 }
 
 func NewRun(id ID, kind RunKind, conversationID ID, now time.Time) (AgentRun, error) {

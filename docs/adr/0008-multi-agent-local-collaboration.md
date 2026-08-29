@@ -23,4 +23,5 @@
 - Single-user invariant сохраняется: `agent_id` не является `user_id` или tenant boundary.
 - Переключение активного агента не должно смешивать private memory, relationship или affect.
 - Agent roster и межагентные сообщения считаются недоверенным контекстом относительно immutable policy.
-- Реализация Stage 8 идёт последовательными вертикальными срезами; наличие `AgentProfile` не означает, что delegation или background dialogue уже включены.
+- Реализация Stage 8 идёт последовательными вертикальными срезами; наличие `AgentProfile` или delegation не означает, что background dialogue уже включён.
+- Первый delegation slice использует пустое пересечение capabilities и один tool-less model turn. Расширение до read-only capabilities требует отдельного scope/policy slice; это не скрытое право, выданное subagent заранее.
