@@ -66,3 +66,24 @@ func TestRunRejectsInvalidInputs(t *testing.T) {
 		t.Fatalf("zero time error = %v", err)
 	}
 }
+
+func TestRunForAgentCapturesOwnerAndKeepsLegacyConstructor(t *testing.T) {
+	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	run, err := NewRunForAgent("agent-a", "run-agent-a", RunKindInteractive, "conversation-a", now)
+	if err != nil {
+		t.Fatalf("NewRunForAgent() error = %v", err)
+	}
+	if run.AgentID != "agent-a" {
+		t.Fatalf("AgentID = %q, want agent-a", run.AgentID)
+	}
+	legacy, err := NewRun("run-legacy", RunKindBackground, "conversation-a", now)
+	if err != nil {
+		t.Fatalf("legacy NewRun() error = %v", err)
+	}
+	if !legacy.AgentID.Empty() {
+		t.Fatalf("legacy NewRun() AgentID = %q, want empty for adapter inference", legacy.AgentID)
+	}
+	if _, err := NewRunForAgent("", "run-agent-a", RunKindInteractive, "conversation-a", now); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("empty agent error = %v, want ErrInvalidArgument", err)
+	}
+}

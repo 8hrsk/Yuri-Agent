@@ -77,7 +77,12 @@ func (b RunBudget) Valid() bool {
 // AgentRun is the domain representation of an execution. It deliberately
 // contains no provider, tool, UI, or storage implementation details.
 type AgentRun struct {
-	ID             ID        `json:"id"`
+	ID ID `json:"id"`
+	// AgentID identifies the named top-level agent that owns this execution.
+	// It is intentionally optional in the legacy NewRun constructor so callers
+	// that predate agent scoping can still construct a run; persistence adapters
+	// resolve it from the owned conversation before writing the row.
+	AgentID        ID        `json:"agent_id,omitempty"`
 	Kind           RunKind   `json:"kind"`
 	ConversationID ID        `json:"conversation_id"`
 	ParentRunID    ID        `json:"parent_run_id,omitempty"`
@@ -92,6 +97,21 @@ type AgentRun struct {
 }
 
 func NewRun(id ID, kind RunKind, conversationID ID, now time.Time) (AgentRun, error) {
+	return newRun(id, "", kind, conversationID, now)
+}
+
+// NewRunForAgent constructs a run owned by one named top-level agent. The
+// legacy NewRun constructor remains available for callers that do not yet
+// carry agent context; storage adapters infer that context from the run's
+// conversation when possible.
+func NewRunForAgent(agentID ID, id ID, kind RunKind, conversationID ID, now time.Time) (AgentRun, error) {
+	if agentID.Empty() {
+		return AgentRun{}, fmt.Errorf("%w: agent id is required", ErrInvalidArgument)
+	}
+	return newRun(id, agentID, kind, conversationID, now)
+}
+
+func newRun(id ID, agentID ID, kind RunKind, conversationID ID, now time.Time) (AgentRun, error) {
 	if id.Empty() || !kind.Valid() {
 		return AgentRun{}, fmt.Errorf("%w: run id and kind are required", ErrInvalidArgument)
 	}
@@ -101,6 +121,7 @@ func NewRun(id ID, kind RunKind, conversationID ID, now time.Time) (AgentRun, er
 	now = now.UTC()
 	return AgentRun{
 		ID:             id,
+		AgentID:        agentID,
 		Kind:           kind,
 		ConversationID: conversationID,
 		State:          RunStateCreated,

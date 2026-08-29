@@ -42,6 +42,7 @@ type Source interface {
 }
 
 type ArchiveQuery struct {
+	AgentID               domain.ID
 	Text                  string
 	Limit                 int
 	ExcludeConversationID domain.ID
@@ -69,6 +70,7 @@ func DefaultConfig() Config {
 // milestones may populate MutablePersona and Relationship without changing
 // the ordering contract introduced here.
 type Input struct {
+	AgentID         domain.ID
 	ConversationID  domain.ID
 	Query           string
 	ImmutablePolicy string
@@ -125,7 +127,7 @@ func (a *Assembler) Assemble(ctx context.Context, input Input) (Snapshot, error)
 		return Snapshot{}, fmt.Errorf("retrieve memory: %w", err)
 	}
 	hits, err := a.source.SearchArchive(ctx, ArchiveQuery{
-		Text: strings.TrimSpace(input.Query), Limit: a.config.RetrievedLimit,
+		AgentID: input.AgentID, Text: strings.TrimSpace(input.Query), Limit: a.config.RetrievedLimit,
 		ExcludeConversationID: input.ConversationID,
 	})
 	if err != nil {

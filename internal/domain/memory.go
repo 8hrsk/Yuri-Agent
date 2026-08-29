@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// MemoryKind identifies the durable store a memory belongs to. All kinds are
-// shared by the single local Yuri profile; a conversation is only a source
-// of evidence and is not a memory namespace.
+// MemoryKind identifies the durable store a memory belongs to. A memory is
+// additionally scoped to its owning named agent; a conversation is only a
+// source of evidence and is not a memory namespace.
 type MemoryKind string
 
 const (
@@ -72,6 +72,19 @@ func (l MemoryLifecycle) Valid() bool {
 	}
 }
 
+// MemoryScope identifies the owner-visible namespace of a memory. Memories
+// are private to one named agent; the explicit scope prevents future shared
+// projections from widening retrieval accidentally.
+type MemoryScope string
+
+const (
+	MemoryScopeAgentPrivate MemoryScope = "agent_private"
+)
+
+func (s MemoryScope) Valid() bool {
+	return s == "" || s == MemoryScopeAgentPrivate
+}
+
 // MemoryState is an architectural alias used by context and reflection code.
 type MemoryState = MemoryLifecycle
 
@@ -130,6 +143,8 @@ func (r MemoryRetention) Valid() bool {
 // carry structured data and must be valid JSON when supplied.
 type Memory struct {
 	ID                   ID                `json:"id"`
+	AgentID              ID                `json:"agent_id"`
+	Scope                MemoryScope       `json:"scope"`
 	Version              uint64            `json:"version"`
 	Kind                 MemoryKind        `json:"kind"`
 	Nature               MemoryNature      `json:"nature"`
@@ -164,7 +179,7 @@ type Memory struct {
 func (m Memory) Valid() bool { return m.Validate() == nil }
 
 func (m Memory) Validate() error {
-	if m.ID.Empty() || !m.Kind.Valid() || !m.Nature.Valid() ||
+	if m.ID.Empty() || !m.Kind.Valid() || !m.Nature.Valid() || !m.Scope.Valid() ||
 		!m.Sensitivity.Valid() || !m.Retention.Valid() || !m.Lifecycle.Valid() {
 		return fmt.Errorf("%w: invalid memory identity or enum", ErrInvalidArgument)
 	}

@@ -16,10 +16,20 @@ import (
 
 const memoryEventName = "yuri:memory"
 
-func (b *Bridge) newMemoryEngine(backend agent.ModelBackend, model string) (*memory.Engine, error) {
-	adapter := sqliteMemoryAdapter{repositories: b.repositories}
+func firstNonEmptyID(values ...domain.ID) domain.ID {
+	for _, value := range values {
+		if !value.Empty() {
+			return value
+		}
+	}
+	return ""
+}
+
+func (b *Bridge) newMemoryEngine(backend agent.ModelBackend, model string, agentID domain.ID) (*memory.Engine, error) {
+	adapter := sqliteMemoryAdapter{repositories: b.repositories, agentID: agentID}
 	return memory.NewEngine(memory.Config{
-		Store: adapter, Extractor: modelMemoryExtractor{backend: backend, model: model},
+		AgentID: agentID,
+		Store:   adapter, Extractor: modelMemoryExtractor{backend: backend, model: model},
 		Archive: adapter, Lexical: adapter, Vectors: memory.NewBruteForceIndex(),
 		Ranker: memory.HybridRanker{Weights: memory.RankWeights{
 			Lexical: .45, Recency: .2, Salience: .3, Affective: .05,
@@ -32,6 +42,7 @@ func (b *Bridge) newMemoryEngine(backend agent.ModelBackend, model string) (*mem
 type desktopContextSource struct {
 	engine       *memory.Engine
 	repositories *storage.Repositories
+	agentID      domain.ID
 }
 
 func (source desktopContextSource) Core(ctx context.Context, limit int) ([]contextbuilder.MemoryItem, error) {
@@ -54,7 +65,7 @@ func (source desktopContextSource) Recall(ctx context.Context, query string, lim
 		return nil, nil
 	}
 	results, err := source.engine.Recall(ctx, query, memory.RecallOptions{
-		Mode: memory.RecallAutomatic, Limit: limit, Budget: memory.Budget{MaxItems: limit, MaxChars: 3_000},
+		AgentID: source.agentID, Mode: memory.RecallAutomatic, Limit: limit, Budget: memory.Budget{MaxItems: limit, MaxChars: 3_000},
 	})
 	if err != nil {
 		return nil, err
@@ -84,7 +95,7 @@ func (source desktopContextSource) SearchArchive(ctx context.Context, query cont
 	// Ask for a bounded superset because the current conversation is filtered
 	// below and must not crowd out actual cross-session hits.
 	hits, err := source.repositories.Archive.Search(ctx, query.Text, storage.ArchiveSearchOptions{
-		Limit: limit * 3, MaxTokens: 3_000,
+		AgentID: firstNonEmptyID(query.AgentID, source.agentID), Limit: limit * 3, MaxTokens: 3_000,
 	})
 	if err != nil {
 		return nil, err
@@ -125,9 +136,21 @@ func memoryProvenance(sources []domain.MemorySource) string {
 
 var _ contextbuilder.Source = desktopContextSource{}
 
-func (b *Bridge) reviewTurnInBackground(engine *memory.Engine, backend agent.ModelBackend, model string, allowReflection bool, turn memory.Turn) {
+func (b *Bridge) reviewTurnInBackground(engine *memory.Engine, backend agent.ModelBackend, model string, allowReflection bool, turn memory.Turn, agentID domain.ID) {
 	if engine == nil || turn.ConversationID.Empty() {
 		return
+	}
+	if agentID.Empty() {
+		agentID = turn.AgentID
+	}
+	if agentID.Empty() {
+		return
+	}
+	// The captured owner is authoritative for the whole background pass. Do
+	// not let a stale or caller-supplied Turn.AgentID redirect memory writes
+	// after the active profile has changed.
+	if turn.AgentID != agentID {
+		turn.AgentID = agentID
 	}
 	b.mu.Lock()
 	if b.shuttingDown {
@@ -168,7 +191,7 @@ func (b *Bridge) reviewTurnInBackground(engine *memory.Engine, backend agent.Mod
 			}
 		}
 		if allowReflection {
-			b.reflectOnTurn(ctx, backend, model, turn)
+			b.reflectOnTurn(ctx, backend, model, turn, agentID)
 		}
 	}()
 }

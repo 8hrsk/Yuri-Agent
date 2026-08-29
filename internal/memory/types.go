@@ -94,6 +94,9 @@ func Normalize(m domain.Memory, now time.Time) (domain.Memory, error) {
 		return domain.Memory{}, fmt.Errorf("%w: memory timestamp is required", domain.ErrInvalidArgument)
 	}
 	m.Content = strings.TrimSpace(m.Content)
+	if m.Scope == "" {
+		m.Scope = domain.MemoryScopeAgentPrivate
+	}
 	if m.Kind == "" {
 		m.Kind = domain.MemoryKindSemantic
 	}
@@ -231,6 +234,7 @@ func (m TranscriptMessage) Valid() error {
 // Extractors may return an empty slice; that is a valid, expected result.
 type Turn struct {
 	RunID          domain.ID
+	AgentID        domain.ID
 	ConversationID domain.ID
 	Messages       []TranscriptMessage
 	Now            time.Time
@@ -305,6 +309,7 @@ func (b Budget) normalize(defaultItems int) Budget {
 }
 
 type MemoryFilter struct {
+	AgentID        domain.ID
 	States         []LifecycleState
 	Kinds          []Kind
 	IncludeDormant bool
@@ -314,6 +319,7 @@ type MemoryFilter struct {
 }
 
 type RecallOptions struct {
+	AgentID        domain.ID
 	Mode           RecallMode
 	Limit          int
 	Budget         Budget
@@ -351,6 +357,7 @@ type ArchiveHit struct {
 }
 
 type ArchiveSearchOptions struct {
+	AgentID         domain.ID
 	Limit           int
 	Budget          Budget
 	IncludeArchived bool

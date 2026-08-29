@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/OrdoAI/yuri-agent/internal/agent"
+	"github.com/OrdoAI/yuri-agent/internal/config"
 	contextbuilder "github.com/OrdoAI/yuri-agent/internal/context"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 	"github.com/OrdoAI/yuri-agent/internal/memory"
@@ -15,7 +16,9 @@ import (
 
 func newMemoryTestBridge(t *testing.T) *Bridge {
 	t.Helper()
-	database, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "yuri.db"))
+	root := t.TempDir()
+	paths := config.Paths{DataDirectory: root, DatabaseFile: filepath.Join(root, "yuri.db")}
+	database, err := storage.Open(context.Background(), paths.DatabaseFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +28,7 @@ func newMemoryTestBridge(t *testing.T) *Bridge {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	return &Bridge{database: database, repositories: repositories}
+	return &Bridge{database: database, repositories: repositories, paths: paths, config: config.Default(paths)}
 }
 
 func seedMemoryTest(t *testing.T, bridge *Bridge) (domain.ID, domain.ID) {
@@ -35,7 +38,7 @@ func seedMemoryTest(t *testing.T, bridge *Bridge) (domain.ID, domain.ID) {
 	conversationID := domain.ID("conversation-memory-test")
 	messageID := domain.ID("message-memory-test")
 	if err := bridge.repositories.Conversations.Create(ctx, storage.Conversation{
-		ID: conversationID, Title: "Предпочтения", CreatedAt: now, UpdatedAt: now,
+		ID: conversationID, AgentID: bridge.personaProfileID(), Title: "Предпочтения", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +50,8 @@ func seedMemoryTest(t *testing.T, bridge *Bridge) (domain.ID, domain.ID) {
 	}
 	memoryID := domain.ID("memory-tea")
 	if err := bridge.repositories.Memories.Create(ctx, domain.Memory{
-		ID: memoryID, Version: 1, Kind: domain.MemoryKindUserModel, Nature: domain.MemoryNatureFact,
+		ID: memoryID, AgentID: bridge.personaProfileID(), Scope: domain.MemoryScopeAgentPrivate,
+		Version: 1, Kind: domain.MemoryKindUserModel, Nature: domain.MemoryNatureFact,
 		Content: "Пользователь любит зелёный чай", Confidence: .95, Salience: .8,
 		Sensitivity: domain.MemorySensitivityPrivate, Retention: domain.MemoryRetentionDecay,
 		Lifecycle: domain.MemoryLifecycleActive, CreatedAt: now, UpdatedAt: now,
@@ -106,9 +110,9 @@ func TestStageTwoContextUsesCoreAndCrossSessionArchive(t *testing.T) {
 	bridge := newMemoryTestBridge(t)
 	seedMemoryTest(t, bridge)
 	engine, err := memory.NewEngine(memory.Config{
-		Store:   sqliteMemoryAdapter{repositories: bridge.repositories},
-		Lexical: sqliteMemoryAdapter{repositories: bridge.repositories},
-		Archive: sqliteMemoryAdapter{repositories: bridge.repositories},
+		Store:   sqliteMemoryAdapter{repositories: bridge.repositories, agentID: bridge.personaProfileID()},
+		Lexical: sqliteMemoryAdapter{repositories: bridge.repositories, agentID: bridge.personaProfileID()},
+		Archive: sqliteMemoryAdapter{repositories: bridge.repositories, agentID: bridge.personaProfileID()},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -116,16 +120,16 @@ func TestStageTwoContextUsesCoreAndCrossSessionArchive(t *testing.T) {
 	currentID := domain.ID("conversation-current-context")
 	now := time.Now().UTC()
 	if err := bridge.repositories.Conversations.Create(context.Background(), storage.Conversation{
-		ID: currentID, Title: "Новый диалог", CreatedAt: now, UpdatedAt: now,
+		ID: currentID, AgentID: bridge.personaProfileID(), Title: "Новый диалог", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	assembler, err := contextbuilder.New(desktopContextSource{engine: engine, repositories: bridge.repositories}, contextbuilder.DefaultConfig())
+	assembler, err := contextbuilder.New(desktopContextSource{engine: engine, repositories: bridge.repositories, agentID: bridge.personaProfileID()}, contextbuilder.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := assembler.Assemble(context.Background(), contextbuilder.Input{
-		ConversationID: currentID, Query: "чай", ImmutablePolicy: "policy", IdentitySeed: "identity",
+		AgentID: bridge.personaProfileID(), ConversationID: currentID, Query: "чай", ImmutablePolicy: "policy", IdentitySeed: "identity",
 		Transcript: []agent.Message{{Role: agent.RoleUser, Content: "Какой чай я люблю?"}},
 	})
 	if err != nil {

@@ -54,6 +54,7 @@ func NewService(dependencies Dependencies) (*Service, error) {
 }
 
 type CreateRunInput struct {
+	AgentID        domain.ID
 	ID             domain.ID
 	Kind           domain.RunKind
 	ConversationID domain.ID
@@ -73,7 +74,13 @@ func (s *Service) CreateRun(ctx context.Context, input CreateRunInput) (domain.A
 			return domain.AgentRun{}, fmt.Errorf("create run id: %w", err)
 		}
 	}
-	run, err := domain.NewRun(runID, input.Kind, input.ConversationID, s.clock.Now())
+	var run domain.AgentRun
+	var err error
+	if input.AgentID.Empty() {
+		run, err = domain.NewRun(runID, input.Kind, input.ConversationID, s.clock.Now())
+	} else {
+		run, err = domain.NewRunForAgent(input.AgentID, runID, input.Kind, input.ConversationID, s.clock.Now())
+	}
 	if err != nil {
 		return domain.AgentRun{}, err
 	}

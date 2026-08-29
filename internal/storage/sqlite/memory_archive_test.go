@@ -22,7 +22,7 @@ func stage2Memory(at time.Time, id, content string) domain.Memory {
 func stage2ConversationAndMessage(t *testing.T, databaseCtx context.Context, repositories *Repositories, now time.Time, conversationID, messageID, content string) {
 	t.Helper()
 	if err := repositories.Conversations.Create(databaseCtx, Conversation{
-		ID: domain.ID(conversationID), Title: conversationID, CreatedAt: now, UpdatedAt: now,
+		ID: domain.ID(conversationID), AgentID: "owner", Title: conversationID, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -221,5 +221,45 @@ func TestSafeFTSQueryRejectsOperatorsAndKeepsTerms(t *testing.T) {
 	}
 	if _, err := safeFTSQuery("***"); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("punctuation-only query error = %v", err)
+	}
+}
+
+func TestMemoryRepositoryScopesListSearchAndRecallByAgent(t *testing.T) {
+	database, ctx := testDatabase(t)
+	repositories, err := NewRepositories(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	for _, profileID := range []domain.ID{"agent-a", "agent-b"} {
+		profile, profileErr := domain.NewAgentProfile(profileID, string(profileID), 20, "female", "", now)
+		if profileErr != nil {
+			t.Fatal(profileErr)
+		}
+		if err := repositories.Agents.Create(ctx, profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, item := range []domain.Memory{
+		{ID: "memory-a", AgentID: "agent-a", Scope: domain.MemoryScopeAgentPrivate, Kind: domain.MemoryKindSemantic, Nature: domain.MemoryNatureFact, Content: "agent a likes tea", Summary: "agent a likes tea", Confidence: .9, Salience: .8, Sensitivity: domain.MemorySensitivityPrivate, Retention: domain.MemoryRetentionPermanent, Lifecycle: domain.MemoryLifecycleActive, CreatedAt: now, UpdatedAt: now},
+		{ID: "memory-b", AgentID: "agent-b", Scope: domain.MemoryScopeAgentPrivate, Kind: domain.MemoryKindSemantic, Nature: domain.MemoryNatureFact, Content: "agent b likes coffee", Summary: "agent b likes coffee", Confidence: .9, Salience: .8, Sensitivity: domain.MemorySensitivityPrivate, Retention: domain.MemoryRetentionPermanent, Lifecycle: domain.MemoryLifecycleActive, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := repositories.Memories.Create(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := repositories.Memories.List(ctx, MemoryListOptions{AgentID: "agent-a", Scope: domain.MemoryScopeAgentPrivate})
+	if err != nil || len(items) != 1 || items[0].AgentID != "agent-a" {
+		t.Fatalf("scoped list = %#v, %v", items, err)
+	}
+	hits, err := repositories.Memories.Search(ctx, "coffee", MemorySearchOptions{AgentID: "agent-a", Scope: domain.MemoryScopeAgentPrivate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("cross-agent search returned %#v", hits)
+	}
+	if _, err := repositories.Memories.GetForAgent(ctx, "agent-a", "memory-b"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("cross-agent get error = %v", err)
 	}
 }

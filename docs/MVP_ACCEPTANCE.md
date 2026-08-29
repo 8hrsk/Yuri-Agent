@@ -24,7 +24,7 @@
 
 ## Текущий срез Stage 8
 
-Первый вертикальный срез добавляет persistent `AgentProfile`, обязательное создание агента при чистом запуске, owner-defined identity/traits, активный выбор профиля и bounded peer roster в model context. UI создания дополнительных агентов, физическое scoping старых таблиц по `agent_id`, anonymous delegation и background inter-agent dialogue остаются следующими последовательными срезами Stage 8 и пока не считаются реализованными.
+Первые два вертикальных среза добавляют persistent `AgentProfile`, обязательное создание агента при чистом запуске, owner-defined identity/traits, активный выбор профиля и bounded peer roster. Conversations, runs, transcript archive/FTS и private memory физически адресуются `agent_id`; legacy rows транзакционно привязываются к мигрированному владельцу, а background turn захватывает agent ID до запуска. UI создания дополнительных агентов, shared-memory scopes, anonymous delegation и background inter-agent dialogue остаются следующими последовательными срезами Stage 8 и пока не считаются реализованными.
 
 ## Состояние Stage 7
 

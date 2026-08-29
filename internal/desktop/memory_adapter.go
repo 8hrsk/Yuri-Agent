@@ -16,14 +16,22 @@ import (
 // memory engine and authoritative SQLite repositories.
 type sqliteMemoryAdapter struct {
 	repositories *storage.Repositories
+	agentID      domain.ID
 }
 
 func (adapter sqliteMemoryAdapter) GetMemory(ctx context.Context, id domain.ID) (domain.Memory, error) {
+	if !adapter.agentID.Empty() {
+		return adapter.repositories.Memories.GetForAgent(ctx, adapter.agentID, id)
+	}
 	return adapter.repositories.Memories.Get(ctx, id)
 }
 
 func (adapter sqliteMemoryAdapter) ListMemories(ctx context.Context, filter memory.MemoryFilter) ([]domain.Memory, error) {
+	if !adapter.agentID.Empty() && !filter.AgentID.Empty() && filter.AgentID != adapter.agentID {
+		return nil, domain.ErrConflict
+	}
 	items, err := adapter.repositories.Memories.List(ctx, storage.MemoryListOptions{
+		AgentID: adapter.agentID, Scope: domain.MemoryScopeAgentPrivate,
 		IncludeDormant: filter.IncludeDormant, IncludeDeleted: filter.IncludeDeleted, Limit: filter.Limit,
 	})
 	if err != nil {
@@ -61,7 +69,17 @@ func (adapter sqliteMemoryAdapter) ApplyMemoryChange(ctx context.Context, change
 	if change.Memory.ID.Empty() {
 		return fmt.Errorf("memory id is required")
 	}
-	current, err := adapter.repositories.Memories.Get(ctx, change.Memory.ID)
+	if change.Memory.Scope == "" {
+		change.Memory.Scope = domain.MemoryScopeAgentPrivate
+	}
+	if !adapter.agentID.Empty() {
+		if change.Memory.AgentID.Empty() {
+			change.Memory.AgentID = adapter.agentID
+		} else if change.Memory.AgentID != adapter.agentID {
+			return domain.ErrConflict
+		}
+	}
+	current, err := adapter.GetMemory(ctx, change.Memory.ID)
 	if errors.Is(err, domain.ErrNotFound) {
 		if change.Memory.Version != 1 {
 			return domain.ErrConflict
@@ -85,16 +103,29 @@ func (adapter sqliteMemoryAdapter) ApplyMemoryChange(ctx context.Context, change
 }
 
 func (adapter sqliteMemoryAdapter) TouchMemory(ctx context.Context, id domain.ID, at time.Time) error {
+	if !adapter.agentID.Empty() {
+		_, err := adapter.repositories.Memories.RecordRecallForAgent(ctx, adapter.agentID, id, at)
+		return err
+	}
 	_, err := adapter.repositories.Memories.RecordRecall(ctx, id, at)
 	return err
 }
 
 func (adapter sqliteMemoryAdapter) ListMemorySources(ctx context.Context, id domain.ID) ([]domain.MemorySource, error) {
+	if !adapter.agentID.Empty() {
+		return adapter.repositories.Memories.ListSourcesForAgent(ctx, adapter.agentID, id)
+	}
 	return adapter.repositories.Memories.ListSources(ctx, id)
 }
 
 func (adapter sqliteMemoryAdapter) ListMemoryVersions(ctx context.Context, id domain.ID, limit int) ([]memory.MemoryRevision, error) {
-	versions, err := adapter.repositories.Memories.ListVersions(ctx, id, limit)
+	var versions []storage.MemoryVersionRecord
+	var err error
+	if !adapter.agentID.Empty() {
+		versions, err = adapter.repositories.Memories.ListVersionsForAgent(ctx, adapter.agentID, id, limit)
+	} else {
+		versions, err = adapter.repositories.Memories.ListVersions(ctx, id, limit)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +141,11 @@ func (adapter sqliteMemoryAdapter) ListMemoryVersions(ctx context.Context, id do
 }
 
 func (adapter sqliteMemoryAdapter) SearchMemoryLexical(ctx context.Context, query string, filter memory.MemoryFilter, limit int) ([]memory.LexicalHit, error) {
+	if !adapter.agentID.Empty() && !filter.AgentID.Empty() && filter.AgentID != adapter.agentID {
+		return nil, domain.ErrConflict
+	}
 	hits, err := adapter.repositories.Memories.Search(ctx, query, storage.MemorySearchOptions{
+		AgentID: adapter.agentID, Scope: domain.MemoryScopeAgentPrivate,
 		IncludeDormant: filter.IncludeDormant, IncludeDeleted: filter.IncludeDeleted,
 		Limit: limit,
 	})
@@ -127,8 +162,12 @@ func (adapter sqliteMemoryAdapter) SearchMemoryLexical(ctx context.Context, quer
 }
 
 func (adapter sqliteMemoryAdapter) SearchArchive(ctx context.Context, query string, options memory.ArchiveSearchOptions) ([]memory.ArchiveHit, error) {
+	if !adapter.agentID.Empty() && !options.AgentID.Empty() && options.AgentID != adapter.agentID {
+		return nil, domain.ErrConflict
+	}
+	agentID := firstNonEmptyID(options.AgentID, adapter.agentID)
 	hits, err := adapter.repositories.Archive.Search(ctx, query, storage.ArchiveSearchOptions{
-		IncludeArchived: options.IncludeArchived, Limit: options.Limit, MaxTokens: options.Budget.MaxTokens,
+		AgentID: agentID, IncludeArchived: options.IncludeArchived, Limit: options.Limit, MaxTokens: options.Budget.MaxTokens,
 	})
 	if err != nil {
 		return nil, err

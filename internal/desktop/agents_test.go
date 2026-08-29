@@ -2,11 +2,14 @@ package desktop
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/OrdoAI/yuri-agent/internal/config"
+	"github.com/OrdoAI/yuri-agent/internal/domain"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 )
 
@@ -31,6 +34,40 @@ func newAgentTestBridge(t *testing.T) *Bridge {
 	bridge := &Bridge{database: database, repositories: repositories, paths: paths, config: config.Default(paths)}
 	t.Cleanup(func() { _ = database.Close() })
 	return bridge
+}
+
+func TestActiveAgentCannotReusePeerConversation(t *testing.T) {
+	bridge := newAgentTestBridge(t)
+	first, err := bridge.CreateAgent(CreateAgentInput{Name: "Юри", Gender: "female"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversation, err := bridge.NewConversation("Приватный диалог Юри")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := bridge.CreateAgent(CreateAgentInput{Name: "Мира", Gender: "female"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible, err := bridge.ListConversations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visible) != 0 {
+		t.Fatalf("peer conversations leaked to %s: %#v", second.Name, visible)
+	}
+	err = bridge.ensureConversation(context.Background(), domain.ID(conversation.ID), "чужой диалог", time.Now().UTC())
+	if err == nil || errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("cross-agent conversation error = %v, want explicit ownership rejection", err)
+	}
+	if _, err := bridge.SetActiveAgent(SelectAgentInput{ID: first.ID}); err != nil {
+		t.Fatal(err)
+	}
+	visible, err = bridge.ListConversations()
+	if err != nil || len(visible) != 1 || visible[0].ID != conversation.ID {
+		t.Fatalf("owner conversations = %#v, err = %v", visible, err)
+	}
 }
 
 func TestCreateAgentPersistsOwnerIdentityAndInitialPersona(t *testing.T) {

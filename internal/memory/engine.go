@@ -17,7 +17,17 @@ import (
 
 var ErrNoExtractor = fmt.Errorf("memory: extractor is not configured")
 
+func firstAgentID(values ...domain.ID) domain.ID {
+	for _, value := range values {
+		if !value.Empty() {
+			return value
+		}
+	}
+	return ""
+}
+
 type Config struct {
+	AgentID      domain.ID
 	Store        Store
 	Extractor    Extractor
 	Archive      ArchiveSearcher
@@ -37,6 +47,7 @@ type Config struct {
 // memory writes are internal, versioned, reversible changes. External side
 // effects remain outside this package and still require Yuri policy checks.
 type Engine struct {
+	agentID      domain.ID
 	store        Store
 	extractor    Extractor
 	archive      ArchiveSearcher
@@ -88,7 +99,7 @@ func NewEngine(config Config) (*Engine, error) {
 		config.Ranker.Now = config.Now
 	}
 	return &Engine{
-		store: config.Store, extractor: config.Extractor, archive: config.Archive,
+		agentID: config.AgentID, store: config.Store, extractor: config.Extractor, archive: config.Archive,
 		lexical: config.Lexical, vectors: config.Vectors, embedder: config.Embedder,
 		consolidator: config.Consolidator, ranker: config.Ranker,
 		now: config.Now, ids: config.IDs, decayPolicy: config.DecayPolicy,
@@ -129,6 +140,12 @@ func (e *Engine) ProcessTurn(ctx context.Context, turn Turn) ([]WriteResult, err
 	}
 	results := make([]WriteResult, 0, len(candidates))
 	for _, candidate := range candidates {
+		if candidate.Memory.AgentID.Empty() {
+			candidate.Memory.AgentID = firstAgentID(turn.AgentID, e.agentID)
+		}
+		if candidate.Memory.Scope == "" {
+			candidate.Memory.Scope = domain.MemoryScopeAgentPrivate
+		}
 		if err := contextErr(ctx); err != nil {
 			return results, err
 		}
@@ -167,6 +184,15 @@ func (e *Engine) applyCandidate(ctx context.Context, candidate Candidate, now ti
 	}
 	if now.IsZero() {
 		now = e.now()
+	}
+	if candidate.Memory.AgentID.Empty() {
+		candidate.Memory.AgentID = e.agentID
+	}
+	if candidate.Memory.Scope == "" {
+		candidate.Memory.Scope = domain.MemoryScopeAgentPrivate
+	}
+	if !e.agentID.Empty() && candidate.Memory.AgentID != e.agentID {
+		return WriteResult{}, domain.ErrConflict
 	}
 	if candidate.Operation == "" {
 		candidate.Operation = CandidateAuto
@@ -278,12 +304,15 @@ func (e *Engine) resolveExisting(ctx context.Context, candidate Candidate, memor
 		}
 		return existing, true, nil
 	}
-	items, err := e.store.ListMemories(ctx, MemoryFilter{IncludeDormant: true, Limit: 0})
+	items, err := e.store.ListMemories(ctx, MemoryFilter{AgentID: e.agentID, IncludeDormant: true, Limit: 0})
 	if err != nil {
 		return domain.Memory{}, false, err
 	}
 	key := strings.TrimSpace(memory.CanonicalKey)
 	for _, item := range items {
+		if !e.agentID.Empty() && item.AgentID != e.agentID {
+			continue
+		}
 		if item.Lifecycle == domain.MemoryLifecycleDeleted || item.HiddenFromCore && candidate.Operation == CandidateCreate {
 			continue
 		}
@@ -453,7 +482,8 @@ func (e *Engine) Recall(ctx context.Context, query string, options RecallOptions
 	if options.Limit <= 0 {
 		options.Limit = budget.MaxItems
 	}
-	filter := MemoryFilter{States: []LifecycleState{StateActive}, IncludeDormant: options.Mode == RecallDeliberate, IncludeHidden: options.IncludeHidden, Limit: 0}
+	agentID := firstAgentID(options.AgentID, e.agentID)
+	filter := MemoryFilter{AgentID: agentID, States: []LifecycleState{StateActive}, IncludeDormant: options.Mode == RecallDeliberate, IncludeHidden: options.IncludeHidden, Limit: 0}
 	if options.Mode == RecallDeliberate {
 		filter.States = []LifecycleState{StateActive, StateDormant}
 	}
@@ -544,6 +574,12 @@ func (e *Engine) Recall(ctx context.Context, query string, options RecallOptions
 }
 
 func eligible(memory domain.Memory, filter MemoryFilter) bool {
+	if !filter.AgentID.Empty() && memory.AgentID != filter.AgentID {
+		return false
+	}
+	if memory.Scope != "" && memory.Scope != domain.MemoryScopeAgentPrivate {
+		return false
+	}
 	if memory.Lifecycle == domain.MemoryLifecycleDeleted {
 		return false
 	}
@@ -616,6 +652,7 @@ func (e *Engine) SearchArchive(ctx context.Context, query string, options Archiv
 		options.Limit = 20
 	}
 	options.Budget = options.Budget.normalize(options.Limit)
+	options.AgentID = firstAgentID(options.AgentID, e.agentID)
 	hits, err := e.archive.SearchArchive(ctx, query, options)
 	if err != nil {
 		return nil, err
@@ -660,13 +697,13 @@ func (e *Engine) ApplyDecay(ctx context.Context, now time.Time) ([]WriteResult, 
 	if now.IsZero() {
 		now = e.now()
 	}
-	items, err := e.store.ListMemories(ctx, MemoryFilter{Limit: 0})
+	items, err := e.store.ListMemories(ctx, MemoryFilter{AgentID: e.agentID, Limit: 0})
 	if err != nil {
 		return nil, err
 	}
 	results := make([]WriteResult, 0)
 	for _, item := range items {
-		if item.Lifecycle != domain.MemoryLifecycleActive || item.Pinned || item.HiddenFromCore || item.Retention == domain.MemoryRetentionPermanent {
+		if (!e.agentID.Empty() && item.AgentID != e.agentID) || item.Lifecycle != domain.MemoryLifecycleActive || item.Pinned || item.HiddenFromCore || item.Retention == domain.MemoryRetentionPermanent {
 			continue
 		}
 		policy := e.decayPolicy(item).normalize(item.Kind)
@@ -823,13 +860,13 @@ func (e *Engine) RebuildVectorIndex(ctx context.Context) (int, error) {
 	if e.embedder == nil || e.vectors == nil {
 		return 0, fmt.Errorf("%w: vector index and embedder are required", ErrNoEmbedder)
 	}
-	items, err := e.store.ListMemories(ctx, MemoryFilter{IncludeDormant: true, IncludeHidden: true, Limit: 0})
+	items, err := e.store.ListMemories(ctx, MemoryFilter{AgentID: e.agentID, IncludeDormant: true, IncludeHidden: true, Limit: 0})
 	if err != nil {
 		return 0, err
 	}
 	count := 0
 	for _, item := range items {
-		if item.Lifecycle == domain.MemoryLifecycleDeleted {
+		if (!e.agentID.Empty() && item.AgentID != e.agentID) || item.Lifecycle == domain.MemoryLifecycleDeleted {
 			continue
 		}
 		if err := e.indexMemory(ctx, item); err != nil {
@@ -870,13 +907,13 @@ func (e *Engine) CoreSnapshot(ctx context.Context, options Budget) (ContextSnaps
 		options = e.coreBudget
 	}
 	options = options.normalize(16)
-	items, err := e.store.ListMemories(ctx, MemoryFilter{States: []LifecycleState{StateActive}, Kinds: []Kind{KindCore, KindUserProfile, KindSemantic, KindProcedural, KindRelationship}, IncludeHidden: false, Limit: 0})
+	items, err := e.store.ListMemories(ctx, MemoryFilter{AgentID: e.agentID, States: []LifecycleState{StateActive}, Kinds: []Kind{KindCore, KindUserProfile, KindSemantic, KindProcedural, KindRelationship}, IncludeHidden: false, Limit: 0})
 	if err != nil {
 		return ContextSnapshot{}, err
 	}
 	candidates := make([]RankCandidate, 0, len(items))
 	for _, item := range items {
-		if item.Lifecycle != domain.MemoryLifecycleActive || item.HiddenFromCore || item.Lifecycle == domain.MemoryLifecycleDeleted ||
+		if (!e.agentID.Empty() && item.AgentID != e.agentID) || item.Lifecycle != domain.MemoryLifecycleActive || item.HiddenFromCore || item.Lifecycle == domain.MemoryLifecycleDeleted ||
 			item.Sensitivity == domain.MemorySensitivityHighlySensitive {
 			continue
 		}

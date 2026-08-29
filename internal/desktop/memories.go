@@ -38,6 +38,8 @@ type MemorySourceView struct {
 
 type MemoryView struct {
 	ID               string             `json:"id"`
+	AgentID          string             `json:"agentId"`
+	Scope            string             `json:"scope"`
 	Version          uint64             `json:"version"`
 	Kind             string             `json:"kind"`
 	Nature           string             `json:"nature"`
@@ -117,6 +119,7 @@ func (b *Bridge) ListMemories(input MemoryListInput) ([]MemoryView, error) {
 	includeDormant := input.IncludeDormant || lifecycle == "dormant" || lifecycle == "all"
 	includeDeleted := input.IncludeDeleted || lifecycle == "deleted" || lifecycle == "all"
 	options := storage.MemoryListOptions{
+		AgentID: b.personaProfileID(), Scope: domain.MemoryScopeAgentPrivate,
 		IncludeDormant: includeDormant, IncludeDeleted: includeDeleted,
 		Limit: input.Limit, Offset: input.Offset,
 	}
@@ -134,6 +137,7 @@ func (b *Bridge) ListMemories(input MemoryListInput) ([]MemoryView, error) {
 		}
 	} else {
 		hits, err := b.repositories.Memories.Search(ctx, query, storage.MemorySearchOptions{
+			AgentID: b.personaProfileID(), Scope: domain.MemoryScopeAgentPrivate,
 			IncludeDormant: includeDormant, IncludeDeleted: includeDeleted, Kind: options.Kind,
 			Limit: input.Limit, Offset: input.Offset,
 		})
@@ -163,7 +167,7 @@ func (b *Bridge) UpdateMemory(input UpdateMemoryInput) (MemoryView, error) {
 	ctx, cancel := b.context()
 	defer cancel()
 	id := memoryInputID(input.ID, input.MemoryID)
-	current, err := b.repositories.Memories.Get(ctx, id)
+	current, err := b.repositories.Memories.GetForAgent(ctx, b.personaProfileID(), id)
 	if err != nil {
 		return MemoryView{}, err
 	}
@@ -208,7 +212,7 @@ func (b *Bridge) SetMemoryLifecycle(input SetMemoryLifecycleInput) (MemoryView, 
 	ctx, cancel := b.context()
 	defer cancel()
 	id := memoryInputID(input.ID, input.MemoryID)
-	current, err := b.repositories.Memories.Get(ctx, id)
+	current, err := b.repositories.Memories.GetForAgent(ctx, b.personaProfileID(), id)
 	if err != nil {
 		return MemoryView{}, err
 	}
@@ -217,11 +221,11 @@ func (b *Bridge) SetMemoryLifecycle(input SetMemoryLifecycleInput) (MemoryView, 
 	var next domain.Memory
 	switch state {
 	case domain.MemoryLifecycleActive:
-		next, err = b.repositories.Memories.Restore(ctx, id, current.Version, now, "user restored memory")
+		next, err = b.repositories.Memories.RestoreForAgent(ctx, b.personaProfileID(), id, current.Version, now, "user restored memory")
 	case domain.MemoryLifecycleDormant:
-		next, err = b.repositories.Memories.MarkDormant(ctx, id, current.Version, now, "user hid memory from active recall")
+		next, err = b.repositories.Memories.MarkDormantForAgent(ctx, b.personaProfileID(), id, current.Version, now, "user hid memory from active recall")
 	case domain.MemoryLifecycleDeleted:
-		next, err = b.repositories.Memories.SoftDelete(ctx, id, current.Version, now, "user deleted memory")
+		next, err = b.repositories.Memories.SoftDeleteForAgent(ctx, b.personaProfileID(), id, current.Version, now, "user deleted memory")
 	default:
 		return MemoryView{}, fmt.Errorf("invalid memory lifecycle %q", state)
 	}
@@ -237,14 +241,14 @@ func (b *Bridge) DeleteMemory(input DeleteMemoryInput) error {
 	ctx, cancel := b.context()
 	defer cancel()
 	id := memoryInputID(input.ID, input.MemoryID)
-	current, err := b.repositories.Memories.Get(ctx, id)
+	current, err := b.repositories.Memories.GetForAgent(ctx, b.personaProfileID(), id)
 	if err != nil {
 		return err
 	}
 	if current.IsDeleted() {
 		return nil
 	}
-	_, err = b.repositories.Memories.SoftDelete(ctx, id, current.Version, time.Now().UTC(), "user deleted memory")
+	_, err = b.repositories.Memories.SoftDeleteForAgent(ctx, b.personaProfileID(), id, current.Version, time.Now().UTC(), "user deleted memory")
 	return err
 }
 
@@ -260,7 +264,7 @@ func (b *Bridge) SearchArchive(input ArchiveSearchInput) (ArchiveSearchResponseV
 		limit = 40
 	}
 	hits, err := b.repositories.Archive.Search(ctx, query, storage.ArchiveSearchOptions{
-		ConversationID: domain.ID(strings.TrimSpace(input.ConversationID)), Limit: limit,
+		AgentID: b.personaProfileID(), ConversationID: domain.ID(strings.TrimSpace(input.ConversationID)), Limit: limit,
 		Offset: input.Offset, MaxTokens: 8_000,
 	})
 	if err != nil {
@@ -276,6 +280,7 @@ func (b *Bridge) SearchArchive(input ArchiveSearchInput) (ArchiveSearchResponseV
 	// the original evidence message whenever provenance is available.
 	if input.IncludeDormant && len(results) < limit {
 		memoryHits, searchErr := b.repositories.Memories.Search(ctx, query, storage.MemorySearchOptions{
+			AgentID: b.personaProfileID(), Scope: domain.MemoryScopeAgentPrivate,
 			IncludeDormant: true, Deliberate: true, Limit: limit - len(results), MaxTokens: 4_000,
 		})
 		if searchErr != nil {
@@ -316,7 +321,7 @@ func (b *Bridge) SearchArchive(input ArchiveSearchInput) (ArchiveSearchResponseV
 }
 
 func (b *Bridge) memoryView(ctx context.Context, item domain.Memory) (MemoryView, error) {
-	sources, err := b.repositories.Memories.ListSources(ctx, item.ID, item.Version)
+	sources, err := b.repositories.Memories.ListSourcesForAgent(ctx, item.AgentID, item.ID, item.Version)
 	if err != nil {
 		return MemoryView{}, err
 	}
@@ -341,7 +346,7 @@ func (b *Bridge) memoryView(ctx context.Context, item domain.Memory) (MemoryView
 		views = append(views, view)
 	}
 	result := MemoryView{
-		ID: string(item.ID), Version: item.Version, Kind: string(item.Kind), Nature: string(item.Nature),
+		ID: string(item.ID), AgentID: string(item.AgentID), Scope: string(item.Scope), Version: item.Version, Kind: string(item.Kind), Nature: string(item.Nature),
 		Content: item.Content, Confidence: item.Confidence, Salience: item.Salience, Valence: item.Valence,
 		Sensitivity: string(item.Sensitivity), Lifecycle: string(item.Lifecycle), Pinned: item.Pinned,
 		AccessCount: item.AccessCount, DecayPolicy: string(item.Retention), EmbeddingVersion: item.EmbeddingVersion,

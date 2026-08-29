@@ -106,7 +106,7 @@ type approvalDecisionInput struct {
 func (b *Bridge) ListConversations() ([]ConversationView, error) {
 	ctx, cancel := b.context()
 	defer cancel()
-	conversations, err := b.repositories.Conversations.List(ctx)
+	conversations, err := b.repositories.Conversations.ListByAgent(ctx, b.personaProfileID())
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +148,7 @@ func (b *Bridge) NewConversation(title string) (ConversationView, error) {
 	}
 	now := time.Now().UTC()
 	if err := b.repositories.Conversations.Create(ctx, storage.Conversation{
-		ID: id, Title: truncateRunes(title, 80), CreatedAt: now, UpdatedAt: now,
+		ID: id, AgentID: b.personaProfileID(), Title: truncateRunes(title, 80), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		return ConversationView{}, err
 	}
@@ -183,6 +183,13 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if request.Text == "" {
 		return ChatRunResult{}, errors.New("message text is required")
 	}
+	// Capture ownership before any provider or background work starts. The
+	// active agent may change while this run is in flight, but all durable and
+	// derived state for the run must remain scoped to this one agent.
+	agentID := b.personaProfileID()
+	if agentID.Empty() {
+		return ChatRunResult{}, fmt.Errorf("%w: active agent is required", domain.ErrInvalidArgument)
+	}
 	conversationID := domain.ID(strings.TrimSpace(request.ConversationID))
 	if conversationID.Empty() {
 		var err error
@@ -204,7 +211,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	defer cancel()
 
 	now := time.Now().UTC()
-	if err := b.ensureConversation(runContext, conversationID, request.Text, now); err != nil {
+	if err := b.ensureConversation(runContext, conversationID, request.Text, now, agentID); err != nil {
 		return ChatRunResult{}, err
 	}
 	var userMessageID domain.ID
@@ -226,7 +233,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if err != nil {
 		return ChatRunResult{}, err
 	}
-	run, err := domain.NewRun(runID, runKind, conversationID, now)
+	run, err := domain.NewRunForAgent(agentID, runID, runKind, conversationID, now)
 	if err != nil {
 		return ChatRunResult{}, err
 	}
@@ -289,7 +296,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	}
 	runtime.Approvals = desktopApprovalHandler{bridge: b}
 	emitter.tools = registry
-	memoryEngine, err := b.newMemoryEngine(backend, model)
+	memoryEngine, err := b.newMemoryEngine(backend, model, agentID)
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
@@ -309,11 +316,11 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 			userMessageID = message.ID
 		}
 	}
-	assembler, err := contextbuilder.New(desktopContextSource{engine: memoryEngine, repositories: b.repositories}, contextbuilder.DefaultConfig())
+	assembler, err := contextbuilder.New(desktopContextSource{engine: memoryEngine, repositories: b.repositories, agentID: agentID}, contextbuilder.DefaultConfig())
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
-	profileID := b.personaProfileID()
+	profileID := agentID
 	profile, err := b.repositories.Agents.Get(runContext, profileID)
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
@@ -335,7 +342,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
 	snapshot, err := assembler.Assemble(runContext, contextbuilder.Input{
-		ConversationID: conversationID, Query: request.Text,
+		AgentID: profileID, ConversationID: conversationID, Query: request.Text,
 		ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, roster),
 		MutablePersona: formatMutablePersonaContext(persona), Relationship: formatRelationshipContext(relationship, affect),
 		Transcript: currentTranscript,
@@ -362,15 +369,15 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if err := transitionAndSave(runContext, b.repositories.Runs, &run, domain.RunStateCompleted); err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
-	_ = b.touchConversation(runContext, conversationID, finishedAt)
+	_ = b.touchConversation(runContext, conversationID, finishedAt, agentID)
 	emitter.emit(ChatEvent{Type: "run.completed", ConversationID: string(conversationID), RunID: string(runID), Status: "complete"})
 	b.reviewTurnInBackground(memoryEngine, backend, model, runKind == domain.RunKindInteractive, memory.Turn{
-		RunID: runID, ConversationID: conversationID, Now: finishedAt,
+		RunID: runID, AgentID: profileID, ConversationID: conversationID, Now: finishedAt,
 		Messages: []memory.TranscriptMessage{
 			{ID: userMessageID, ConversationID: conversationID, Role: string(agent.RoleUser), Content: request.Text, CreatedAt: now},
 			{ID: assistantMessageID, ConversationID: conversationID, Role: string(agent.RoleAssistant), Content: result.Message.Content, CreatedAt: finishedAt},
 		},
-	})
+	}, agentID)
 	return ChatRunResult{RunID: string(runID), Status: "complete", Events: emitter.Events()}, nil
 }
 
@@ -1035,9 +1042,19 @@ func (b *Bridge) failChatRun(ctx context.Context, run *domain.AgentRun, emitter 
 	return ChatRunResult{RunID: emitter.runID, Status: status, Events: emitter.Events()}
 }
 
-func (b *Bridge) ensureConversation(ctx context.Context, id domain.ID, text string, now time.Time) error {
+func (b *Bridge) ensureConversation(ctx context.Context, id domain.ID, text string, now time.Time, agentIDs ...domain.ID) error {
+	agentID := b.personaProfileID()
+	if len(agentIDs) > 0 {
+		agentID = agentIDs[0]
+	}
+	if agentID.Empty() {
+		return fmt.Errorf("%w: active agent is required", domain.ErrInvalidArgument)
+	}
 	conversation, err := b.repositories.Conversations.Get(ctx, id)
 	if err == nil {
+		if conversation.AgentID != agentID {
+			return errors.New("conversation does not belong to the active agent")
+		}
 		conversation.UpdatedAt = now
 		return b.repositories.Conversations.Save(ctx, conversation)
 	}
@@ -1045,14 +1062,24 @@ func (b *Bridge) ensureConversation(ctx context.Context, id domain.ID, text stri
 		return err
 	}
 	return b.repositories.Conversations.Create(ctx, storage.Conversation{
-		ID: id, Title: truncateRunes(text, 36), CreatedAt: now, UpdatedAt: now,
+		ID: id, AgentID: agentID, Title: truncateRunes(text, 36), CreatedAt: now, UpdatedAt: now,
 	})
 }
 
-func (b *Bridge) touchConversation(ctx context.Context, id domain.ID, now time.Time) error {
+func (b *Bridge) touchConversation(ctx context.Context, id domain.ID, now time.Time, agentIDs ...domain.ID) error {
+	agentID := b.personaProfileID()
+	if len(agentIDs) > 0 {
+		agentID = agentIDs[0]
+	}
+	if agentID.Empty() {
+		return fmt.Errorf("%w: active agent is required", domain.ErrInvalidArgument)
+	}
 	conversation, err := b.repositories.Conversations.Get(ctx, id)
 	if err != nil {
 		return err
+	}
+	if conversation.AgentID != agentID {
+		return errors.New("conversation does not belong to the active agent")
 	}
 	conversation.UpdatedAt = now
 	return b.repositories.Conversations.Save(ctx, conversation)

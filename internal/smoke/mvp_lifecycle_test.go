@@ -72,7 +72,7 @@ func TestMVPOfflineLifecycle(t *testing.T) {
 
 	t.Run("conversation archive and memory", func(t *testing.T) {
 		conversation := storage.Conversation{
-			ID: conversationID, Title: "Offline dogfood", CreatedAt: now, UpdatedAt: now,
+			ID: conversationID, AgentID: "owner", Title: "Offline dogfood", CreatedAt: now, UpdatedAt: now,
 		}
 		if err := repositories.Conversations.Create(ctx, conversation); err != nil {
 			t.Fatalf("create conversation: %v", err)

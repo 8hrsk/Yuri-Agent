@@ -46,7 +46,7 @@ func TestDesktopApprovalHandlerExpiresStaleDecision(t *testing.T) {
 	now := time.Now().UTC()
 	conversationID := domain.ID("conversation-expired")
 	runID := domain.ID("run-expired")
-	if err := repositories.Conversations.Create(ctx, storage.Conversation{ID: conversationID, Title: "Expired", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := repositories.Conversations.Create(ctx, storage.Conversation{ID: conversationID, AgentID: "owner", Title: "Expired", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	run, err := domain.NewRun(runID, domain.RunKindInteractive, conversationID, now)

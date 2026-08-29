@@ -17,7 +17,11 @@ import (
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 )
 
-func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, model string, turn memory.Turn) {
+func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, model string, turn memory.Turn, agentIDs ...domain.ID) {
+	agentID := firstNonEmptyID(agentIDs...)
+	if agentID.Empty() {
+		agentID = firstNonEmptyID(turn.AgentID, b.personaProfileID())
+	}
 	b.mu.Lock()
 	enabled := b.config.Persona.AutoEvolution
 	cooldown := time.Duration(b.config.Persona.ReflectionCooldownMinutes) * time.Minute
@@ -31,16 +35,17 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 	if !enabled || backend == nil || strings.TrimSpace(model) == "" || len(turn.Messages) == 0 {
 		return
 	}
-	// The product has one local owner/profile. Skip overlapping reviews rather
-	// than queueing stale snapshots and spending model budget only to lose the
-	// optimistic version race at persistence time.
+	// Reflection currently has one process-wide worker. Skip overlapping reviews
+	// rather than queueing stale snapshots and spending model budget only to lose
+	// the optimistic version race at persistence time. The captured agent ID still
+	// keeps the accepted review inside its profile boundary.
 	select {
 	case gate <- struct{}{}:
 		defer func() { <-gate }()
 	default:
 		return
 	}
-	state, domainState, evidence, err := b.reflectionSnapshot(ctx, turn)
+	state, domainState, evidence, err := b.reflectionSnapshot(ctx, turn, agentID)
 	if err != nil {
 		b.logReflectionFailure(ctx, turn.RunID, err)
 		return
@@ -70,7 +75,7 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 		b.logReflectionFailure(ctx, turn.RunID, err)
 		return
 	}
-	profileID := b.personaProfileID()
+	profileID := agentID
 	profile, err := b.repositories.Agents.Get(ctx, profileID)
 	if err != nil {
 		b.logReflectionFailure(ctx, turn.RunID, err)
@@ -118,8 +123,11 @@ type reflectionDomainState struct {
 	affect       domain.AffectiveState
 }
 
-func (b *Bridge) reflectionSnapshot(ctx context.Context, turn memory.Turn) (reflection.ReflectionState, reflectionDomainState, []reflection.Evidence, error) {
-	profileID := b.personaProfileID()
+func (b *Bridge) reflectionSnapshot(ctx context.Context, turn memory.Turn, agentIDs ...domain.ID) (reflection.ReflectionState, reflectionDomainState, []reflection.Evidence, error) {
+	profileID := firstNonEmptyID(agentIDs...)
+	if profileID.Empty() {
+		profileID = firstNonEmptyID(turn.AgentID, b.personaProfileID())
+	}
 	persona, err := b.repositories.Persona.Get(ctx, profileID)
 	if err != nil {
 		return reflection.ReflectionState{}, reflectionDomainState{}, nil, err

@@ -26,8 +26,8 @@ func (r *ConversationRepository) Create(ctx context.Context, conversation Conver
 	if err := contextErr(ctx); err != nil {
 		return err
 	}
-	if conversation.ID.Empty() || strings.TrimSpace(conversation.Title) == "" {
-		return fmt.Errorf("%w: conversation id and title are required", domain.ErrInvalidArgument)
+	if conversation.ID.Empty() || conversation.AgentID.Empty() || strings.TrimSpace(conversation.Title) == "" {
+		return fmt.Errorf("%w: conversation id, agent id and title are required", domain.ErrInvalidArgument)
 	}
 	createdAt, err := timeValue(conversation.CreatedAt)
 	if err != nil {
@@ -42,9 +42,9 @@ func (r *ConversationRepository) Create(ctx context.Context, conversation Conver
 		return err
 	}
 	_, err = r.db.ExecContext(ctx, `
-		INSERT INTO conversations(id, title, created_at, updated_at, archived_at)
-		VALUES (?, ?, ?, ?, ?)`,
-		string(conversation.ID), strings.TrimSpace(conversation.Title), createdAt,
+		INSERT INTO conversations(id, agent_id, title, created_at, updated_at, archived_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		string(conversation.ID), string(conversation.AgentID), strings.TrimSpace(conversation.Title), createdAt,
 		updatedAtValue, nullableTimeValue(pointerTime(conversation.ArchivedAt)))
 	return wrappedSQLError("create conversation", err)
 }
@@ -62,16 +62,17 @@ func (r *ConversationRepository) Get(ctx context.Context, id domain.ID) (Convers
 	var (
 		result                         Conversation
 		archivedAt, createdAt, updated string
-		idValue                        string
+		idValue, agentIDValue          string
 	)
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, title, created_at, updated_at, archived_at
+		SELECT id, agent_id, title, created_at, updated_at, archived_at
 		FROM conversations WHERE id = ?`, string(id)).Scan(
-		&idValue, &result.Title, &createdAt, &updated, &nullableString{Value: &archivedAt})
+		&idValue, &agentIDValue, &result.Title, &createdAt, &updated, &nullableString{Value: &archivedAt})
 	if err != nil {
 		return Conversation{}, wrappedSQLError("get conversation", err)
 	}
 	result.ID = domain.ID(idValue)
+	result.AgentID = domain.ID(agentIDValue)
 	if result.CreatedAt, err = scanTime(createdAt); err != nil {
 		return Conversation{}, err
 	}
@@ -91,6 +92,18 @@ func (r *ConversationRepository) Get(ctx context.Context, id domain.ID) (Convers
 // List returns conversations ordered by most recently updated. Archived
 // conversations are excluded unless includeArchived is true.
 func (r *ConversationRepository) List(ctx context.Context, includeArchived ...bool) ([]Conversation, error) {
+	return r.list(ctx, "", includeArchived...)
+}
+
+// ListByAgent returns only conversations owned by one named agent.
+func (r *ConversationRepository) ListByAgent(ctx context.Context, agentID domain.ID, includeArchived ...bool) ([]Conversation, error) {
+	if agentID.Empty() {
+		return nil, fmt.Errorf("%w: agent id is required", domain.ErrInvalidArgument)
+	}
+	return r.list(ctx, agentID, includeArchived...)
+}
+
+func (r *ConversationRepository) list(ctx context.Context, agentID domain.ID, includeArchived ...bool) ([]Conversation, error) {
 	if err := requireDatabase(r.db); err != nil {
 		return nil, err
 	}
@@ -99,13 +112,22 @@ func (r *ConversationRepository) List(ctx context.Context, includeArchived ...bo
 	}
 	include := len(includeArchived) > 0 && includeArchived[0]
 	query := `
-		SELECT id, title, created_at, updated_at, archived_at
+		SELECT id, agent_id, title, created_at, updated_at, archived_at
 		FROM conversations`
+	where := make([]string, 0, 2)
+	args := make([]any, 0, 1)
+	if !agentID.Empty() {
+		where = append(where, "agent_id = ?")
+		args = append(args, string(agentID))
+	}
 	if !include {
-		query += " WHERE archived_at IS NULL"
+		where = append(where, "archived_at IS NULL")
+	}
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
 	}
 	query += " ORDER BY updated_at DESC, id DESC"
-	rows, err := r.db.QueryContext(ctx, query)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, wrappedSQLError("list conversations", err)
 	}
@@ -113,14 +135,15 @@ func (r *ConversationRepository) List(ctx context.Context, includeArchived ...bo
 	result := make([]Conversation, 0)
 	for rows.Next() {
 		var (
-			item                        Conversation
-			idValue, createdAt, updated string
-			archived                    sql.NullString
+			item                                      Conversation
+			idValue, agentIDValue, createdAt, updated string
+			archived                                  sql.NullString
 		)
-		if err := rows.Scan(&idValue, &item.Title, &createdAt, &updated, &archived); err != nil {
+		if err := rows.Scan(&idValue, &agentIDValue, &item.Title, &createdAt, &updated, &archived); err != nil {
 			return nil, wrappedSQLError("scan conversation", err)
 		}
 		item.ID = domain.ID(idValue)
+		item.AgentID = domain.ID(agentIDValue)
 		if item.CreatedAt, err = scanTime(createdAt); err != nil {
 			return nil, err
 		}
@@ -151,8 +174,8 @@ func (r *ConversationRepository) Save(ctx context.Context, conversation Conversa
 	if err := contextErr(ctx); err != nil {
 		return err
 	}
-	if conversation.ID.Empty() || strings.TrimSpace(conversation.Title) == "" {
-		return fmt.Errorf("%w: conversation id and title are required", domain.ErrInvalidArgument)
+	if conversation.ID.Empty() || conversation.AgentID.Empty() || strings.TrimSpace(conversation.Title) == "" {
+		return fmt.Errorf("%w: conversation id, agent id and title are required", domain.ErrInvalidArgument)
 	}
 	updatedAt := conversation.UpdatedAt
 	if updatedAt.IsZero() {

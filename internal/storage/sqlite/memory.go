@@ -15,6 +15,8 @@ import (
 // By default only active memories are returned. The UI can opt into dormant
 // and deleted records for review without changing normal retrieval behavior.
 type MemoryListOptions struct {
+	AgentID        domain.ID
+	Scope          domain.MemoryScope
 	Kind           domain.MemoryKind
 	IncludeDormant bool
 	IncludeDeleted bool
@@ -27,6 +29,8 @@ type MemoryListOptions struct {
 // CoreMemoryOptions bounds the stable prefix injected into a new context.
 // MaxTokens is an approximate UTF-8 token budget; zero means unbounded.
 type CoreMemoryOptions struct {
+	AgentID   domain.ID
+	Scope     domain.MemoryScope
 	MaxItems  int
 	MaxTokens int
 }
@@ -35,6 +39,8 @@ type CoreMemoryOptions struct {
 // similarity is supplied by the memory service; this repository owns the FTS
 // lexical leg and returns a deterministic lexical score and provenance.
 type MemorySearchOptions struct {
+	AgentID        domain.ID
+	Scope          domain.MemoryScope
 	IncludeDormant bool
 	// Deliberate is an explicit opt-in alias for IncludeDormant. It is useful
 	// for callers representing a user-requested retrospective search.
@@ -172,6 +178,9 @@ func (r *MemoryRepository) saveWithOperation(ctx context.Context, memory domain.
 	if memory.Version != currentVersion+1 {
 		return domain.ErrConflict
 	}
+	if err := ensureMemoryAgentTx(ctx, tx, memory.ID, memory.AgentID); err != nil {
+		return err
+	}
 	if err := r.appendVersionTx(ctx, tx, memory, firstSources(sources), currentVersion, operation, nil, nil); err != nil {
 		return err
 	}
@@ -221,6 +230,9 @@ func (r *MemoryRepository) AppendVersion(ctx context.Context, memory domain.Memo
 	if expectedVersion != currentVersion || memory.Version != currentVersion+1 {
 		return domain.Memory{}, domain.ErrConflict
 	}
+	if err := ensureMemoryAgentTx(ctx, tx, memory.ID, memory.AgentID); err != nil {
+		return domain.Memory{}, err
+	}
 	if err := r.appendVersionTx(ctx, tx, memory, firstSources(sources), currentVersion, "update", nil, nil); err != nil {
 		return domain.Memory{}, err
 	}
@@ -264,6 +276,9 @@ func (r *MemoryRepository) AppendVersionWithMetadata(ctx context.Context, memory
 	if metadata.ParentVersion == 0 {
 		metadata.ParentVersion = currentVersion
 	}
+	if err := ensureMemoryAgentTx(ctx, tx, memory.ID, memory.AgentID); err != nil {
+		return domain.Memory{}, err
+	}
 	if err := r.appendVersionTx(ctx, tx, memory, firstSources(sources), currentVersion, metadata.Operation, &metadata, nil); err != nil {
 		return domain.Memory{}, err
 	}
@@ -293,6 +308,22 @@ func (r *MemoryRepository) Get(ctx context.Context, id domain.ID) (domain.Memory
 		return domain.Memory{}, fmt.Errorf("%w: memory id is required", domain.ErrInvalidArgument)
 	}
 	return getCurrentMemory(ctx, r.db, id)
+}
+
+// GetForAgent returns a memory only when it belongs to the requested agent.
+// This scoped variant is used by the desktop adapter; the unscoped method is
+// retained for migrations and administrative tooling.
+func (r *MemoryRepository) GetForAgent(ctx context.Context, agentID, id domain.ID) (domain.Memory, error) {
+	if agentID.Empty() {
+		return domain.Memory{}, fmt.Errorf("%w: memory agent id is required", domain.ErrInvalidArgument)
+	}
+	if err := requireDatabase(r.db); err != nil {
+		return domain.Memory{}, err
+	}
+	if err := contextErr(ctx); err != nil {
+		return domain.Memory{}, err
+	}
+	return getCurrentMemoryForAgent(ctx, r.db, agentID, id)
 }
 
 // GetVersion returns an immutable journal revision rather than the current
@@ -410,6 +441,23 @@ func (r *MemoryRepository) ListMemoryVersions(ctx context.Context, id domain.ID,
 	return r.ListVersions(ctx, id, limit...)
 }
 
+func (r *MemoryRepository) ListVersionsForAgent(ctx context.Context, agentID, id domain.ID, limit ...int) ([]MemoryVersionRecord, error) {
+	item, err := r.GetForAgent(ctx, agentID, id)
+	if err != nil {
+		return nil, err
+	}
+	versions, err := r.ListVersions(ctx, id, limit...)
+	if err != nil {
+		return nil, err
+	}
+	for index := range versions {
+		if versions[index].Memory.AgentID != item.AgentID || versions[index].Memory.Scope != item.Scope {
+			return nil, domain.ErrConflict
+		}
+	}
+	return versions, nil
+}
+
 // GetCurrent is an explicit alias for Get for context assemblers that need to
 // distinguish the current projection from an immutable journal revision.
 func (r *MemoryRepository) GetCurrent(ctx context.Context, id domain.ID) (domain.Memory, error) {
@@ -420,6 +468,17 @@ func (r *MemoryRepository) GetCurrent(ctx context.Context, id domain.ID) (domain
 // deduplication. Empty keys are rejected because an empty key would collapse
 // unrelated candidates into one record.
 func (r *MemoryRepository) FindByCanonicalKey(ctx context.Context, key string, includeDormant ...bool) (domain.Memory, error) {
+	return r.findByCanonicalKey(ctx, domain.ID(""), key, includeDormant...)
+}
+
+func (r *MemoryRepository) FindByCanonicalKeyForAgent(ctx context.Context, agentID domain.ID, key string, includeDormant ...bool) (domain.Memory, error) {
+	if agentID.Empty() {
+		return domain.Memory{}, fmt.Errorf("%w: memory agent id is required", domain.ErrInvalidArgument)
+	}
+	return r.findByCanonicalKey(ctx, agentID, key, includeDormant...)
+}
+
+func (r *MemoryRepository) findByCanonicalKey(ctx context.Context, agentID domain.ID, key string, includeDormant ...bool) (domain.Memory, error) {
 	if err := requireDatabase(r.db); err != nil {
 		return domain.Memory{}, err
 	}
@@ -435,12 +494,18 @@ func (r *MemoryRepository) FindByCanonicalKey(ctx context.Context, key string, i
 	if dormant {
 		state = "mv.lifecycle_state IN ('active', 'dormant')"
 	}
+	whereAgent := ""
+	args := []any{key}
+	if !agentID.Empty() {
+		whereAgent = " AND mv.agent_id = ? AND mv.scope = 'agent_private'"
+		args = append(args, string(agentID))
+	}
 	row := r.db.QueryRowContext(ctx, memorySelectPrefix+`
 		FROM memory_heads AS mh
 		JOIN memory_versions AS mv ON mv.memory_id = mh.memory_id AND mv.version = mh.version
-		WHERE mv.canonical_key = ? AND `+state+`
+		WHERE mv.canonical_key = ? AND `+state+whereAgent+`
 		ORDER BY mv.salience DESC, mv.updated_at DESC, mv.memory_id ASC
-		LIMIT 1`, key)
+		LIMIT 1`, args...)
 	item, err := scanMemory(row)
 	if err != nil {
 		return domain.Memory{}, wrappedSQLError("find memory by canonical key", err)
@@ -466,7 +531,18 @@ func (r *MemoryRepository) List(ctx context.Context, options ...MemoryListOption
 		return nil, fmt.Errorf("%w: memory limit and offset cannot be negative", domain.ErrInvalidArgument)
 	}
 	where := []string{"1 = 1"}
-	args := make([]any, 0, 3)
+	args := make([]any, 0, 5)
+	if !opts.AgentID.Empty() {
+		where = append(where, "mv.agent_id = ?")
+		args = append(args, string(opts.AgentID))
+	}
+	if opts.Scope != "" {
+		if !opts.Scope.Valid() {
+			return nil, fmt.Errorf("%w: invalid memory scope %q", domain.ErrInvalidArgument, opts.Scope)
+		}
+		where = append(where, "mv.scope = ?")
+		args = append(args, string(opts.Scope))
+	}
 	if !opts.IncludeDeleted {
 		if opts.IncludeDormant {
 			where = append(where, "mv.lifecycle_state IN ('active', 'dormant')")
@@ -532,7 +608,7 @@ func (r *MemoryRepository) ListCore(ctx context.Context, options ...CoreMemoryOp
 	if opts.MaxItems < 0 || opts.MaxTokens < 0 {
 		return nil, fmt.Errorf("%w: core limits cannot be negative", domain.ErrInvalidArgument)
 	}
-	items, err := r.List(ctx, MemoryListOptions{})
+	items, err := r.List(ctx, MemoryListOptions{AgentID: opts.AgentID, Scope: opts.Scope})
 	if err != nil {
 		return nil, err
 	}
@@ -586,10 +662,31 @@ func (r *MemoryRepository) ListSources(ctx context.Context, id domain.ID, versio
 	return listSources(ctx, r.db, id, targetVersion)
 }
 
+func (r *MemoryRepository) ListSourcesForAgent(ctx context.Context, agentID, id domain.ID, version ...uint64) ([]domain.MemorySource, error) {
+	if agentID.Empty() {
+		return nil, fmt.Errorf("%w: memory agent id is required", domain.ErrInvalidArgument)
+	}
+	item, err := r.GetForAgent(ctx, agentID, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(version) > 0 && version[0] > 0 {
+		if version[0] > item.Version {
+			return nil, domain.ErrNotFound
+		}
+		return listSources(ctx, r.db, id, version[0])
+	}
+	return listSources(ctx, r.db, id, item.Version)
+}
+
 // MarkDormant appends a lifecycle revision that is excluded from ordinary
 // retrieval. A deliberate search can request IncludeDormant/Deliberate.
 func (r *MemoryRepository) MarkDormant(ctx context.Context, id domain.ID, expectedVersion uint64, at time.Time, reason string) (domain.Memory, error) {
 	return r.transitionLifecycle(ctx, id, expectedVersion, domain.MemoryLifecycleDormant, at, reason)
+}
+
+func (r *MemoryRepository) MarkDormantForAgent(ctx context.Context, agentID, id domain.ID, expectedVersion uint64, at time.Time, reason string) (domain.Memory, error) {
+	return r.transitionLifecycleForAgent(ctx, agentID, id, expectedVersion, domain.MemoryLifecycleDormant, at, reason)
 }
 
 // Restore appends an active revision for a dormant or deleted memory while
@@ -598,10 +695,18 @@ func (r *MemoryRepository) Restore(ctx context.Context, id domain.ID, expectedVe
 	return r.transitionLifecycle(ctx, id, expectedVersion, domain.MemoryLifecycleActive, at, reason)
 }
 
+func (r *MemoryRepository) RestoreForAgent(ctx context.Context, agentID, id domain.ID, expectedVersion uint64, at time.Time, reason string) (domain.Memory, error) {
+	return r.transitionLifecycleForAgent(ctx, agentID, id, expectedVersion, domain.MemoryLifecycleActive, at, reason)
+}
+
 // SoftDelete creates a tombstone revision. Original conversation messages and
 // evidence rows from prior revisions are never physically removed here.
 func (r *MemoryRepository) SoftDelete(ctx context.Context, id domain.ID, expectedVersion uint64, at time.Time, reason string) (domain.Memory, error) {
 	return r.transitionLifecycle(ctx, id, expectedVersion, domain.MemoryLifecycleDeleted, at, reason)
+}
+
+func (r *MemoryRepository) SoftDeleteForAgent(ctx context.Context, agentID, id domain.ID, expectedVersion uint64, at time.Time, reason string) (domain.Memory, error) {
+	return r.transitionLifecycleForAgent(ctx, agentID, id, expectedVersion, domain.MemoryLifecycleDeleted, at, reason)
 }
 
 // Forget is the user-facing alias for SoftDelete.
@@ -676,6 +781,28 @@ func (r *MemoryRepository) RecordRecall(ctx context.Context, id domain.ID, at ti
 	return current, nil
 }
 
+func (r *MemoryRepository) RecordRecallForAgent(ctx context.Context, agentID, id domain.ID, at time.Time) (domain.Memory, error) {
+	if agentID.Empty() {
+		return domain.Memory{}, fmt.Errorf("%w: memory agent id is required", domain.ErrInvalidArgument)
+	}
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	current, err := r.GetForAgent(ctx, agentID, id)
+	if err != nil {
+		return domain.Memory{}, err
+	}
+	current.Version++
+	current.AccessCount++
+	current.LastAccessedAt = at.UTC()
+	current.LastRecalledAt = at.UTC()
+	current.UpdatedAt = at.UTC()
+	if err := r.saveWithOperation(ctx, current, "touch"); err != nil {
+		return domain.Memory{}, err
+	}
+	return current, nil
+}
+
 // Search performs safe FTS5 lexical retrieval over current memory revisions.
 // Dormant memories are included only with an explicit deliberate option.
 func (r *MemoryRepository) Search(ctx context.Context, query string, options ...MemorySearchOptions) ([]MemorySearchHit, error) {
@@ -701,6 +828,17 @@ func (r *MemoryRepository) Search(ctx context.Context, query string, options ...
 	}
 	where := []string{"memory_fts MATCH ?"}
 	args := []any{ftsQuery}
+	if !opts.AgentID.Empty() {
+		where = append(where, "mv.agent_id = ?")
+		args = append(args, string(opts.AgentID))
+	}
+	if opts.Scope != "" {
+		if !opts.Scope.Valid() {
+			return nil, fmt.Errorf("%w: invalid memory scope %q", domain.ErrInvalidArgument, opts.Scope)
+		}
+		where = append(where, "mv.scope = ?")
+		args = append(args, string(opts.Scope))
+	}
 	if opts.IncludeDeleted {
 		if opts.IncludeDormant || opts.Deliberate {
 			where = append(where, "mv.lifecycle_state IN ('active', 'dormant', 'deleted')")
@@ -874,6 +1012,47 @@ func (r *MemoryRepository) transitionLifecycle(ctx context.Context, id domain.ID
 	return current, nil
 }
 
+func (r *MemoryRepository) transitionLifecycleForAgent(ctx context.Context, agentID, id domain.ID, expectedVersion uint64, state domain.MemoryLifecycle, at time.Time, reason string) (domain.Memory, error) {
+	if agentID.Empty() {
+		return domain.Memory{}, fmt.Errorf("%w: memory agent id is required", domain.ErrInvalidArgument)
+	}
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	if !state.Valid() {
+		return domain.Memory{}, fmt.Errorf("%w: invalid memory lifecycle %q", domain.ErrInvalidArgument, state)
+	}
+	current, err := r.GetForAgent(ctx, agentID, id)
+	if err != nil {
+		return domain.Memory{}, err
+	}
+	if expectedVersion != current.Version {
+		return domain.Memory{}, domain.ErrConflict
+	}
+	current.Version++
+	current.Lifecycle = state
+	current.UpdatedAt = at.UTC()
+	current.Reason = reason
+	current.DormantAt = time.Time{}
+	current.DeletedAt = time.Time{}
+	switch state {
+	case domain.MemoryLifecycleDormant:
+		current.DormantAt = at.UTC()
+	case domain.MemoryLifecycleDeleted:
+		current.DeletedAt = at.UTC()
+	}
+	operation := "restore"
+	if state == domain.MemoryLifecycleDormant {
+		operation = "dormant"
+	} else if state == domain.MemoryLifecycleDeleted {
+		operation = "forget"
+	}
+	if err := r.saveWithOperation(ctx, current, operation); err != nil {
+		return domain.Memory{}, err
+	}
+	return current, nil
+}
+
 func (r *MemoryRepository) appendVersionTx(ctx context.Context, tx *sql.Tx, memory domain.Memory, sources []domain.MemorySource, previousVersion uint64, operation string, metadata *MemoryVersionMetadata, copySources func([]domain.MemorySource) []domain.MemorySource) error {
 	if previousVersion > 0 {
 		if copySources == nil {
@@ -939,13 +1118,13 @@ func insertMemoryVersion(ctx context.Context, tx *sql.Tx, memory domain.Memory, 
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO memory_versions(
-			memory_id, version, revision_id, operation, parent_version, kind, nature, content_text, content_json, summary,
+			memory_id, agent_id, scope, version, revision_id, operation, parent_version, kind, nature, content_text, content_json, summary,
 			confidence, salience, valence, sensitivity, retention_policy, lifecycle_state,
 			pinned, hidden_from_core, canonical_key, embedding_version, access_count,
 			last_accessed_at, last_recalled_at, created_at, updated_at, dormant_at,
 			deleted_at, reason, source_run_id, source_conversation_id, source_message_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(memory.ID), memory.Version, revisionID, operation, parentVersion, string(memory.Kind), string(memory.Nature), memory.Content,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(memory.ID), string(memory.AgentID), string(memory.Scope), memory.Version, revisionID, operation, parentVersion, string(memory.Kind), string(memory.Nature), memory.Content,
 		memory.ContentJSON, memory.Summary, memory.Confidence, memory.Salience, memory.Valence,
 		string(memory.Sensitivity), string(memory.Retention), string(memory.Lifecycle), boolInt(memory.Pinned),
 		boolInt(memory.HiddenFromCore), memory.CanonicalKey, memory.EmbeddingVersion, memory.AccessCount,
@@ -974,6 +1153,14 @@ func normalizeMemoryForCreate(memory domain.Memory) domain.Memory {
 	}
 	if memory.Kind == "" {
 		memory.Kind = domain.MemoryKindSemantic
+	}
+	if memory.AgentID.Empty() {
+		// Legacy callers had no agent boundary. Keep them functional while all
+		// desktop/runtime writes provide the active named agent explicitly.
+		memory.AgentID = domain.ID("owner")
+	}
+	if memory.Scope == "" {
+		memory.Scope = domain.MemoryScopeAgentPrivate
 	}
 	if memory.Nature == "" {
 		memory.Nature = domain.MemoryNatureFact
@@ -1012,6 +1199,12 @@ func normalizeMemoryForCreate(memory domain.Memory) domain.Memory {
 func validateMemoryForStorage(memory domain.Memory) error {
 	if err := memory.Validate(); err != nil {
 		return err
+	}
+	if memory.AgentID.Empty() {
+		return fmt.Errorf("%w: memory agent id is required", domain.ErrInvalidArgument)
+	}
+	if memory.Scope != domain.MemoryScopeAgentPrivate {
+		return fmt.Errorf("%w: unsupported memory scope %q", domain.ErrInvalidArgument, memory.Scope)
 	}
 	if memory.Lifecycle == domain.MemoryLifecycleDormant && !memory.DeletedAt.IsZero() {
 		return fmt.Errorf("%w: dormant memory cannot have deleted_at", domain.ErrInvalidArgument)
@@ -1054,6 +1247,37 @@ func getCurrentMemory(ctx context.Context, queryer interface {
 	return item, nil
 }
 
+func getCurrentMemoryForAgent(ctx context.Context, queryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, agentID, id domain.ID) (domain.Memory, error) {
+	if id.Empty() {
+		return domain.Memory{}, fmt.Errorf("%w: memory id is required", domain.ErrInvalidArgument)
+	}
+	row := queryer.QueryRowContext(ctx, memorySelectPrefix+`
+		FROM memory_heads AS mh
+		JOIN memory_versions AS mv ON mv.memory_id = mh.memory_id AND mv.version = mh.version
+		WHERE mh.memory_id = ? AND mv.agent_id = ? AND mv.scope = 'agent_private'`, string(id), string(agentID))
+	item, err := scanMemory(row)
+	if err != nil {
+		return domain.Memory{}, wrappedSQLError("get agent memory", err)
+	}
+	return item, nil
+}
+
+func ensureMemoryAgentTx(ctx context.Context, tx *sql.Tx, id, agentID domain.ID) error {
+	if agentID.Empty() {
+		return fmt.Errorf("%w: memory agent id is required", domain.ErrInvalidArgument)
+	}
+	var stored string
+	if err := tx.QueryRowContext(ctx, `SELECT agent_id FROM memory_versions WHERE memory_id = ? AND version = 1`, string(id)).Scan(&stored); err != nil {
+		return wrappedSQLError("check memory agent", err)
+	}
+	if stored != string(agentID) {
+		return domain.ErrConflict
+	}
+	return nil
+}
+
 func getMemoryVersion(ctx context.Context, queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, id domain.ID, version uint64) (domain.Memory, error) {
@@ -1081,7 +1305,7 @@ func memoryHeadVersion(ctx context.Context, queryer interface {
 }
 
 const memorySelectPrefix = `SELECT
-	mv.memory_id, mv.version, mv.kind, mv.nature, mv.content_text, mv.content_json, mv.summary,
+	mv.memory_id, mv.agent_id, mv.scope, mv.version, mv.kind, mv.nature, mv.content_text, mv.content_json, mv.summary,
 	mv.confidence, mv.salience, mv.valence, mv.sensitivity, mv.retention_policy,
 	mv.lifecycle_state, mv.pinned, mv.hidden_from_core, mv.canonical_key, mv.embedding_version,
 	mv.access_count, mv.last_accessed_at, mv.last_recalled_at, mv.created_at, mv.updated_at,
@@ -1094,16 +1318,16 @@ type scanner interface {
 
 func scanMemory(row scanner) (domain.Memory, error) {
 	var (
-		item                                                                  domain.Memory
-		idValue, kind, nature, contentJSON, sensitivity, retention, lifecycle string
-		content, summary, canonicalKey, embeddingVersion, reason              string
-		sourceRunID, sourceConversationID, sourceMessageID                    sql.NullString
-		lastAccessedAt, lastRecalledAt, createdAt, updatedAt                  string
-		dormantAt, deletedAt                                                  sql.NullString
-		pinned, hidden                                                        int
+		item                                                                                  domain.Memory
+		idValue, agentID, scope, kind, nature, contentJSON, sensitivity, retention, lifecycle string
+		content, summary, canonicalKey, embeddingVersion, reason                              string
+		sourceRunID, sourceConversationID, sourceMessageID                                    sql.NullString
+		lastAccessedAt, lastRecalledAt, createdAt, updatedAt                                  string
+		dormantAt, deletedAt                                                                  sql.NullString
+		pinned, hidden                                                                        int
 	)
 	err := row.Scan(
-		&idValue, &item.Version, &kind, &nature, &content, &contentJSON, &summary,
+		&idValue, &agentID, &scope, &item.Version, &kind, &nature, &content, &contentJSON, &summary,
 		&item.Confidence, &item.Salience, &item.Valence, &sensitivity, &retention,
 		&lifecycle, &pinned, &hidden, &canonicalKey, &embeddingVersion, &item.AccessCount,
 		&nullableString{Value: &lastAccessedAt}, &nullableString{Value: &lastRecalledAt},
@@ -1113,6 +1337,8 @@ func scanMemory(row scanner) (domain.Memory, error) {
 		return domain.Memory{}, err
 	}
 	item.ID = domain.ID(idValue)
+	item.AgentID = domain.ID(agentID)
+	item.Scope = domain.MemoryScope(scope)
 	item.Kind = domain.MemoryKind(kind)
 	item.Nature = domain.MemoryNature(nature)
 	item.Content = content
@@ -1159,15 +1385,15 @@ func scanMemory(row scanner) (domain.Memory, error) {
 
 func scanMemoryWithTail(row scanner, item *domain.Memory, snippet *string, rank *float64) error {
 	var (
-		idValue, kind, nature, contentJSON, sensitivity, retention, lifecycle string
-		content, summary, canonicalKey, embeddingVersion, reason              string
-		sourceRunID, sourceConversationID, sourceMessageID                    sql.NullString
-		lastAccessedAt, lastRecalledAt, createdAt, updatedAt                  string
-		dormantAt, deletedAt                                                  sql.NullString
-		pinned, hidden                                                        int
+		idValue, agentID, scope, kind, nature, contentJSON, sensitivity, retention, lifecycle string
+		content, summary, canonicalKey, embeddingVersion, reason                              string
+		sourceRunID, sourceConversationID, sourceMessageID                                    sql.NullString
+		lastAccessedAt, lastRecalledAt, createdAt, updatedAt                                  string
+		dormantAt, deletedAt                                                                  sql.NullString
+		pinned, hidden                                                                        int
 	)
 	if err := row.Scan(
-		&idValue, &item.Version, &kind, &nature, &content, &contentJSON, &summary,
+		&idValue, &agentID, &scope, &item.Version, &kind, &nature, &content, &contentJSON, &summary,
 		&item.Confidence, &item.Salience, &item.Valence, &sensitivity, &retention,
 		&lifecycle, &pinned, &hidden, &canonicalKey, &embeddingVersion, &item.AccessCount,
 		&nullableString{Value: &lastAccessedAt}, &nullableString{Value: &lastRecalledAt},
@@ -1176,6 +1402,8 @@ func scanMemoryWithTail(row scanner, item *domain.Memory, snippet *string, rank 
 		return err
 	}
 	item.ID = domain.ID(idValue)
+	item.AgentID = domain.ID(agentID)
+	item.Scope = domain.MemoryScope(scope)
 	item.Kind = domain.MemoryKind(kind)
 	item.Nature = domain.MemoryNature(nature)
 	item.Content = content

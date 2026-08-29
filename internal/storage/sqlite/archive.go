@@ -15,6 +15,7 @@ import (
 // for a list-only view. Dormant memory filtering belongs to
 // MemorySearchOptions, not the transcript archive.
 type ArchiveSearchOptions struct {
+	AgentID         domain.ID
 	ConversationID  domain.ID
 	IncludeArchived bool
 	ExcludeArchived bool
@@ -69,6 +70,10 @@ func (r *ArchiveRepository) Search(ctx context.Context, query string, options ..
 	}
 	where := []string{"messages_fts MATCH ?"}
 	args := []any{ftsQuery}
+	if !opts.AgentID.Empty() {
+		where = append(where, "c.agent_id = ?")
+		args = append(args, string(opts.AgentID))
+	}
 	if !opts.ConversationID.Empty() {
 		where = append(where, "m.conversation_id = ?")
 		args = append(args, string(opts.ConversationID))

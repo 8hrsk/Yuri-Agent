@@ -28,7 +28,7 @@ func TestSQLiteRepositoriesPersistVerticalSliceRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
-	conversation := Conversation{ID: "conversation-1", Title: "Initial chat", CreatedAt: now, UpdatedAt: now}
+	conversation := Conversation{ID: "conversation-1", AgentID: "owner", Title: "Initial chat", CreatedAt: now, UpdatedAt: now}
 	if err := repositories.Conversations.Create(ctx, conversation); err != nil {
 		t.Fatalf("create conversation: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestSQLiteRepositoriesEnforceTranscriptForeignKeysAndRedactedJSON(t *testin
 	if err == nil {
 		t.Fatal("orphan message unexpectedly created")
 	}
-	if err := repositories.Conversations.Create(ctx, Conversation{ID: "conversation", Title: "test", CreatedAt: now}); err != nil {
+	if err := repositories.Conversations.Create(ctx, Conversation{ID: "conversation", AgentID: "owner", Title: "test", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	err = repositories.Messages.Create(ctx, Message{

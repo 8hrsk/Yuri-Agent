@@ -88,7 +88,7 @@ func TestFilesystemWriteApprovalAuditFlow(t *testing.T) {
 			conversationID := domain.ID("conversation-write-" + test.name)
 			runID := domain.ID("run-write-" + test.name)
 			if err := repositories.Conversations.Create(ctx, storage.Conversation{
-				ID: conversationID, Title: "Write", CreatedAt: now, UpdatedAt: now,
+				ID: conversationID, AgentID: "owner", Title: "Write", CreatedAt: now, UpdatedAt: now,
 			}); err != nil {
 				t.Fatal(err)
 			}

@@ -16,6 +16,7 @@ import (
 // authoritative even when a later context snapshot summarizes it.
 type Conversation struct {
 	ID         domain.ID  `json:"id"`
+	AgentID    domain.ID  `json:"agent_id"`
 	Title      string     `json:"title"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
