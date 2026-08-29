@@ -47,7 +47,7 @@ func TestThreadStartParamsIncludesDynamicToolsInAppServerShape(t *testing.T) {
 	params := threadStartParams(ThreadOptions{
 		DynamicTools: []DynamicToolSpec{{
 			Type:        "function",
-			Name:        "filesystem.read",
+			Name:        "filesystem_read_d8f55b3922",
 			Description: "Read an allowed local file",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`),
 		}},
@@ -56,7 +56,7 @@ func TestThreadStartParamsIncludesDynamicToolsInAppServerShape(t *testing.T) {
 	if !ok || len(tools) != 1 {
 		t.Fatalf("dynamicTools = %#v", params["dynamicTools"])
 	}
-	if tools[0].Type != "function" || tools[0].Name != "filesystem.read" {
+	if tools[0].Type != "function" || tools[0].Name != "filesystem_read_d8f55b3922" {
 		t.Fatalf("dynamic tool = %#v", tools[0])
 	}
 	if !json.Valid(tools[0].InputSchema) {

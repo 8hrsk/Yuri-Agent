@@ -2,6 +2,7 @@ package codexapp
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,9 +49,10 @@ func (backend *Backend) Start(ctx context.Context, request agent.ModelRequest) (
 	if model == "codex-default" || model == "gpt-5-codex" || model == "gpt-4o-mini" {
 		model = ""
 	}
+	dynamicTools, dynamicToolNames := dynamicToolSpecs(request.Tools)
 	thread, err := backend.Client.StartThreadWithOptions(ctx, ThreadOptions{
 		Model: model, CWD: backend.CWD, ReadableRoots: backend.ReadableRoots,
-		DynamicTools: dynamicToolSpecs(request.Tools),
+		DynamicTools: dynamicTools,
 	})
 	if err != nil {
 		release()
@@ -72,6 +74,7 @@ func (backend *Backend) Start(ctx context.Context, request agent.ModelRequest) (
 	return &codexModelStream{
 		client: backend.Client, events: backend.Client.Events(),
 		threadID: thread.ID, turnID: turn.ID, release: release,
+		dynamicToolNames: dynamicToolNames,
 	}, nil
 }
 
@@ -116,6 +119,10 @@ type codexModelStream struct {
 	// request id that the app server expects in the response. The model-facing
 	// event deliberately exposes only the stable call id.
 	dynamicRequests map[string]json.RawMessage
+	// dynamicToolNames maps Responses-compatible provider aliases back to the
+	// stable Yuri tool ids. Yuri ids intentionally use namespaces such as
+	// "filesystem.read", while Codex only accepts [a-zA-Z0-9_-]+.
+	dynamicToolNames map[string]string
 }
 
 func (stream *codexModelStream) Recv(ctx context.Context) (agent.ModelEvent, error) {
@@ -318,9 +325,17 @@ func (stream *codexModelStream) dynamicToolCall(event Event) (agent.ModelEvent, 
 	}
 	stream.dynamicRequests[params.CallID] = append(json.RawMessage(nil), event.ID...)
 	stream.mu.Unlock()
+	toolName := params.Tool
+	if stream.dynamicToolNames != nil {
+		mapped, exists := stream.dynamicToolNames[params.Tool]
+		if !exists {
+			return agent.ModelEvent{}, fmt.Errorf("Codex requested undeclared dynamic tool %q", params.Tool)
+		}
+		toolName = mapped
+	}
 	return agent.ModelEvent{
 		Type: agent.ModelEventToolCallDone, ToolCallID: params.CallID,
-		ToolName: params.Tool, Arguments: arguments,
+		ToolName: toolName, Arguments: arguments,
 	}, nil
 }
 
@@ -355,18 +370,66 @@ func dynamicToolResultResponse(result agent.ToolResult) map[string]any {
 	}
 }
 
-func dynamicToolSpecs(tools []agent.ToolDescriptor) []DynamicToolSpec {
+func dynamicToolSpecs(tools []agent.ToolDescriptor) ([]DynamicToolSpec, map[string]string) {
 	if len(tools) == 0 {
-		return nil
+		return nil, nil
 	}
 	specs := make([]DynamicToolSpec, 0, len(tools))
+	names := make(map[string]string, len(tools))
 	for _, tool := range tools {
+		providerName := codexDynamicToolName(tool.Name)
+		if existing, collision := names[providerName]; collision && existing != tool.Name {
+			// The hash suffix makes this practically unreachable, but keep the
+			// provider contract deterministic and fail closed if it ever occurs.
+			providerName = codexDynamicToolName(tool.Name + "_collision")
+		}
+		names[providerName] = tool.Name
 		specs = append(specs, DynamicToolSpec{
-			Type: "function", Name: tool.Name, Description: tool.Description,
+			Type: "function", Name: providerName, Description: tool.Description,
 			InputSchema: append(json.RawMessage(nil), tool.InputSchema...),
 		})
 	}
-	return specs
+	return specs, names
+}
+
+func codexDynamicToolName(name string) string {
+	if name != "" && len(name) <= 64 && isCodexDynamicToolName(name) {
+		return name
+	}
+	var builder strings.Builder
+	for _, character := range name {
+		switch {
+		case character >= 'a' && character <= 'z',
+			character >= 'A' && character <= 'Z',
+			character >= '0' && character <= '9',
+			character == '_', character == '-':
+			builder.WriteRune(character)
+		default:
+			builder.WriteByte('_')
+		}
+	}
+	base := strings.Trim(builder.String(), "_-")
+	if base == "" {
+		base = "yuri_tool"
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(name)))[:10]
+	const suffixLength = 11 // underscore plus ten hexadecimal characters
+	if len(base) > 64-suffixLength {
+		base = base[:64-suffixLength]
+	}
+	return base + "_" + digest
+}
+
+func isCodexDynamicToolName(name string) bool {
+	for _, character := range name {
+		if !((character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			character == '_' || character == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 func (stream *codexModelStream) matches(threadID, turnID string) bool {

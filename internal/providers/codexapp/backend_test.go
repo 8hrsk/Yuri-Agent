@@ -52,11 +52,12 @@ func TestCodexModelStreamNormalizesDynamicToolCallAndResponds(t *testing.T) {
 	}
 	stream := &codexModelStream{
 		client: client, events: events, threadID: "thread", turnID: "turn",
+		dynamicToolNames: map[string]string{"filesystem_read_d8f55b3922": "filesystem.read"},
 	}
 	events <- Event{
 		ID:     json.RawMessage(`41`),
 		Method: "item/tool/call",
-		Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","callId":"call-1","tool":"filesystem.read","arguments":{"path":"notes.txt"}}`),
+		Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","callId":"call-1","tool":"filesystem_read_d8f55b3922","arguments":{"path":"notes.txt"}}`),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -96,6 +97,42 @@ func TestCodexModelStreamNormalizesDynamicToolCallAndResponds(t *testing.T) {
 	}
 	if err := stream.RespondToolResult(ctx, "call-1", agent.ToolResult{Content: "duplicate"}); err == nil {
 		t.Fatal("expected duplicate result to be rejected")
+	}
+}
+
+func TestDynamicToolSpecsUseCodexCompatibleAliasesAndRestoreYuriNames(t *testing.T) {
+	specs, names := dynamicToolSpecs([]agent.ToolDescriptor{
+		{Name: "agent.delegate", Description: "Delegate"},
+		{Name: "already-valid", Description: "Valid"},
+	})
+	if len(specs) != 2 {
+		t.Fatalf("dynamic tool specs = %#v", specs)
+	}
+	if specs[0].Name == "agent.delegate" || !isCodexDynamicToolName(specs[0].Name) {
+		t.Fatalf("invalid Codex alias = %q", specs[0].Name)
+	}
+	if got := names[specs[0].Name]; got != "agent.delegate" {
+		t.Fatalf("alias mapping = %q, want agent.delegate", got)
+	}
+	if specs[1].Name != "already-valid" || names[specs[1].Name] != "already-valid" {
+		t.Fatalf("valid name should be preserved: %#v, %#v", specs[1], names)
+	}
+}
+
+func TestCodexModelStreamRejectsUndeclaredDynamicToolAlias(t *testing.T) {
+	events := make(chan Event, 1)
+	stream := &codexModelStream{
+		events: events, threadID: "thread", turnID: "turn",
+		dynamicToolNames: map[string]string{"filesystem_read": "filesystem.read"},
+	}
+	events <- Event{
+		ID: json.RawMessage(`42`), Method: "item/tool/call",
+		Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","callId":"call-2","tool":"unknown_tool","arguments":{}}`),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := stream.Recv(ctx); err == nil || !strings.Contains(err.Error(), "undeclared dynamic tool") {
+		t.Fatalf("Recv() error = %v", err)
 	}
 }
 
