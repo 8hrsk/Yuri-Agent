@@ -14,9 +14,10 @@ const openAISettings: ProviderSettings = {
 
 describe('first-run onboarding rules', () => {
   it('requires both a successful provider probe and persisted completion', () => {
-    expect(isOnboardingComplete({ completed: false, providerTested: true })).toBe(false)
-    expect(isOnboardingComplete({ completed: true, providerTested: false })).toBe(false)
-    expect(isOnboardingComplete({ completed: true, providerTested: true })).toBe(true)
+    expect(isOnboardingComplete({ completed: false, providerTested: true, agentConfigured: true })).toBe(false)
+    expect(isOnboardingComplete({ completed: true, providerTested: false, agentConfigured: true })).toBe(false)
+    expect(isOnboardingComplete({ completed: true, providerTested: true, agentConfigured: false })).toBe(false)
+    expect(isOnboardingComplete({ completed: true, providerTested: true, agentConfigured: true })).toBe(true)
   })
 
   it('validates the provider fields without requiring a real credential in preview', () => {
@@ -37,7 +38,7 @@ describe('first-run onboarding rules', () => {
   })
 
   it('keeps the stepper order stable', () => {
-    expect(onboardingSteps.map((step) => step.id)).toEqual(['welcome', 'provider', 'success'])
-    expect(onboardingStepIndex('provider')).toBe(1)
+    expect(onboardingSteps.map((step) => step.id)).toEqual(['welcome', 'agent', 'provider', 'success'])
+    expect(onboardingStepIndex('provider')).toBe(2)
   })
 })

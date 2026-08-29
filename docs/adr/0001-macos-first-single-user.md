@@ -6,7 +6,7 @@
 
 ## Контекст
 
-Yuri разворачивается локально для одного владельца. Все диалоги, память, отношения, mutable persona, разрешения и фоновые задачи принадлежат одному локальному профилю. Multi-user, серверный multi-tenant режим, shared workspace и удалённая авторизация не входят в продуктовую модель.
+Yuri разворачивается локально для одного владельца. Внутри этой установки владелец может создать несколько именованных агентов с отдельными persona/relationship/affect/private-memory scopes. Multi-user, серверный multi-tenant режим, shared workspace между владельцами и удалённая авторизация не входят в продуктовую модель.
 
 MVP нужно быстро проверять на одной desktop-платформе, но domain-слой нельзя связывать с APIs конкретной ОС: после стабилизации возможны Windows и Linux релизы.
 
@@ -14,7 +14,7 @@ MVP нужно быстро проверять на одной desktop-плат�
 
 1. Целевая и тестируемая платформа MVP — macOS.
 2. UI реализуется в Wails + React, core — в Go, работающем в том же локальном приложении.
-3. Один локальный installation/profile является владельцем всех durable данных. В моделях данных не вводятся `user_id`, tenant routing или network session semantics только ради будущего multi-user.
+3. Один локальный installation/profile владельца является владельцем всех durable данных. `agent_id` разделяет персонажей, но не является `user_id` или tenant boundary; tenant routing и network session semantics не вводятся.
 4. Файловые roots, microphone, notifications и Keychain выдаются через нативные macOS permissions и локально сохраняемые grants.
 5. Platform-specific функции скрываются за ports/adapters. В domain/application не импортируются macOS frameworks.
 6. Windows/Linux добавляются последующими релизами через новые adapters и packaging targets, а не через изменение domain invariants.

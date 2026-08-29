@@ -96,9 +96,9 @@ func NewBridge(ctx context.Context) (*Bridge, error) {
 		approvals: make(map[string]chan bool), backgroundCtx: backgroundCtx, backgroundCancel: backgroundCancel,
 		modelTurns: make(chan struct{}, 1), reflectionRuns: reflection.NewCoordinator(), reflectionGate: make(chan struct{}, 1), pluginSupervisors: make(map[string]*plugins.Supervisor),
 	}
-	if err := bridge.ensurePersonaState(ctx); err != nil {
+	if err := bridge.reconcileAgentRoster(ctx); err != nil {
 		database.Close()
-		return nil, fmt.Errorf("initialize persona state: %w", err)
+		return nil, fmt.Errorf("initialize agent roster: %w", err)
 	}
 	service, err := proactivity.NewService(proactivitySettings(value.Proactivity), proactivity.FuncNotifier(bridge.emitNotification))
 	if err != nil {

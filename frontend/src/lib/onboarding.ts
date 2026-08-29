@@ -2,6 +2,7 @@ import type { CodexAccount, OnboardingState, ProviderSettings } from './contract
 
 export const onboardingSteps = [
   { id: 'welcome', label: 'Начало' },
+  { id: 'agent', label: 'Агент' },
   { id: 'provider', label: 'Провайдер' },
   { id: 'success', label: 'Готово' },
 ] as const
@@ -9,7 +10,7 @@ export const onboardingSteps = [
 export type OnboardingStep = (typeof onboardingSteps)[number]['id']
 
 export function isOnboardingComplete(state: OnboardingState): boolean {
-  return state.completed && state.providerTested
+  return state.completed && state.providerTested && state.agentConfigured
 }
 
 export function onboardingStepIndex(step: OnboardingStep): number {

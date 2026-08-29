@@ -32,6 +32,8 @@ type OnboardingView struct {
 	Completed          bool            `json:"completed"`
 	ProviderTested     bool            `json:"providerTested"`
 	ProviderConfigured bool            `json:"providerConfigured"`
+	AgentConfigured    bool            `json:"agentConfigured"`
+	ActiveAgentID      string          `json:"activeAgentId,omitempty"`
 }
 
 type ProviderView struct {
@@ -136,6 +138,8 @@ func (b *Bridge) GetOnboardingState() OnboardingView {
 	b.mu.RLock()
 	completed := b.config.Onboarding.Completed
 	providerTested := b.config.Onboarding.ProviderTested
+	agentConfigured := b.config.Onboarding.AgentConfigured
+	activeAgentID := b.config.Persona.ProfileID
 	providers := append([]config.ProviderConfig(nil), b.config.Providers...)
 	b.mu.RUnlock()
 
@@ -155,11 +159,11 @@ func (b *Bridge) GetOnboardingState() OnboardingView {
 		}
 	}
 	state := OnboardingStatePending
-	if completed && providerTested {
+	if completed && providerTested && agentConfigured {
 		state = OnboardingStateComplete
 	}
-	completed = completed && providerTested
-	return OnboardingView{State: state, Completed: completed, ProviderTested: providerTested, ProviderConfigured: configured}
+	completed = completed && providerTested && agentConfigured
+	return OnboardingView{State: state, Completed: completed, ProviderTested: providerTested, ProviderConfigured: configured, AgentConfigured: agentConfigured, ActiveAgentID: activeAgentID}
 }
 
 func (b *Bridge) ListProviders() []ProviderView {
@@ -429,7 +433,7 @@ func (b *Bridge) completeOnboarding(_ context.Context) error {
 		return nil
 	}
 	candidate := b.config
-	candidate.Onboarding.Completed = true
+	candidate.Onboarding.Completed = candidate.Onboarding.AgentConfigured
 	candidate.Onboarding.ProviderTested = true
 	if err := config.Save(b.paths, candidate); err != nil {
 		return err

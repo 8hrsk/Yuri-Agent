@@ -15,6 +15,7 @@ import { Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
 import { useBackendConnection } from './hooks/useBackendConnection'
 import { createYuriClient } from './lib/client'
+import type { AgentProfile } from './lib/contracts'
 import { isOnboardingComplete } from './lib/onboarding'
 import { navItems, type NavId } from './lib/navigation'
 
@@ -22,6 +23,7 @@ function App() {
   const [activeId, setActiveId] = useState<NavId>('chat')
   const client = useMemo(() => createYuriClient(), [])
   const [onboardingStatus, setOnboardingStatus] = useState<'loading' | 'required' | 'ready'>('loading')
+  const [activeAgent, setActiveAgent] = useState<AgentProfile>()
   const backend = useBackendConnection()
   const activeItem = useMemo(() => navItems.find((item) => item.id === activeId) ?? navItems[0], [activeId])
 
@@ -35,6 +37,15 @@ function App() {
     return () => { mounted = false }
   }, [client])
 
+  useEffect(() => {
+    if (onboardingStatus !== 'ready') return
+    let mounted = true
+    void client.getActiveAgent().then((agent) => {
+      if (mounted) setActiveAgent(agent)
+    }).catch(() => undefined)
+    return () => { mounted = false }
+  }, [client, onboardingStatus])
+
   if (onboardingStatus === 'loading') {
     return <div className="onboarding-shell"><div className="onboarding-loading" role="status"><span className="onboarding-loading__pulse" /> Проверяю состояние первого запуска…</div></div>
   }
@@ -46,7 +57,7 @@ function App() {
   return (
     <div className="app-shell">
       <NotificationCenter />
-      <Sidebar activeId={activeId} connectionStatus={backend.status} onNavigate={setActiveId} />
+      <Sidebar activeId={activeId} agentName={activeAgent?.name ?? 'Агент'} connectionStatus={backend.status} onNavigate={setActiveId} />
       <main className="main-panel">
         <Topbar
           activeItem={activeItem}
@@ -56,7 +67,7 @@ function App() {
         />
         <div className="main-panel__scroll">
           {activeId === 'chat' ? (
-            <ChatView backend={backend} onOpenSettings={() => setActiveId('settings')} />
+            <ChatView agentName={activeAgent?.name ?? 'Агент'} backend={backend} onOpenSettings={() => setActiveId('settings')} />
           ) : activeId === 'tasks' ? (
             <TasksView />
           ) : activeId === 'memory' ? (
@@ -75,7 +86,7 @@ function App() {
         </div>
         <footer className="statusbar">
           <span className="statusbar__left"><span className="statusbar__pulse" /> Local-first workspace</span>
-          <span className="statusbar__right">Yuri stage 7 · MVP stabilization <Icon name="spark" width={12} height={12} /></span>
+          <span className="statusbar__right">Yuri stage 8 · agent profiles <Icon name="spark" width={12} height={12} /></span>
         </footer>
       </main>
     </div>

@@ -40,8 +40,10 @@
 
   const enterStableProviderStep = async () => {
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const welcome = await waitFor('welcome screen', () => findButton('Настроить провайдера'))
+      const welcome = await waitFor('welcome screen', () => findButton('Создать агента'))
       welcome.click()
+      const createAgent = await waitFor('agent form', () => document.querySelector('#agent-name') && findButton('Создать агента'))
+      createAgent.click()
       const providerInput = await waitForAttempt(() => document.querySelector('#onboarding-base-url'), 1000)
       if (!(providerInput instanceof HTMLInputElement)) continue
       await wait(200)
@@ -156,10 +158,22 @@
   }
 
   const enterChat = async (bridge) => {
-    let onboarding = { completed: false, providerTested: false }
+    let onboarding = { completed: false, providerTested: false, agentConfigured: false }
+    let activeAgent
     bridge.GetOnboardingState = async () => onboarding
+    bridge.ListAgents = async () => activeAgent ? [activeAgent] : []
+    bridge.GetActiveAgent = async () => activeAgent
+    bridge.CreateAgent = async (input) => {
+      activeAgent = {
+        id: 'agent-voice-ui-smoke', name: input.name, age: input.age, gender: input.gender,
+        preferences: input.preferences, traits: input.traits, active: true,
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      }
+      onboarding = { ...onboarding, agentConfigured: true, activeAgentId: activeAgent.id }
+      return activeAgent
+    }
     bridge.CompleteOnboarding = async () => {
-      onboarding = { completed: true, providerTested: true, completedAt: new Date().toISOString() }
+      onboarding = { ...onboarding, completed: true, providerTested: true, completedAt: new Date().toISOString() }
       return { ok: true, message: 'Voice UI smoke provider connected.', state: onboarding }
     }
 

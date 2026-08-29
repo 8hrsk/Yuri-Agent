@@ -52,8 +52,9 @@ type Config struct {
 // legacy config files without an onboarding object remain valid and safely
 // default to an incomplete first run.
 type OnboardingConfig struct {
-	Completed      bool `json:"completed"`
-	ProviderTested bool `json:"provider_tested"`
+	Completed       bool `json:"completed"`
+	ProviderTested  bool `json:"provider_tested"`
+	AgentConfigured bool `json:"agent_configured"`
 }
 
 type ProviderKind string
@@ -244,6 +245,14 @@ func Load(paths Paths) (Config, error) {
 	if strings.TrimSpace(value.Persona.ProfileID) == "" {
 		value.Persona = Default(paths).Persona
 	}
+	// Stage 7 considered a successful provider probe sufficient to complete
+	// onboarding. Those installations already have the legacy owner persona,
+	// which the desktop bridge migrates to an AgentProfile on startup. Treat
+	// the missing Stage 8 flag as configured so upgrades do not reopen first
+	// run or fail validation before the database migration can execute.
+	if value.Onboarding.Completed && value.Onboarding.ProviderTested && !value.Onboarding.AgentConfigured {
+		value.Onboarding.AgentConfigured = true
+	}
 	// Early Codex OAuth builds persisted model placeholders or copied the
 	// generic OpenAI-compatible default. Clear only those legacy values; models
 	// explicitly selected from model/list remain durable.
@@ -375,8 +384,8 @@ func (c Config) Validate() error {
 }
 
 func (c OnboardingConfig) Validate() error {
-	if c.Completed != c.ProviderTested {
-		return errors.New("onboarding completed and provider_tested must transition together")
+	if c.Completed != (c.ProviderTested && c.AgentConfigured) {
+		return errors.New("onboarding completed requires both provider_tested and agent_configured")
 	}
 	return nil
 }

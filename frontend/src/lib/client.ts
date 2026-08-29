@@ -7,6 +7,8 @@ import type {
   ActivityStatus,
   ActivityType,
   ApprovalRequest,
+  AgentProfile,
+  AgentProfileInput,
   ChatEvent,
   ChatRequest,
   CodexAccount,
@@ -57,6 +59,7 @@ import type {
   UsageLimits,
   YuriClient,
 } from './contracts'
+import { normalizeAgentProfile } from './agents'
 import {
   clonePersonalitySnapshot,
   createStarterPersonalitySnapshot,
@@ -88,6 +91,7 @@ const defaultSettings: ProviderSettings = {
 const defaultOnboardingState: OnboardingState = {
   completed: false,
   providerTested: false,
+  agentConfigured: false,
 }
 
 const defaultLimits: UsageLimits = {
@@ -135,7 +139,7 @@ function normalizeOnboardingState(value: unknown): OnboardingState {
   const source = raw.onboarding && typeof raw.onboarding === 'object'
     ? raw.onboarding as UnknownRecord
     : raw
-  return {
+  const result: OnboardingState = {
     completed: normalizeBoolean(source.completed ?? source.complete ?? source.isComplete ?? source.is_complete, false),
     providerTested: normalizeBoolean(
       source.providerTested
@@ -146,8 +150,13 @@ function normalizeOnboardingState(value: unknown): OnboardingState {
         ?? source.provider_check_passed,
       false,
     ),
-    completedAt: optionalString(source, 'completedAt', 'completed_at'),
+    agentConfigured: normalizeBoolean(source.agentConfigured ?? source.agent_configured, false),
   }
+  const activeAgentId = optionalString(source, 'activeAgentId', 'active_agent_id')
+  const completedAt = optionalString(source, 'completedAt', 'completed_at')
+  if (activeAgentId) result.activeAgentId = activeAgentId
+  if (completedAt) result.completedAt = completedAt
+  return result
 }
 
 function normalizeOnboardingResult(value: unknown, fallbackState: OnboardingState): OnboardingResult {
@@ -1154,6 +1163,8 @@ class MockYuriClient implements YuriClient {
     codex: { connected: false },
   }
   private onboarding: OnboardingState = { ...defaultOnboardingState }
+  private readonly agents = new Map<string, AgentProfile>()
+  private activeAgentId?: string
   private allowedDirectories: string[] = []
   private schedules: Schedule[] = [starterSchedule()]
   private jobRuns: JobRun[] = starterJobRuns()
@@ -1178,6 +1189,41 @@ class MockYuriClient implements YuriClient {
     }
     this.conversations.set(conversation.id, conversation)
     return cloneConversation(conversation)
+  }
+
+  async listAgents(): Promise<AgentProfile[]> {
+    return [...this.agents.values()].map((agent) => ({ ...agent, traits: { ...agent.traits }, active: agent.id === this.activeAgentId }))
+  }
+
+  async getActiveAgent(): Promise<AgentProfile | undefined> {
+    const agent = this.activeAgentId ? this.agents.get(this.activeAgentId) : undefined
+    return agent ? { ...agent, traits: { ...agent.traits }, active: true } : undefined
+  }
+
+  async createAgent(input: AgentProfileInput): Promise<AgentProfile> {
+    const now = nowIso()
+    const agent: AgentProfile = {
+      id: makeId('agent'), name: input.name.trim(), age: input.age, gender: input.gender.trim(),
+      preferences: input.preferences.trim(), traits: { ...input.traits }, active: true,
+      createdAt: now, updatedAt: now,
+    }
+    this.agents.set(agent.id, agent)
+    this.activeAgentId = agent.id
+    this.onboarding = {
+      ...this.onboarding,
+      agentConfigured: true,
+      activeAgentId: agent.id,
+      completed: this.onboarding.providerTested,
+    }
+    return { ...agent, traits: { ...agent.traits } }
+  }
+
+  async setActiveAgent(agentId: string): Promise<AgentProfile> {
+    const agent = this.agents.get(agentId)
+    if (!agent) throw new Error('Агент не найден.')
+    this.activeAgentId = agent.id
+    this.onboarding = { ...this.onboarding, activeAgentId: agent.id }
+    return { ...agent, traits: { ...agent.traits }, active: true }
   }
 
   async sendMessage(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult> {
@@ -1233,11 +1279,11 @@ class MockYuriClient implements YuriClient {
     }
     if (settings.kind === 'codex-app-server') {
       if (!this.provider.codex.connected) return { ok: false, message: 'Сначала выполните OAuth-вход.' }
-      this.onboarding = { ...this.onboarding, completed: true, providerTested: true, completedAt: nowIso() }
+      this.onboarding = { ...this.onboarding, completed: this.onboarding.agentConfigured, providerTested: true, completedAt: this.onboarding.agentConfigured ? nowIso() : undefined }
       return { ok: true, message: 'Codex App Server отвечает.' }
     }
     if (!settings.baseUrl.trim() || !settings.model.trim()) return { ok: false, message: 'Укажите Base URL и модель.' }
-    this.onboarding = { ...this.onboarding, completed: true, providerTested: true, completedAt: nowIso() }
+    this.onboarding = { ...this.onboarding, completed: this.onboarding.agentConfigured, providerTested: true, completedAt: this.onboarding.agentConfigured ? nowIso() : undefined }
     return { ok: true, message: 'Endpoint доступен для потокового запроса.' }
   }
 
@@ -1278,7 +1324,7 @@ class MockYuriClient implements YuriClient {
       ...this.provider,
       codex: { connected: false },
     }
-    this.onboarding = { completed: false, providerTested: false }
+    this.onboarding = { ...this.onboarding, completed: false, providerTested: false, completedAt: undefined }
     return { disconnected: true, onboarding: { ...this.onboarding } }
   }
 
@@ -1801,6 +1847,28 @@ class WailsYuriClient implements YuriClient {
     }
   }
 
+  async listAgents(): Promise<AgentProfile[]> {
+    const value = await callBridgeSafe<unknown>(['ListAgents', 'ListAgentProfiles'])
+    if (!Array.isArray(value)) return []
+    return value.map(normalizeAgentProfile).filter((agent): agent is AgentProfile => Boolean(agent))
+  }
+
+  async getActiveAgent(): Promise<AgentProfile | undefined> {
+    return normalizeAgentProfile(await callBridgeSafe<unknown>(['GetActiveAgent', 'GetActiveAgentProfile']))
+  }
+
+  async createAgent(input: AgentProfileInput): Promise<AgentProfile> {
+    const result = normalizeAgentProfile(await callBridge<unknown>(['CreateAgent', 'CreateAgentProfile'], [input]))
+    if (!result) throw new Error('Backend не вернул созданного агента.')
+    return result
+  }
+
+  async setActiveAgent(agentId: string): Promise<AgentProfile> {
+    const result = normalizeAgentProfile(await callBridge<unknown>(['SetActiveAgent', 'SelectAgent'], [{ id: agentId }]))
+    if (!result) throw new Error('Backend не подтвердил выбор агента.')
+    return result
+  }
+
   async sendMessage(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult> {
     return this.runWithBridge(['SendMessage', 'StartChat', 'Chat'], request, onEvent)
   }
@@ -1889,7 +1957,7 @@ class WailsYuriClient implements YuriClient {
       const result = await completeMethod(payload)
       const state = await this.getOnboardingState()
       const normalized = normalizeOnboardingResult(result, state)
-      return normalized.state.completed && normalized.state.providerTested
+      return normalized.state.completed && normalized.state.providerTested && normalized.state.agentConfigured
         ? normalized
         : { ...normalized, ok: false, message: normalized.message || 'Onboarding state не сохранён.', state }
     }

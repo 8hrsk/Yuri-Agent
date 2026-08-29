@@ -7,13 +7,15 @@ import type { BackendStatus } from '../lib/backend'
 
 type SidebarProps = {
   activeId: NavId
+  agentName: string
   connectionStatus: BackendStatus
   onNavigate: Dispatch<SetStateAction<NavId>>
 }
 
 const iconName = (name: string): IconName => name as IconName
 
-export function Sidebar({ activeId, connectionStatus, onNavigate }: SidebarProps) {
+export function Sidebar({ activeId, agentName, connectionStatus, onNavigate }: SidebarProps) {
+  const initial = Array.from(agentName.trim())[0]?.toLocaleUpperCase('ru-RU') ?? 'A'
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
@@ -30,13 +32,13 @@ export function Sidebar({ activeId, connectionStatus, onNavigate }: SidebarProps
 
       <div className="sidebar__profile">
         <div className="profile-orb" aria-hidden="true">
-          <span>Y</span>
+          <span>{initial}</span>
         </div>
         <div className="profile-copy">
-          <strong>Yuri</strong>
+          <strong>{agentName}</strong>
           <span>neutral · local</span>
         </div>
-        <span className="profile-status" aria-label="Yuri is idle" />
+        <span className="profile-status" aria-label={`${agentName} is idle`} />
       </div>
 
       <nav className="sidebar__nav" aria-label="Основная навигация">
@@ -71,7 +73,7 @@ export function Sidebar({ activeId, connectionStatus, onNavigate }: SidebarProps
 
       <div className="sidebar__footer">
         <ConnectionBadge compact label={connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'connecting' ? 'Connecting' : 'Shell mode'} status={connectionStatus} />
-        <span className="sidebar__footer-copy">Этап 7 · OSS readiness</span>
+        <span className="sidebar__footer-copy">Этап 8 · Agent profiles</span>
       </div>
     </aside>
   )

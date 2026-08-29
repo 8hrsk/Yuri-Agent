@@ -119,16 +119,41 @@ type PersonaVersionView struct {
 }
 
 func (b *Bridge) ensurePersonaState(ctx context.Context) error {
+	profileID := b.personaProfileID()
+	if b != nil && b.repositories != nil && b.repositories.Agents != nil && !profileID.Empty() {
+		if _, err := b.repositories.Agents.Get(ctx, profileID); errors.Is(err, domain.ErrNotFound) {
+			profile, createErr := domain.NewAgentProfile(profileID, "Yuri", 0, "female", "", time.Now().UTC())
+			if createErr != nil {
+				return createErr
+			}
+			if createErr = b.repositories.Agents.Create(ctx, profile); createErr != nil && !errors.Is(createErr, domain.ErrConflict) {
+				return createErr
+			}
+		} else if err != nil {
+			return err
+		}
+	}
+	return b.ensurePersonaStateFor(ctx, profileID, nil, "")
+}
+
+func (b *Bridge) ensurePersonaStateFor(ctx context.Context, profileID domain.ID, initialTraits map[string]float64, initialPrompt string) error {
 	if b == nil || b.repositories == nil || b.repositories.Persona == nil || b.repositories.Relationship == nil || b.repositories.Affect == nil {
 		return errors.New("persona repositories are unavailable")
 	}
-	profileID := b.personaProfileID()
 	if profileID.Empty() {
 		return errors.New("local persona profile id is empty")
 	}
 	now := time.Now().UTC()
 	if _, err := b.repositories.Persona.Get(ctx, profileID); errors.Is(err, domain.ErrNotFound) {
-		seed, createErr := domain.NewMutablePersona(profileID, defaultPersonaTraits(), defaultMutablePersonaPrompt, now)
+		traits := defaultPersonaTraits()
+		for name, value := range initialTraits {
+			traits[name] = value
+		}
+		prompt := strings.TrimSpace(initialPrompt)
+		if prompt == "" {
+			prompt = defaultMutablePersonaPrompt
+		}
+		seed, createErr := domain.NewMutablePersona(profileID, traits, prompt, now)
 		if createErr != nil {
 			return createErr
 		}

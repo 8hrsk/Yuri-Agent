@@ -42,8 +42,10 @@
 
   const enterStableProviderStep = async () => {
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const welcome = await waitFor('welcome screen', () => findButton('Настроить провайдера'))
+      const welcome = await waitFor('welcome screen', () => findButton('Создать агента'))
       welcome.click()
+      const createAgent = await waitFor('agent form', () => document.querySelector('#agent-name') && findButton('Создать агента'))
+      createAgent.click()
       const providerInput = await waitForAttempt(() => document.querySelector('#onboarding-base-url'), 1000)
       if (!(providerInput instanceof HTMLInputElement)) continue
       await wait(200)
@@ -56,9 +58,22 @@
   const run = async () => {
     const bridge = await waitFor('Wails desktop bridge', () => window.go?.desktop?.Bridge)
     const originalGetOnboardingState = bridge.GetOnboardingState
-    let onboarding = { completed: false, providerTested: false }
+    let onboarding = { completed: false, providerTested: false, agentConfigured: false }
+    let activeAgent
 
     bridge.GetOnboardingState = async () => onboarding
+    bridge.ListAgents = async () => activeAgent ? [activeAgent] : []
+    bridge.GetActiveAgent = async () => activeAgent
+    bridge.CreateAgent = async (input) => {
+      if (!input?.name) throw new Error('Agent name did not reach the typed bridge')
+      activeAgent = {
+        id: 'agent-ui-smoke', name: input.name, age: input.age, gender: input.gender,
+        preferences: input.preferences, traits: input.traits, active: true,
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      }
+      onboarding = { ...onboarding, agentConfigured: true, activeAgentId: activeAgent.id }
+      return activeAgent
+    }
     bridge.CompleteOnboarding = async (payload) => {
       const settings = payload?.settings
       if (settings?.kind !== 'openai-compatible') throw new Error('Unexpected provider kind')
@@ -68,13 +83,15 @@
       onboarding = {
         completed: true,
         providerTested: true,
+        agentConfigured: true,
+        activeAgentId: activeAgent.id,
         completedAt: new Date().toISOString(),
       }
       return { ok: true, message: 'UI smoke provider connected.', state: onboarding }
     }
 
     try {
-      await waitFor('welcome screen', () => findButton('Настроить провайдера'))
+      await waitFor('welcome screen', () => findButton('Создать агента'))
       steps.push('welcome-visible')
       const baseURL = await enterStableProviderStep()
       const model = document.querySelector('#onboarding-model')

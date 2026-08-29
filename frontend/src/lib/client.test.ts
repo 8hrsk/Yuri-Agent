@@ -7,6 +7,7 @@ import {
   resetYuriClientForTests,
   subscribeNotifications,
 } from './client'
+import { defaultAgentDraft } from './agents'
 
 describe('Yuri client contract', () => {
   beforeEach(() => {
@@ -35,14 +36,16 @@ describe('Yuri client contract', () => {
 
   it('keeps the mock first-run gate closed until provider probe succeeds', async () => {
     const client = createYuriClient()
-    expect(await client.getOnboardingState()).toEqual({ completed: false, providerTested: false })
+    expect(await client.getOnboardingState()).toEqual({ completed: false, providerTested: false, agentConfigured: false })
+
+    await client.createAgent(defaultAgentDraft)
 
     const settings = (await client.getProviderSnapshot()).settings
     const result = await client.completeOnboarding(settings)
 
     expect(result).toMatchObject({
       ok: true,
-      state: { completed: true, providerTested: true },
+      state: { completed: true, providerTested: true, agentConfigured: true },
     })
     expect(await client.getOnboardingState()).toMatchObject({ completed: true, providerTested: true })
   })
@@ -58,7 +61,7 @@ describe('Yuri client contract', () => {
       alternative: 'openai-compatible-api-key',
       state: { completed: false, providerTested: false },
     })
-    expect(await client.getOnboardingState()).toEqual({ completed: false, providerTested: false })
+    expect(await client.getOnboardingState()).toEqual({ completed: false, providerTested: false, agentConfigured: false })
   })
 
   it('logs the mock Codex account out and closes the provider gate', async () => {
@@ -69,10 +72,10 @@ describe('Yuri client contract', () => {
 
     await expect(client.logoutCodex()).resolves.toEqual({
       disconnected: true,
-      onboarding: { completed: false, providerTested: false },
+      onboarding: { completed: false, providerTested: false, agentConfigured: false },
     })
     expect((await client.getProviderSnapshot()).codex.connected).toBe(false)
-    expect(await client.getOnboardingState()).toEqual({ completed: false, providerTested: false })
+    expect(await client.getOnboardingState()).toEqual({ completed: false, providerTested: false, agentConfigured: false })
   })
 
   it('forwards Codex logout and requires an explicit backend confirmation', async () => {
@@ -91,7 +94,7 @@ describe('Yuri client contract', () => {
     try {
       await expect(createYuriClient().logoutCodex()).resolves.toEqual({
         disconnected: true,
-        onboarding: { completed: false, providerTested: false },
+        onboarding: { completed: false, providerTested: false, agentConfigured: false },
       })
       expect(calls).toEqual(['CodexLogout'])
     } finally {
@@ -103,17 +106,19 @@ describe('Yuri client contract', () => {
 
   it('forwards typed first-run state and atomic completion through Wails', async () => {
     const calls: Array<{ name: string; args: unknown[] }> = []
+    let onboardingComplete = false
     const bridge = {
       GetOnboardingState: () => {
         calls.push({ name: 'GetOnboardingState', args: [] })
-        return { completed: false, provider_tested: false }
+        return { completed: onboardingComplete, provider_tested: onboardingComplete, agent_configured: true, active_agent_id: 'agent-yuri' }
       },
       CompleteOnboarding: (input: unknown) => {
         calls.push({ name: 'CompleteOnboarding', args: [input] })
+        onboardingComplete = true
         return {
           ok: true,
           message: 'Endpoint отвечает.',
-          state: { completed: true, provider_tested: true, completed_at: '2026-08-28T12:00:00Z' },
+          state: { completed: true, provider_tested: true, agent_configured: true, active_agent_id: 'agent-yuri', completed_at: '2026-08-28T12:00:00Z' },
         }
       },
     }
@@ -124,7 +129,7 @@ describe('Yuri client contract', () => {
     try {
       const client = createYuriClient()
       expect(client.mode).toBe('wails')
-      await expect(client.getOnboardingState()).resolves.toEqual({ completed: false, providerTested: false })
+      await expect(client.getOnboardingState()).resolves.toEqual({ completed: false, providerTested: false, agentConfigured: true, activeAgentId: 'agent-yuri' })
       const result = await client.completeOnboarding({
         kind: 'openai-compatible',
         baseUrl: 'https://api.example.test/v1',
@@ -134,7 +139,7 @@ describe('Yuri client contract', () => {
         streamResponses: true,
       }, 'preview-key')
 
-      expect(result).toMatchObject({ ok: true, state: { completed: true, providerTested: true } })
+      expect(result).toMatchObject({ ok: true, state: { completed: true, providerTested: true, agentConfigured: true } })
       expect(calls).toEqual([
         { name: 'GetOnboardingState', args: [] },
         {
@@ -176,6 +181,41 @@ describe('Yuri client contract', () => {
       expect(snapshot.settings.kind).toBe('openai-compatible')
       expect(snapshot.codex.connected).toBe(false)
       expect(codexCalls).toBe(0)
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
+  it('normalizes and forwards named-agent roster methods through Wails', async () => {
+    const calls: Array<{ name: string; args: unknown[] }> = []
+    const wireAgent = {
+      id: 'agent-yuri', name: 'Юри', age: 21, gender: 'female', preferences: 'Коротко',
+      traits: { warmth: 0.6 }, active: true, created_at: '2026-08-29T00:00:00Z', updated_at: '2026-08-29T00:00:00Z',
+    }
+    const bridge = {
+      ListConversations: () => [],
+      ListAgents: () => { calls.push({ name: 'ListAgents', args: [] }); return [wireAgent] },
+      GetActiveAgent: () => { calls.push({ name: 'GetActiveAgent', args: [] }); return wireAgent },
+      CreateAgent: (input: unknown) => { calls.push({ name: 'CreateAgent', args: [input] }); return wireAgent },
+      SetActiveAgent: (input: unknown) => { calls.push({ name: 'SetActiveAgent', args: [input] }); return wireAgent },
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+    try {
+      const client = createYuriClient()
+      await expect(client.listAgents()).resolves.toMatchObject([{ id: 'agent-yuri', name: 'Юри', traits: { warmth: 0.6 }, active: true }])
+      await expect(client.getActiveAgent()).resolves.toMatchObject({ id: 'agent-yuri' })
+      await expect(client.createAgent(defaultAgentDraft)).resolves.toMatchObject({ id: 'agent-yuri' })
+      await expect(client.setActiveAgent('agent-yuri')).resolves.toMatchObject({ id: 'agent-yuri', active: true })
+      expect(calls).toEqual([
+        { name: 'ListAgents', args: [] },
+        { name: 'GetActiveAgent', args: [] },
+        { name: 'CreateAgent', args: [defaultAgentDraft] },
+        { name: 'SetActiveAgent', args: [{ id: 'agent-yuri' }] },
+      ])
     } finally {
       if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
       else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })

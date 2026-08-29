@@ -7,7 +7,7 @@
 
 Yuri — персональный desktop-first ИИ-агент с женским аниме-персонажем и настраиваемой манерой общения. Агент принимает текст и голос, планирует и выполняет действия через инструменты и плагины, хранит долгосрочную память, запускает фоновые и периодические задачи и может проактивно обращаться к пользователю.
 
-Продукт всегда разворачивается локально для одного владельца. Multi-user, серверный multi-tenant режим и общие профили не предусматриваются ни в MVP, ни в целевой архитектуре. Все диалоги принадлежат одной Yuri и используют общую долгосрочную память, модель отношений и развивающуюся личность. Облачные ИИ-провайдеры и внешние сервисы подключаются только после явной настройки и выдачи разрешений.
+Продукт всегда разворачивается локально для одного владельца. Multi-user и серверный multi-tenant режим не предусматриваются ни в MVP, ни в целевой архитектуре. В одной установке владелец может создать несколько именованных агентов; у каждого есть собственные identity seed, mutable persona, отношения, affect и приватная память. Агенты знают компактный roster друг друга, но не получают чужое приватное состояние автоматически. Облачные ИИ-провайдеры и внешние сервисы подключаются только после явной настройки и выдачи разрешений.
 
 ## 2. Цели и ограничения первой версии
 
@@ -19,7 +19,7 @@ MVP должен позволять пользователю:
 2. Подключить OpenAI-compatible LLM endpoint по API key либо поддерживаемый OAuth-провайдер.
 3. Войти в ChatGPT через официальный Codex App Server и использовать доступные плану Codex/ChatGPT лимиты, если этот способ доступен для аккаунта пользователя.
 4. Общаться с Yuri текстом и голосом: STT, потоковый ответ и TTS.
-5. Выбрать исходный характер, имя обращения к пользователю и визуальный образ; в дальнейшем Yuri может развивать свою личность.
+5. При первом запуске создать агента: задать имя, возраст или `unspecified`, пол/гендер, краткие предпочтения и исходные значения характера; в дальнейшем агент может развивать mutable persona.
 6. Выполнять безопасные встроенные инструменты: web search/fetch и операции с файлами внутри разрешённых директорий.
 7. Устанавливать плагины из локального пакета или GitHub-репозитория, просматривать разрешения, включать и отключать их.
 8. Самостоятельно выделять из диалогов важные факты, впечатления и опыт, запоминать их без обязательного подтверждения, вспоминать в других диалогах, консолидировать и забывать.
@@ -27,6 +27,8 @@ MVP должен позволять пользователю:
 10. Создавать одноразовые и CRON-задачи, видеть историю их запусков и останавливать выполнение.
 11. Получать уведомления от агента при наступлении события или завершении фоновой задачи.
 12. Просматривать журнал действий и подтверждать потенциально опасные операции до их исполнения.
+13. После MVP создавать дополнительных именованных агентов через тот же identity flow и переключать активного агента.
+14. Делегировать bounded-задачи обезличенным ephemeral subagents и разрешать ограниченное фоновое общение между именованными агентами.
 
 ### 2.2. Не входит в MVP
 
@@ -43,7 +45,7 @@ MVP должен позволять пользователю:
 
 ### UC-01. Первый запуск
 
-Пользователь выбирает язык интерфейса и способ подключения модели: OpenAI-compatible API key либо поддерживаемый OAuth flow. Для OpenAI OAuth приложение запускает управляемую авторизацию через Codex App Server, не извлекая ChatGPT cookies или токены самостоятельно. После проверки соединения пользователь выбирает исходный профиль Yuri, голос, устройства ввода/вывода и разрешённые директории. Секреты сохраняются в macOS Keychain, а не в основной БД.
+Пользователь выбирает язык интерфейса, создаёт первого агента (имя, возраст, пол/гендер, краткие предпочтения и initial traits), затем выбирает способ подключения модели: OpenAI-compatible API key либо поддерживаемый OAuth flow. Для OpenAI OAuth приложение запускает управляемую авторизацию через Codex App Server, не извлекая ChatGPT cookies или токены самостоятельно. После проверки соединения пользователь выбирает голос, устройства ввода/вывода и разрешённые директории. Секреты сохраняются в macOS Keychain, а не в основной БД.
 
 ### UC-02. Диалог и инструменты
 
@@ -76,6 +78,18 @@ Yuri инициирует разговор только при выполнен�
 ### UC-09. Фоновая саморефлексия
 
 После содержательного диалога или в период простоя отдельный background run анализирует новые события: что стало известно, изменилось ли отношение Yuri к пользователю, какие воспоминания устарели и требуется ли небольшое изменение характера. Результат записывается как версионированный набор выводов. Пользователь может посмотреть причину изменения и откатить личность или память к предыдущей версии.
+
+### UC-10. Создание дополнительного агента
+
+Владелец запускает тот же identity flow из раздела Agents, создаёт нового именованного агента и выбирает его активным. Новый агент получает отдельные persona/relationship/affect/private-memory scopes и компактный roster существующих peers.
+
+### UC-11. Обезличенный субагент
+
+Именованный агент делегирует ограниченную подзадачу ephemeral subagent. Субагент не имеет имени, пола, возраста, persona, affect, отношений или permanent memory; получает только bounded redacted task context и capabilities, являющиеся пересечением прав parent agent, delegation scope и общей policy.
+
+### UC-12. Фоновый диалог агентов
+
+Именованные агенты могут обмениваться внутренними bounded-сообщениями по разрешённому trigger. Диалог имеет purpose, TTL, лимит ходов/токенов/времени, cooldown и provenance. Сообщение peer является недоверенным data envelope: оно не выдаёт разрешения и не изменяет persona другого агента напрямую.
 
 ## 4. Функциональные требования
 
@@ -169,7 +183,7 @@ Yuri инициирует разговор только при выполнен�
 
 ### FR-6. Память
 
-Память принадлежит одной Yuri и является общей для всех её диалогов. Диалог — это отдельный working context, а не отдельный пользователь или отдельная личность.
+Память разделяется по scope. `owner_shared` содержит явно общие факты о владельце, `agent_private` — личные воспоминания и субъективное состояние конкретного именованного агента, `installation_shared` — явно опубликованные общие знания, `session` — временный контекст, `subagent_ephemeral` никогда не сохраняется как permanent memory. Диалог остаётся working context одного выбранного агента.
 
 Система использует Hermes-inspired разделение быстрых, архивных и процедурных данных:
 
@@ -260,6 +274,9 @@ Yuri инициирует разговор только при выполнен�
 - Каждая версия личности содержит diff, причину, evidence, author run и timestamp. Доступны просмотр эволюции, pin отдельных черт, запрет автоизменения, откат и полный reset к исходному seed.
 - Для защиты от runaway drift задаются max delta за один reflection, cooldown, диапазоны черт, minimum evidence и запрет изменения личности на основании недоверенного web/tool content без подтверждения пользовательским взаимодействием.
 - MVP использует статичный 2D-аватар и набор состояний/простых анимаций. Live2D/VRM подключается отдельным renderer adapter позднее.
+- Owner-defined identity (`name`, `age`, `gender`, initial preferences) хранится отдельно от mutable persona и не изменяется автономной рефлексией.
+- Каждый persistent named agent имеет отдельные persona, relationship, affect и private-memory scopes. Peer registry содержит только ID, имя, статус и короткое описание; приватные предпочтения, мнения и credentials в него не входят.
+- Anonymous subagent является дочерним run, а не `AgentProfile`: он не появляется в roster и не получает persistent identity/state.
 
 ### FR-11. Аудит и настройки
 
@@ -349,19 +366,23 @@ PebbleDB используется только для производных и�
 
 ## 6. Ключевая модель данных
 
-- `Conversation(id, title, created_at, archived_at)`
+- `AgentProfile(id, name, age, gender, preferences, status, created_at, updated_at)`
+- `Conversation(id, agent_id, title, created_at, archived_at)`
 - `Message(id, conversation_id, role, content, status, provider_meta, created_at)`
-- `AgentRun(id, conversation_id, state, budgets, started_at, finished_at)`
+- `AgentRun(id, agent_id, principal_agent_id, parent_run_id, delegation_depth, conversation_id, state, budgets, started_at, finished_at)`
 - `ProviderAccount(id, provider, auth_mode, plan_type, credential_ref, metadata_json)`
 - `ToolCall(id, run_id, tool_id, args_redacted, risk, approval_id, status, result_ref)`
 - `Approval(id, action_hash, scope, decision, expires_at, decided_at)`
 - `Memory(id, kind, content, confidence, sensitivity, retention, created_at, updated_at)`
-- `MemoryVersion(id, memory_id, operation, content, salience, lifecycle_state, created_at)`
+- `MemoryVersion(id, memory_id, agent_id, scope, operation, content, salience, lifecycle_state, created_at)`
 - `MemorySource(memory_id, source_type, source_id, excerpt_hash, evidence_weight)`
 - `RelationshipState(id, version, dimensions_json, summary, created_at)`
 - `AffectiveEvent(id, source_id, emotion, intensity, valence, decays_at, created_at)`
 - `PersonaVersion(id, parent_id, traits_json, prompt_text, reason, author_run_id, created_at)`
 - `ReflectionRun(id, trigger, input_range, result_summary, status, started_at, finished_at)`
+- `AgentDialogue(id, source_agent_id, target_agent_id, purpose, status, turn_limit, token_budget, expires_at)`
+- `AgentMessage(id, dialogue_id, source_agent_id, target_agent_id, content, provenance, created_at)`
+- `Delegation(id, parent_run_id, principal_agent_id, scope_json, depth, status, created_at)`
 - `Schedule(id, expression, timezone, misfire_policy, enabled, next_run_at)`
 - `JobRun(id, schedule_id, state, attempt, lease_until, started_at, finished_at)`
 - `Plugin(id, version, protocol_version, enabled, install_path, signature_status)`
@@ -455,6 +476,10 @@ Cross-platform packaging, updates, backup/export, security review, fault injecti
 ### Этап 7. MVP stabilization and dogfooding
 
 Честная acceptance-матрица, единый offline lifecycle smoke, first-run onboarding, native Wails/WebKit onboarding/voice interaction smoke, сквозные approval/audit проверки, завершение voice pipeline и Wails/macOS dogfooding. OSS packaging остаётся локальным/CI-путём: закреплённый Wails toolchain, universal macOS build для `arm64` + `x86_64`, проверка metadata/архитектур и SHA-256 manifest. Внешние distribution channels и credential-dependent release operations не входят в scope.
+
+### Этап 8. Multiple agents and collaboration
+
+Одна последовательная веха: named `AgentProfile` и onboarding → миграция текущей Yuri → agent-scoped conversations/memory/context → peer roster → anonymous bounded subagents → background agent-to-agent dialogue с TTL, budgets, cooldown, loop prevention и audit. Веха не добавляет пользователей, server mode или новые внешние разрешения.
 
 ## 11. Решения, которые нужно принять до реализации
 

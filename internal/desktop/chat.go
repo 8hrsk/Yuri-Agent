@@ -313,21 +313,30 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
-	persona, err := b.repositories.Persona.Get(runContext, b.personaProfileID())
+	profileID := b.personaProfileID()
+	profile, err := b.repositories.Agents.Get(runContext, profileID)
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
-	relationship, err := b.repositories.Relationship.Get(runContext, b.personaProfileID())
+	roster, err := b.repositories.Agents.List(runContext)
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
-	affect, err := b.repositories.Affect.Get(runContext, b.personaProfileID())
+	persona, err := b.repositories.Persona.Get(runContext, profileID)
+	if err != nil {
+		return b.failChatRun(runContext, &run, emitter, err), nil
+	}
+	relationship, err := b.repositories.Relationship.Get(runContext, profileID)
+	if err != nil {
+		return b.failChatRun(runContext, &run, emitter, err), nil
+	}
+	affect, err := b.repositories.Affect.Get(runContext, profileID)
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
 	snapshot, err := assembler.Assemble(runContext, contextbuilder.Input{
 		ConversationID: conversationID, Query: request.Text,
-		ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: identitySeedSystemPrompt,
+		ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, roster),
 		MutablePersona: formatMutablePersonaContext(persona), Relationship: formatRelationshipContext(relationship, affect),
 		Transcript: currentTranscript,
 	})

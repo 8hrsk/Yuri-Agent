@@ -1,4 +1,4 @@
-# ADR-0006: Общая память Yuri с bounded snapshot и on-demand cross-session search
+# ADR-0006: Scoped память агентов с bounded snapshot и on-demand cross-session search
 
 - Статус: accepted
 - Дата: 2026-08-27
@@ -10,7 +10,7 @@
 
 ## Решение
 
-1. Все conversations принадлежат одной Yuri и используют общую memory/relationship/persona state.
+1. Conversation принадлежит выбранному именованному агенту. Его persona, relationship, affect и `agent_private` memory изолированы; явно опубликованные `owner_shared` и `installation_shared` данные могут использоваться несколькими агентами.
 2. На границе run создаётся `ContextSnapshot` в фиксированном порядке: immutable policy → identity seed → mutable persona → relationship/affect → bounded core memory → task context → retrieved history → current conversation.
 3. Core memory ограничена token budget и хранит curated high-signal entries; неактивные записи переводятся в lifecycle state `dormant` и не попадают в обычный retrieval.
 4. Полный transcript остаётся в SQLite. FTS5/session search и semantic/vector search являются отдельными projections; hybrid ranker выдаёт bounded snippets с session/source IDs и evidence.
@@ -29,5 +29,4 @@
 
 - retrieval может не найти слабый или противоречивый эпизод;
 - memory lifecycle, sensitivity filter и token budget требуют отдельного тестирования;
-- общая память принадлежит одному профилю и не является user-isolation mechanism для multi-user сценариев.
-
+- memory scopes разделяют агентов одного владельца, но не являются user-isolation mechanism для multi-user сценариев.

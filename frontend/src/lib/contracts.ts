@@ -48,6 +48,26 @@ export interface Conversation {
   messages: ChatMessage[]
 }
 
+export interface AgentProfile {
+  id: string
+  name: string
+  age?: number
+  gender: string
+  preferences: string
+  traits: Record<string, number>
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentProfileInput {
+  name: string
+  age?: number
+  gender: string
+  preferences: string
+  traits: Record<string, number>
+}
+
 /**
  * A memory belongs to Yuri's single local profile, not to an individual
  * conversation. Lifecycle is deliberately explicit: dormant records are
@@ -531,6 +551,8 @@ export interface ProviderSnapshot {
 export interface OnboardingState {
   completed: boolean
   providerTested: boolean
+  agentConfigured: boolean
+  activeAgentId?: string
   completedAt?: string
 }
 
@@ -595,6 +617,10 @@ export interface YuriClient {
   readonly mode: 'wails' | 'mock'
   listConversations(): Promise<Conversation[]>
   createConversation(title: string): Promise<Conversation>
+  listAgents(): Promise<AgentProfile[]>
+  getActiveAgent(): Promise<AgentProfile | undefined>
+  createAgent(input: AgentProfileInput): Promise<AgentProfile>
+  setActiveAgent(agentId: string): Promise<AgentProfile>
   sendMessage(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult>
   cancelRun(runId: string): Promise<void>
   approve(approvalId: string, decision: 'approve' | 'deny'): Promise<void>

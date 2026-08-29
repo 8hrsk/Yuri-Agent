@@ -70,9 +70,20 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 		b.logReflectionFailure(ctx, turn.RunID, err)
 		return
 	}
+	profileID := b.personaProfileID()
+	profile, err := b.repositories.Agents.Get(ctx, profileID)
+	if err != nil {
+		b.logReflectionFailure(ctx, turn.RunID, err)
+		return
+	}
+	roster, err := b.repositories.Agents.List(ctx)
+	if err != nil {
+		b.logReflectionFailure(ctx, turn.RunID, err)
+		return
+	}
 	result, err := engine.Run(ctx, reflection.InputSnapshot{
-		ProfileID: b.personaProfileID(), RunID: turn.RunID, Trigger: reflection.TriggerPostTurn,
-		CapturedAt: turn.Now, ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: identitySeedSystemPrompt,
+		ProfileID: profileID, RunID: turn.RunID, Trigger: reflection.TriggerPostTurn,
+		CapturedAt: turn.Now, ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, roster),
 		State: state, Evidence: evidence,
 	})
 	if err != nil {

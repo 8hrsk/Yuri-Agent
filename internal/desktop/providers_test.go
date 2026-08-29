@@ -49,6 +49,7 @@ func TestSaveOpenAIProviderKeepsSecretOutOfConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	bridge := &Bridge{paths: paths, config: config.Default(paths), keyring: store}
+	bridge.config.Onboarding.AgentConfigured = true
 	view, err := bridge.SaveOpenAIProvider(SaveOpenAIProviderInput{
 		ID: "main", DisplayName: "Main", BaseURL: "https://api.example.com/v1",
 		Model: "model", APIKey: "sk-super-secret", Enabled: true,
@@ -129,6 +130,7 @@ func TestMarkProviderUntestedPersistsLogoutGate(t *testing.T) {
 	value := config.Default(paths)
 	value.Onboarding.Completed = true
 	value.Onboarding.ProviderTested = true
+	value.Onboarding.AgentConfigured = true
 	if err := config.Save(paths, value); err != nil {
 		t.Fatal(err)
 	}
@@ -190,6 +192,7 @@ func TestOnboardingRequiresSuccessfulProbeAndSurvivesReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	bridge := &Bridge{paths: paths, config: config.Default(paths), keyring: store}
+	bridge.config.Onboarding.AgentConfigured = true
 
 	initial := bridge.GetOnboardingState()
 	if initial.Completed || initial.ProviderTested || initial.ProviderConfigured || initial.State != OnboardingStatePending {

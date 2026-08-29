@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
+import { defaultAgentDraft } from '../lib/agents'
 import { isOnboardingComplete, onboardingStepIndex, onboardingSteps, validateOnboardingProvider, type OnboardingStep } from '../lib/onboarding'
-import type { CodexAccount, CodexModel, ProviderSettings, YuriClient } from '../lib/contracts'
+import type { AgentProfileInput, CodexAccount, CodexModel, ProviderSettings, YuriClient } from '../lib/contracts'
+import { AgentProfileForm } from './AgentProfileForm'
 import { Icon } from './Icon'
 
 type OnboardingViewProps = {
@@ -15,7 +17,7 @@ type Feedback = {
   text: string
 }
 
-type BusyState = 'loading' | 'oauth' | 'testing' | undefined
+type BusyState = 'loading' | 'agent' | 'oauth' | 'testing' | undefined
 
 const defaultSettings: ProviderSettings = {
   kind: 'openai-compatible',
@@ -49,6 +51,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
   const [step, setStep] = useState<OnboardingStep>('welcome')
   const [settings, setSettings] = useState<ProviderSettings>(defaultSettings)
   const [apiKey, setApiKey] = useState('')
+  const [agentDraft, setAgentDraft] = useState<AgentProfileInput>({ ...defaultAgentDraft, traits: { ...defaultAgentDraft.traits } })
   const [codex, setCodex] = useState<CodexAccount>({ connected: false })
   const [codexModels, setCodexModels] = useState<CodexModel[]>([])
   const [busy, setBusy] = useState<BusyState>('loading')
@@ -59,9 +62,10 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
     setBusy('loading')
     setLoadError(undefined)
     try {
-      const [snapshot, onboarding] = await Promise.all([
+      const [snapshot, onboarding, agents] = await Promise.all([
         client.getProviderSnapshot(),
         client.getOnboardingState(),
+        client.listAgents(),
       ])
       setSettings(snapshot.settings)
       setCodex(snapshot.codex)
@@ -70,7 +74,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
         onComplete()
         return
       }
-      setStep('welcome')
+      setStep(onboarding.agentConfigured || agents.length > 0 ? 'provider' : 'welcome')
     } catch (cause) {
       setLoadError(errorMessage(cause, 'Не удалось загрузить состояние первого запуска.'))
     } finally {
@@ -107,6 +111,20 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
       setStep('success')
     } catch (cause) {
       setFeedback({ kind: 'error', text: errorMessage(cause, 'Не удалось сохранить настройки и проверить провайдер.') })
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
+  const handleCreateAgent = async () => {
+    setBusy('agent')
+    setFeedback(undefined)
+    try {
+      const agent = await client.createAgent(agentDraft)
+      setFeedback({ kind: 'success', text: `Агент ${agent.name} создан и выбран как активный.` })
+      setStep('provider')
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: errorMessage(cause, 'Не удалось создать агента.') })
     } finally {
       setBusy(undefined)
     }
@@ -152,8 +170,8 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
         <div className="onboarding-layout">
           <section className="onboarding-main" aria-labelledby="onboarding-title">
             <div className="onboarding-eyebrow"><span className="eyebrow-dot" /> FIRST-RUN SETUP</div>
-            <h1 id="onboarding-title">Настроим Yuri<span className="title-dot">.</span></h1>
-            <p className="onboarding-lead">Подключите модель, чтобы Yuri могла отвечать. Ключ передаётся только в backend-вызов и не сохраняется в renderer.</p>
+            <h1 id="onboarding-title">Создадим вашего агента<span className="title-dot">.</span></h1>
+            <p className="onboarding-lead">Задайте исходную личность, затем подключите модель. Идентичность хранится локально, а секреты не сохраняются в renderer.</p>
             <OnboardingStepper activeStep={step} />
 
             {busy === 'loading' ? (
@@ -172,20 +190,29 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
                   <section className="onboarding-panel onboarding-panel--welcome">
                     <div className="onboarding-panel__mark"><Icon name="spark" width={23} height={23} /></div>
                     <span className="section-heading__overline">Шаг 1 · локальный профиль</span>
-                    <h2>Один короткий тест — и можно начинать.</h2>
-                    <p>Сначала сохраним только настройки endpoint. Затем backend выполнит безопасный минимальный probe. Экран не исчезнет, пока успешный результат не будет подтверждён durable onboarding state.</p>
+                    <h2>Сначала — кто будет рядом с вами.</h2>
+                    <p>Создайте именованного агента с собственной исходной личностью. Имя, возраст и гендер остаются под вашим контролем; изменяемые черты смогут развиваться со временем.</p>
                     <div className="onboarding-facts">
                       <span><Icon name="shield" width={14} height={14} /> deny-by-default permissions</span>
                       <span><Icon name="lock" width={14} height={14} /> secrets stay in keyring</span>
                     </div>
-                    <button className="button button--accent" onClick={() => { setFeedback(undefined); setStep('provider') }} type="button">Настроить провайдера <Icon name="chevron-right" width={14} height={14} /></button>
+                    <button className="button button--accent" onClick={() => { setFeedback(undefined); setStep('agent') }} type="button">Создать агента <Icon name="chevron-right" width={14} height={14} /></button>
+                  </section>
+                )}
+
+                {step === 'agent' && (
+                  <section className="onboarding-panel onboarding-panel--agent" aria-labelledby="agent-onboarding-title">
+                    <div className="onboarding-panel__heading"><div><span className="section-heading__overline">Шаг 2 · identity seed</span><h2 id="agent-onboarding-title">Исходная личность агента</h2></div><span className="onboarding-provider-state"><i /> LOCAL</span></div>
+                    <p className="onboarding-panel__hint">Эти поля задаёт владелец. Фоновая рефлексия сможет менять только незакреплённые черты, но не базовую идентичность.</p>
+                    <AgentProfileForm busy={busy === 'agent'} onBack={() => { setFeedback(undefined); setStep('welcome') }} onChange={setAgentDraft} onSubmit={() => void handleCreateAgent()} value={agentDraft} />
+                    {renderFeedback}
                   </section>
                 )}
 
                 {step === 'provider' && (
                   <section className="onboarding-panel onboarding-panel--provider" aria-labelledby="provider-onboarding-title">
                     <div className="onboarding-panel__heading">
-                      <div><span className="section-heading__overline">Шаг 2 · connection check</span><h2 id="provider-onboarding-title">Подключите провайдера</h2></div>
+                      <div><span className="section-heading__overline">Шаг 3 · connection check</span><h2 id="provider-onboarding-title">Подключите провайдера</h2></div>
                       <span className="onboarding-provider-state"><i /> SETUP</span>
                     </div>
                     <div aria-label="Выбор провайдера" className="onboarding-provider-tabs" role="tablist">
@@ -200,7 +227,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
                           <label htmlFor="onboarding-base-url"><span>Base URL</span><input autoComplete="url" id="onboarding-base-url" onChange={(event) => updateSettings('baseUrl', event.target.value)} spellCheck={false} type="url" value={settings.baseUrl} /></label>
                           <label htmlFor="onboarding-model"><span>Model</span><input autoComplete="off" id="onboarding-model" onChange={(event) => updateSettings('model', event.target.value)} spellCheck={false} value={settings.model} /></label>
                           <label htmlFor="onboarding-api-key"><span>API key <small>{settings.apiKeyConfigured ? '· сохранён в keyring' : '· optional in preview'}</small></span><input autoComplete="new-password" id="onboarding-api-key" onChange={(event) => setApiKey(event.target.value)} placeholder={settings.apiKeyConfigured ? 'Оставьте пустым, чтобы сохранить текущий' : 'sk-…'} type="password" value={apiKey} /></label>
-                          <div className="onboarding-form__actions"><button className="button button--quiet" onClick={() => { setFeedback(undefined); setStep('welcome') }} type="button">Назад</button><button className="button button--accent" disabled={busy === 'testing' || busy === 'oauth'} type="submit">{busy === 'testing' ? 'Сохраняю и проверяю…' : 'Сохранить и проверить'} <Icon name="arrow-up" width={14} height={14} /></button></div>
+                          <div className="onboarding-form__actions"><button className="button button--accent" disabled={busy === 'testing' || busy === 'oauth'} type="submit">{busy === 'testing' ? 'Сохраняю и проверяю…' : 'Сохранить и проверить'} <Icon name="arrow-up" width={14} height={14} /></button></div>
                         </form>
                       </>
                     ) : settings.kind === 'codex-app-server' ? (
@@ -209,14 +236,14 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
                         {codex.connected && <label className="codex-model-picker"><span>Модель</span><select aria-label="Модель Codex" onChange={(event) => updateSettings('model', event.target.value)} value={settings.model}><option value="">Автоматически · {codexModels.find((model) => model.isDefault)?.displayName ?? 'модель аккаунта'}</option>{codexModels.map((model) => <option key={model.id} value={model.model}>{model.displayName}{model.isDefault ? ' · default' : ''}</option>)}</select><small>{settings.model ? codexModels.find((model) => model.model === settings.model)?.description : 'Codex выберет модель по умолчанию для вашего аккаунта.'}</small></label>}
                         <p className="onboarding-panel__hint">OAuth остаётся явным действием пользователя. Yuri не получает и не показывает токен, а backend сам выполняет probe после подключения.</p>
                         {!codex.connected && <button className="button button--quiet button--wide" disabled={busy === 'oauth' || busy === 'testing'} onClick={() => void handleLogin()} type="button"><Icon name="command" width={15} height={15} />{busy === 'oauth' ? 'Открываю OAuth…' : 'Войти через ChatGPT'}</button>}
-                        <div className="onboarding-form__actions"><button className="button button--quiet" onClick={() => { setFeedback(undefined); setStep('welcome') }} type="button">Назад</button><button className="button button--accent" disabled={!codex.connected || busy === 'testing' || busy === 'oauth'} onClick={() => void handleProbe()} type="button">{busy === 'testing' ? 'Проверяю…' : 'Проверить Codex'} <Icon name="arrow-up" width={14} height={14} /></button></div>
+                        <div className="onboarding-form__actions"><button className="button button--accent" disabled={!codex.connected || busy === 'testing' || busy === 'oauth'} onClick={() => void handleProbe()} type="button">{busy === 'testing' ? 'Проверяю…' : 'Проверить Codex'} <Icon name="arrow-up" width={14} height={14} /></button></div>
                       </div>
                     ) : (
                       <div className="onboarding-codex">
                         <div className="codex-account__row"><div className="codex-account__avatar">A</div><div><strong>Antigravity OAuth недоступен</strong><small>unsupported_auth_mode · конфигурация не будет сохранена</small></div></div>
                         <p className="onboarding-panel__hint">Yuri не импортирует токены Gemini CLI, browser cookies и token cache и не имитирует официальный клиент. Интеграция появится только после публикации разрешённого vendor contract.</p>
                         <button className="button button--quiet button--wide" onClick={() => updateSettings('kind', 'openai-compatible')} type="button">Использовать API key через совместимый endpoint</button>
-                        <div className="onboarding-form__actions"><button className="button button--quiet" onClick={() => { setFeedback(undefined); setStep('welcome') }} type="button">Назад</button></div>
+                        <div className="onboarding-form__actions" />
                       </div>
                     )}
                     {renderFeedback}
@@ -226,8 +253,8 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
                 {step === 'success' && (
                   <section className="onboarding-panel onboarding-panel--success" aria-labelledby="onboarding-success-title">
                     <div className="onboarding-success-mark"><Icon name="check" width={27} height={27} /></div>
-                    <span className="section-heading__overline">Шаг 3 · ready</span>
-                    <h2 id="onboarding-success-title">Yuri готова к диалогу.</h2>
+                    <span className="section-heading__overline">Шаг 4 · ready</span>
+                    <h2 id="onboarding-success-title">Агент готов к диалогу.</h2>
                     <p>{feedback?.kind === 'success' ? feedback.text : 'Провайдер отвечает, а состояние первого запуска сохранено.'}</p>
                     <div className="onboarding-success-meta"><span><i /> provider connected</span><span><i /> onboarding persisted</span></div>
                     <button className="button button--accent" onClick={onComplete} type="button">Открыть Chat <Icon name="chevron-right" width={14} height={14} /></button>

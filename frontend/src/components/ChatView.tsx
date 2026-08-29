@@ -17,25 +17,26 @@ import { Icon } from './Icon'
 import { YuriAvatar } from './YuriAvatar'
 
 type ChatViewProps = {
+  agentName: string
   backend: BackendConnection
   onOpenSettings: () => void
 }
 
-const starterPrompts = [
-  'Познакомиться с Yuri',
+const starterPrompts = (agentName: string) => [
+  `Познакомиться с ${agentName}`,
   'Проверить доступ к файлам',
   'Запиши заметку в Documents',
 ]
 
-const statusCopy: Record<RunStatus, string> = {
-  idle: 'Готова к диалогу',
-  thinking: 'Yuri думает…',
+const statusCopy = (agentName: string): Record<RunStatus, string> => ({
+  idle: 'Жду задачу',
+  thinking: `${agentName} думает…`,
   tool_running: 'Выполняю действие…',
   waiting_approval: 'Ожидается ваше разрешение',
-  speaking: 'Yuri говорит…',
+  speaking: `${agentName} говорит…`,
   cancelled: 'Запуск остановлен',
   error: 'Нужна проверка запуска',
-}
+})
 
 function makeId(prefix: string): string {
   const suffix = typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -93,6 +94,7 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
 }
 
 function MessageBubble({
+  agentName,
   message,
   onSpeak,
   onStopSpeaking,
@@ -100,6 +102,7 @@ function MessageBubble({
   speechSupported,
   onRetry,
 }: {
+  agentName: string
   message: ChatMessage
   onSpeak: () => void
   onStopSpeaking: () => void
@@ -121,12 +124,12 @@ function MessageBubble({
   return (
     <article className={`message message--${message.role} message--${message.status}`}>
       <div className="message__meta">
-        <span className="message__author">{isAssistant ? 'Yuri' : 'Вы'}</span>
+        <span className="message__author">{isAssistant ? agentName : 'Вы'}</span>
         <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
         {statusLabel && <span className="message__status">{statusLabel}</span>}
       </div>
       <div className="message__content">
-        {message.content || (message.status === 'streaming' ? <span className="typing-indicator" aria-label="Yuri печатает"><i /><i /><i /></span> : null)}
+        {message.content || (message.status === 'streaming' ? <span className="typing-indicator" aria-label={`${agentName} печатает`}><i /><i /><i /></span> : null)}
         {message.status === 'streaming' && message.content && <span className="stream-cursor" aria-hidden="true" />}
       </div>
       {isAssistant && message.content && message.status !== 'streaming' && (
@@ -185,15 +188,16 @@ function ApprovalDialog({
   )
 }
 
-export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
+export function ChatView({ agentName, backend, onOpenSettings }: ChatViewProps) {
   const client = useMemo(() => createYuriClient(), [])
+  const labels = useMemo(() => statusCopy(agentName), [agentName])
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [conversationFilter, setConversationFilter] = useState('')
   const [draft, setDraft] = useState('')
   const [runId, setRunId] = useState<string>()
   const [runStatus, setRunStatus] = useState<RunStatus>('idle')
-  const [runLabel, setRunLabel] = useState(statusCopy.idle)
+  const [runLabel, setRunLabel] = useState(labels.idle)
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest>()
   const [approvalBusy, setApprovalBusy] = useState(false)
   const [error, setError] = useState<string>()
@@ -281,14 +285,14 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
     if (event.type === 'run.started') {
       setRunId(event.runId)
       setRunStatus('thinking')
-      setRunLabel(statusCopy.thinking)
+      setRunLabel(labels.thinking)
       return
     }
 
     if (event.type === 'run.status') {
       setRunId(event.runId)
       setRunStatus(event.status)
-      setRunLabel(event.label || statusCopy[event.status])
+      setRunLabel(event.label || labels[event.status])
       return
     }
 
@@ -351,19 +355,19 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
     if (event.type === 'approval.required') {
       setPendingApproval(event.approval)
       setRunStatus('waiting_approval')
-      setRunLabel(statusCopy.waiting_approval)
+      setRunLabel(labels.waiting_approval)
       return
     }
 
     if (event.type === 'run.completed') {
       setRunId(undefined)
       setRunStatus(event.status === 'complete' ? 'idle' : event.status)
-      setRunLabel(event.status === 'complete' ? statusCopy.idle : event.status === 'cancelled' ? statusCopy.cancelled : event.error ?? statusCopy.error)
+      setRunLabel(event.status === 'complete' ? labels.idle : event.status === 'cancelled' ? labels.cancelled : event.error ?? labels.error)
       if (event.status === 'error') setError(event.error ?? 'Запуск завершился ошибкой.')
       if (event.status === 'complete' && autoSpeakEnabledRef.current) autoSpeakRunRef.current = event.runId
       else autoSpeakRunRef.current = undefined
     }
-  }, [])
+  }, [labels])
 
   const startRun = useCallback(async (text: string, retryOfMessageId?: string) => {
     const trimmed = text.trim()
@@ -387,7 +391,7 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
     }
     setDraft('')
     setRunStatus('thinking')
-    setRunLabel(statusCopy.thinking)
+    setRunLabel(labels.thinking)
     try {
       await (retryOfMessageId
         ? client.retryLast({ conversationId: selectedId, text: trimmed, retryOfMessageId }, (event) => handleEvent(selectedId, event))
@@ -395,10 +399,10 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
     } catch (cause) {
       setRunId(undefined)
       setRunStatus('error')
-      setRunLabel(statusCopy.error)
+      setRunLabel(labels.error)
       setError(cause instanceof Error ? cause.message : 'Не удалось отправить сообщение.')
     }
-  }, [client, handleEvent, runId, selectedId])
+  }, [client, handleEvent, labels, runId, selectedId])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -521,7 +525,7 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
         <section aria-label="Текущий диалог" className="chat-main">
           <header className="chat-main__header">
             <div className="chat-main__header-persona">
-              <YuriAvatar label={`Yuri · ${runLabel}`} size="sm" state={avatarState} />
+              <YuriAvatar label={`${agentName} · ${runLabel}`} size="sm" state={avatarState} />
               <div>
                 <span className="section-heading__overline">Conversation · local</span>
                 <h2>{selectedConversation?.title ?? 'Новый диалог'}</h2>
@@ -536,13 +540,14 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
           <div aria-live="polite" className="messages" role="log">
             {selectedConversation?.messages.length === 0 && (
               <div className="empty-conversation">
-                <YuriAvatar label="Yuri · готова к диалогу" size="md" state="idle" />
+                <YuriAvatar label={`${agentName} · можно начинать диалог`} size="md" state="idle" />
                 <h3>С чего начнём?</h3>
-                <p>Напишите Yuri задачу. Ответ появится потоково, а рискованные действия будут показаны до выполнения.</p>
+                <p>Напишите агенту {agentName} задачу. Ответ появится потоково, а рискованные действия будут показаны до выполнения.</p>
               </div>
             )}
             {selectedConversation?.messages.map((message) => (
               <MessageBubble
+                agentName={agentName}
                 key={message.id}
                 message={message}
                 onRetry={() => handleRetry(message)}
@@ -567,10 +572,10 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
             <form className="composer" onSubmit={handleSubmit}>
               <div className="composer__topline">
                 <span className="composer__label">Новое сообщение</span>
-                <span className="composer__mode"><span /> {backend.status === 'connected' ? 'Yuri · connected' : 'Yuri · local preview'}</span>
+                <span className="composer__mode"><span /> {backend.status === 'connected' ? `${agentName} · connected` : `${agentName} · local preview`}</span>
               </div>
               <textarea
-                aria-label="Сообщение Yuri"
+                aria-label={`Сообщение ${agentName}`}
                 className="composer__input"
                 disabled={Boolean(runId)}
                 onChange={(event) => setDraft(event.target.value)}
@@ -583,7 +588,7 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
                 <div className="composer__note-group">
                   <span className="composer__note">⌘/Ctrl + Enter · отправить</span>
                   {voice.state === 'recording' && <span className="voice-timer" aria-live="polite"><i /> {formatDuration(voice.durationMs)}</span>}
-                  {transcribing && <span className="voice-ready">Yuri распознаёт голос…</span>}
+                  {transcribing && <span className="voice-ready">{agentName} распознаёт голос…</span>}
                   {!transcribing && voice.state === 'ready' && <span className="voice-ready">Голосовой фрагмент записан{voice.blob ? ` · ${Math.max(1, Math.round(voice.blob.size / 1024))} KB` : ''}</span>}
                   {voice.error && <span className="voice-error" role="alert">{voice.error}</span>}
                 </div>
@@ -633,7 +638,7 @@ export function ChatView({ backend, onOpenSettings }: ChatViewProps) {
       </div>
       <section aria-label="Быстрые действия" className="chat-starters">
         <span className="chat-starters__label">Быстрый старт</span>
-        {starterPrompts.map((prompt) => <button key={prompt} onClick={() => setDraft(prompt)} type="button">{prompt}<Icon name="arrow-up" width={13} height={13} /></button>)}
+        {starterPrompts(agentName).map((prompt) => <button key={prompt} onClick={() => setDraft(prompt)} type="button">{prompt}<Icon name="arrow-up" width={13} height={13} /></button>)}
       </section>
       {pendingApproval && <ApprovalDialog approval={pendingApproval} busy={approvalBusy} onDecision={(decision) => void handleApproval(decision)} />}
     </div>

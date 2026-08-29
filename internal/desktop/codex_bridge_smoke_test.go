@@ -37,6 +37,7 @@ func TestCodexBridgeAccountLifecycleSmoke(t *testing.T) {
 	}
 	defer database.Close()
 	value := config.Default(paths)
+	value.Onboarding.AgentConfigured = true
 	bridge := &Bridge{paths: paths, config: value, database: database}
 	defer func() {
 		bridge.mu.Lock()

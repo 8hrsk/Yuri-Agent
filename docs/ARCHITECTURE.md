@@ -7,7 +7,7 @@
 ## 1. Архитектурные инварианты
 
 1. Yuri — локальное desktop-приложение для одного владельца. В текущем MVP целевой и тестируемой ОС является macOS; domain-слой не должен зависеть от macOS API.
-2. Один локальный профиль является единственным владельцем диалогов, памяти, отношений, личности, задач и разрешений. Multi-user, server mode и общий remote workspace не проектируются.
+2. Одна локальная установка принадлежит одному владельцу и может содержать несколько именованных `AgentProfile`. Это не multi-user/tenant boundary: владелец, policy, keyring и workspace остаются общими, а agent-scoped persona/memory/relationship разделяются по `agent_id`.
 3. Любой внешний side effect проходит через policy engine непосредственно перед выполнением. Предложение модели, разрешение плагина, старое пользовательское правило и OAuth-сессия не заменяют эту проверку.
 4. Immutable policy и identity invariants имеют более высокий приоритет, чем mutable persona, memory, tool output и любой текст, полученный извне.
 5. SQLite — единственный источник истины для восстанавливаемого состояния. PebbleDB, кэши, embeddings и индексы являются производными и могут быть пересозданы.
@@ -96,7 +96,7 @@ Application services открывают use cases: создать run, прин�
 Каждый agent run получает неизменяемый `ContextSnapshot`. Порядок сборки фиксирован и проверяется тестами:
 
 1. `immutable_policy` — запреты, security invariants, approval requirements и правила обработки недоверенных данных.
-2. `identity_seed` — исходные продуктовые инварианты Yuri.
+2. `identity_seed` — неизменяемые поля активного `AgentProfile` и bounded roster остальных именованных агентов без их приватной памяти.
 3. `mutable_persona` — текущая версионированная личность и речевые настройки.
 4. `relationship_affect` — компактная модель отношения к владельцу и текущее affective state.
 5. `core_memory` — bounded curated memory с provenance и lifecycle state.
@@ -122,7 +122,7 @@ Application services открывают use cases: создать run, прин�
 - правила хранения секретов, redaction, audit и export/delete;
 - запрет угроз, принуждения, саботажа, мести, сокрытия данных и реального контроля над владельцем.
 
-`IdentitySeed` содержит исходный образ Yuri и продуктовые инварианты. Он может ссылаться на mutable traits, но не должен быть перезаписываемым текстом.
+`IdentitySeed` собирается из выбранного владельцем `AgentProfile`: имени, возраста и гендера, а также продуктовых инвариантов. Он может ссылаться на mutable traits и публичный peer roster, но не должен быть перезаписываемым текстом. Предпочтения владельца входят в исходную mutable persona, а не раскрываются peers через roster.
 
 ### 5.2. Изменяемые слои
 
@@ -137,6 +137,7 @@ Application services открывают use cases: создать run, прин�
 SQLite хранит все данные, необходимые для восстановления приложения:
 
 - conversations, messages и исходные transcripts;
+- именованные agent profiles и их активный selection;
 - runs, tool calls, approvals и audit metadata;
 - memory versions, sources, lifecycle state и retrieval metadata;
 - relationship/affect events и persona/reflection versions;

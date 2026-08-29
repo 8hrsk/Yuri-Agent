@@ -88,6 +88,24 @@ func TestLoadLegacyConfigDefaultsToIncompleteOnboarding(t *testing.T) {
 	}
 }
 
+func TestLoadMigratesCompletedStageSevenOnboarding(t *testing.T) {
+	paths := testPaths(t)
+	if err := os.MkdirAll(paths.ConfigDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"version":1,"locale":"ru-RU","log_level":"info","data_directory":"` + paths.DataDirectory + `","onboarding":{"completed":true,"provider_tested":true}}`
+	if err := os.WriteFile(paths.ConfigFile, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !value.Onboarding.Completed || !value.Onboarding.ProviderTested || !value.Onboarding.AgentConfigured {
+		t.Fatalf("migrated onboarding = %#v, want complete Stage 8 state", value.Onboarding)
+	}
+}
+
 func TestLoadClearsLegacyCodexOAuthModel(t *testing.T) {
 	paths := testPaths(t)
 	if err := os.MkdirAll(paths.ConfigDirectory, 0o700); err != nil {

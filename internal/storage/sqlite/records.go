@@ -71,6 +71,7 @@ type AuditEvent struct {
 // Repositories groups all SQLite adapters. Each field is safe to pass
 // to application services that depend on the corresponding domain port.
 type Repositories struct {
+	Agents        *AgentRepository
 	Conversations *ConversationRepository
 	Messages      *MessageRepository
 	Memories      *MemoryRepository
@@ -96,6 +97,7 @@ func NewRepositories(database *sql.DB) (*Repositories, error) {
 		return nil, fmt.Errorf("%w: database is required", domain.ErrInvalidArgument)
 	}
 	return &Repositories{
+		Agents:        NewAgentRepository(database),
 		Conversations: NewConversationRepository(database),
 		Messages:      NewMessageRepository(database),
 		Memories:      NewMemoryRepository(database),

@@ -3092,7 +3092,7 @@ kbd {
 
 .onboarding-stepper {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 7px;
   max-width: 570px;
   margin: 34px 0 18px;
@@ -3323,7 +3323,9 @@ kbd {
   text-transform: none;
 }
 
-.onboarding-form input {
+.onboarding-form input,
+.onboarding-form select,
+.onboarding-form textarea {
   width: 100%;
   min-height: 36px;
   padding: 8px 10px;
@@ -3335,8 +3337,74 @@ kbd {
   background: rgba(0, 0, 0, 0.14);
 }
 
-.onboarding-form input:focus {
+.onboarding-form textarea {
+  min-height: 74px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.onboarding-form input:focus,
+.onboarding-form select:focus,
+.onboarding-form textarea:focus {
   border-color: rgba(185, 165, 255, 0.45);
+}
+
+.agent-profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(90px, 0.65fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.agent-traits {
+  margin: 2px 0 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.agent-traits legend {
+  padding: 0 6px;
+  color: #918b9f;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.agent-traits > p {
+  margin: 0 0 12px;
+  color: #6f6a7e;
+  font-size: 8px;
+}
+
+.agent-traits__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 18px;
+}
+
+.agent-traits__grid label > span {
+  display: flex;
+  justify-content: space-between;
+}
+
+.agent-traits__grid output {
+  color: var(--accent-light);
+}
+
+.agent-traits__grid input[type='range'] {
+  min-height: 18px;
+  padding: 0;
+  accent-color: var(--accent);
+  background: transparent;
+}
+
+.agent-profile-form__validation {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--rose);
+  font-size: 9px;
 }
 
 .codex-model-picker {
@@ -4081,6 +4149,11 @@ kbd {
 
   .onboarding-stepper,
   .onboarding-provider-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-profile-grid,
+  .agent-traits__grid {
     grid-template-columns: 1fr;
   }
 
