@@ -36,6 +36,8 @@ type SelectAgentInput struct {
 	ID string `json:"id"`
 }
 
+const maxAgentRosterContextEntries = 32
+
 func (b *Bridge) ListAgents() ([]AgentProfileView, error) {
 	ctx, cancel := b.context()
 	defer cancel()
@@ -83,10 +85,15 @@ func (b *Bridge) CreateAgent(input CreateAgentInput) (AgentProfileView, error) {
 	if err != nil {
 		return AgentProfileView{}, err
 	}
-	if err := b.repositories.Agents.Create(ctx, profile); err != nil {
+	relationship, err := domain.NewRelationshipState(id, defaultRelationshipDimensions(), "Связь только начинает формироваться из совместных диалогов.", now)
+	if err != nil {
 		return AgentProfileView{}, err
 	}
-	if err := b.ensurePersonaStateFor(ctx, id, seed.Traits, seed.Prompt()); err != nil {
+	affect, err := domain.NewAffectiveState(id, defaultAffectDimensions(), "спокойное внимание", now)
+	if err != nil {
+		return AgentProfileView{}, err
+	}
+	if err := b.repositories.CreateAgentWithDefaults(ctx, profile, seed, relationship, affect); err != nil {
 		return AgentProfileView{}, fmt.Errorf("initialize agent personality: %w", err)
 	}
 	if err := b.activateAgent(profile.ID, true); err != nil {
@@ -206,7 +213,12 @@ func agentIdentitySeed(profile domain.AgentProfile, roster []domain.AgentProfile
 	if len(peers) == 0 {
 		lines = append(lines, "Других именованных агентов пока нет.")
 	} else {
+		omitted := len(peers) - min(len(peers), maxAgentRosterContextEntries)
+		peers = peers[:min(len(peers), maxAgentRosterContextEntries)]
 		lines = append(lines, "Известные peers:", strings.Join(peers, "\n"))
+		if omitted > 0 {
+			lines = append(lines, fmt.Sprintf("Ещё peers вне текущего bounded roster: %d.", omitted))
+		}
 	}
 	return strings.Join(lines, "\n")
 }

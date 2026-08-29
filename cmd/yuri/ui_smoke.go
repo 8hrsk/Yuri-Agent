@@ -22,6 +22,8 @@ var uiSmokeSteps = map[string][]string{
 		"provider-submit-dispatched",
 		"success-visible",
 		"chat-visible",
+		"second-agent-created",
+		"first-agent-restored",
 	},
 	uiSmokeFlowVoice: {
 		"chat-visible",

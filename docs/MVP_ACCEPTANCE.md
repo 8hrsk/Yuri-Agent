@@ -4,7 +4,7 @@
 
 | # | Критерий | Статус | Текущее доказательство | Что требуется закрыть |
 | ---: | --- | --- | --- | --- |
-| 1 | Чистая установка, onboarding, тест провайдера | Automated | Clean-profile first-run gate, typed agent creation + `CompleteOnboarding` Save→Probe, fake provider success/failure, restart persistence и native Wails/WebKit interaction smoke: welcome → agent profile → provider form → success → Chat | — |
+| 1 | Чистая установка, onboarding, тест провайдера | Automated | Clean-profile first-run gate, typed agent creation + `CompleteOnboarding` Save→Probe, fake provider success/failure, restart persistence и native Wails/WebKit interaction smoke: welcome → agent profile → provider form → success → Chat → second agent → switch back | — |
 | 2 | Streaming, cancel, понятная provider error | Automated | Race-enabled Bridge → local OpenAI-compatible SSE smoke проверяет streaming deltas и durable transcript, `CancelRun` с durable cancelled state и redacted upstream error | — |
 | 3 | Read-only файл внутри root, отказ снаружи | Automated | `internal/tools/filesystem_read_test.go` | Включить в общий MVP smoke |
 | 4 | Изменение файла через approval и audit | Automated | Bounded `filesystem.write` (`create`/`replace`) и сквозной `internal/desktop/filesystem_write_test.go`: exact-path approval, deny без mutation, action-linked tool record и redacted audit | Включить сценарий в общий MVP smoke |
@@ -24,7 +24,7 @@
 
 ## Текущий срез Stage 8
 
-Первые два вертикальных среза добавляют persistent `AgentProfile`, обязательное создание агента при чистом запуске, owner-defined identity/traits, активный выбор профиля и bounded peer roster. Conversations, runs, transcript archive/FTS и private memory физически адресуются `agent_id`; legacy rows транзакционно привязываются к мигрированному владельцу, а background turn захватывает agent ID до запуска. UI создания дополнительных агентов, shared-memory scopes, anonymous delegation и background inter-agent dialogue остаются следующими последовательными срезами Stage 8 и пока не считаются реализованными.
+Первые три вертикальных среза добавляют persistent `AgentProfile`, обязательное создание агента при чистом запуске, owner-defined identity/traits, roster selector и повторный flow создания дополнительных агентов. Profile/persona/relationship/affect создаются одной SQLite-транзакцией; conversations, runs, transcript archive/FTS и private memory адресуются `agent_id`, а переключение перемонтирует agent-scoped UI. Legacy rows транзакционно привязываются к мигрированному владельцу, background turn захватывает agent ID до запуска, а peer roster не раскрывает private preferences. Shared-memory scopes, anonymous delegation и background inter-agent dialogue остаются следующими последовательными срезами Stage 8 и пока не считаются реализованными.
 
 ## Состояние Stage 7
 
@@ -32,4 +32,4 @@
 
 Реальные OAuth credentials, платные provider calls, Developer ID, notarization и публикация артефактов не являются условиями локального OSS smoke-набора.
 
-Текущий набор запускается командой `make mvp-smoke`, а на macOS — `make macos-launch-smoke macos-ui-smoke macos-voice-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app`. Первый включает race-enabled offline profile lifecycle, production-path plugin package lifecycle, Bridge → local OpenAI-compatible SSE lifecycle и Bridge → executable fake Codex app-server account lifecycle. macOS targets открывают собранный `.app` с изолированным profile root: lifecycle smoke проверяет `OnDomReady`/clean shutdown, onboarding smoke проходит welcome → agent profile → provider → success → Chat, voice smoke — recording → STT → agent → TTS → barge-in. Browser media/speech и provider response подменяются только на test-mode boundary; production backend paths проверяются отдельными race-enabled smoke.
+Текущий набор запускается командой `make mvp-smoke`, а на macOS — `make macos-launch-smoke macos-ui-smoke macos-voice-smoke MACOS_APP=cmd/yuri/build/bin/yuri.app`. Первый включает race-enabled offline profile lifecycle, production-path plugin package lifecycle, Bridge → local OpenAI-compatible SSE lifecycle и Bridge → executable fake Codex app-server account lifecycle. macOS targets открывают собранный `.app` с изолированным profile root: lifecycle smoke проверяет `OnDomReady`/clean shutdown, onboarding smoke проходит welcome → agent profile → provider → success → Chat → создание второго агента → переключение на первого, voice smoke — recording → STT → agent → TTS → barge-in. Browser media/speech и provider response подменяются только на test-mode boundary; production backend paths проверяются отдельными race-enabled smoke.

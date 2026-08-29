@@ -442,6 +442,7 @@ MVP принимается, если:
 15. OpenAI Codex App Server OAuth flow выполняет login/logout, показывает plan type и доступные rate limits без сохранения токенов в SQLite.
 16. Antigravity adapter не использует сторонний OAuth piggyback; до появления разрешённого vendor contract он явно сообщает о недоступности и предлагает разрешённый способ подключения.
 17. Все обязательные unit, integration и E2E smoke tests проходят на macOS.
+18. В одной локальной установке создаются как минимум два именованных агента; переключение меняет активные chat/memory/persona scopes, private данные не смешиваются, а каждый агент получает только компактный roster peers без их private preferences.
 
 ## 10. Этапы разработки
 
@@ -479,7 +480,7 @@ Cross-platform packaging, updates, backup/export, security review, fault injecti
 
 ### Этап 8. Multiple agents and collaboration
 
-Одна последовательная веха: named `AgentProfile` и onboarding → миграция текущей Yuri → agent-scoped conversations/memory/context → peer roster → anonymous bounded subagents → background agent-to-agent dialogue с TTL, budgets, cooldown, loop prevention и audit. Веха не добавляет пользователей, server mode или новые внешние разрешения.
+Одна последовательная веха: named `AgentProfile` и onboarding → миграция текущей Yuri → agent-scoped conversations/memory/context → создание и переключение дополнительных агентов → peer roster → anonymous bounded subagents → background agent-to-agent dialogue с TTL, budgets, cooldown, loop prevention и audit. Веха не добавляет пользователей, server mode или новые внешние разрешения.
 
 ## 11. Решения, которые нужно принять до реализации
 

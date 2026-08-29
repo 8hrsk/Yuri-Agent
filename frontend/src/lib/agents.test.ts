@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { defaultAgentDraft, normalizeAgentProfile, validateAgentDraft } from './agents'
+import { createYuriClient, resetYuriClientForTests } from './client'
 
 describe('agent profile contracts', () => {
   it('normalizes bridge payloads and bounds traits', () => {
@@ -18,5 +19,21 @@ describe('agent profile contracts', () => {
     expect(validateAgentDraft({ ...defaultAgentDraft, name: ' ' })).toBe('Укажите имя агента.')
     expect(validateAgentDraft({ ...defaultAgentDraft, age: 201 })).toContain('от 1 до 200')
     expect(validateAgentDraft(defaultAgentDraft)).toBeUndefined()
+  })
+
+  it('keeps the mock roster and active selection coherent', async () => {
+    resetYuriClientForTests()
+    const client = createYuriClient()
+    const first = await client.createAgent({ ...defaultAgentDraft, name: 'Yuri' })
+    const second = await client.createAgent({ ...defaultAgentDraft, name: 'Sora' })
+
+    expect((await client.listAgents()).map((agent) => ({ name: agent.name, active: agent.active }))).toEqual([
+      { name: 'Yuri', active: false },
+      { name: 'Sora', active: true },
+    ])
+
+    await expect(client.getActiveAgent()).resolves.toMatchObject({ id: second.id, name: 'Sora', active: true })
+    await expect(client.setActiveAgent(first.id)).resolves.toMatchObject({ id: first.id, name: 'Yuri', active: true })
+    expect((await client.listAgents()).map((agent) => agent.active)).toEqual([true, false])
   })
 })

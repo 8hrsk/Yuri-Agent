@@ -3,6 +3,7 @@ package desktop
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -93,6 +94,12 @@ func TestCreateAgentPersistsOwnerIdentityAndInitialPersona(t *testing.T) {
 	if persona.Traits["directness"] != .91 || !strings.Contains(persona.Prompt(), "Аки") || !strings.Contains(persona.Prompt(), "сухой юмор") {
 		t.Fatalf("persona seed = %#v", persona)
 	}
+	if _, err := bridge.repositories.Relationship.Get(context.Background(), domain.ID(created.ID)); err != nil {
+		t.Fatalf("relationship defaults missing: %v", err)
+	}
+	if _, err := bridge.repositories.Affect.Get(context.Background(), domain.ID(created.ID)); err != nil {
+		t.Fatalf("affect defaults missing: %v", err)
+	}
 	loaded, err := config.Load(bridge.paths)
 	if err != nil {
 		t.Fatal(err)
@@ -112,6 +119,22 @@ func TestAgentRosterExposesPeersWithoutPrivatePreferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	roster, err := bridge.ListAgents()
+	if err != nil || len(roster) != 2 {
+		t.Fatalf("agent roster = %#v, err = %v", roster, err)
+	}
+	activeCount := 0
+	for _, view := range roster {
+		if view.Active {
+			activeCount++
+			if view.ID != second.ID {
+				t.Fatalf("unexpected active roster entry = %#v", view)
+			}
+		}
+	}
+	if activeCount != 1 {
+		t.Fatalf("active roster count = %d, roster = %#v", activeCount, roster)
+	}
 	profiles, err := bridge.repositories.Agents.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -126,5 +149,35 @@ func TestAgentRosterExposesPeersWithoutPrivatePreferences(t *testing.T) {
 	}
 	if !selected.Active || selected.ID != first.ID || bridge.personaProfileID().String() != first.ID {
 		t.Fatalf("selected = %#v, profile = %q, second = %#v", selected, bridge.personaProfileID(), second)
+	}
+}
+
+func TestAgentIdentitySeedBoundsPeerRoster(t *testing.T) {
+	now := time.Now().UTC()
+	active, err := domain.NewAgentProfile("agent_active", "Active", 21, "female", "active-private", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roster := []domain.AgentProfile{active}
+	for index := 0; index < maxAgentRosterContextEntries+5; index++ {
+		peer, err := domain.NewAgentProfile(
+			domain.ID(fmt.Sprintf("agent_peer_%02d", index)),
+			fmt.Sprintf("Peer %02d", index),
+			20+index%10,
+			"unspecified",
+			fmt.Sprintf("private-%02d", index),
+			now.Add(time.Duration(index+1)*time.Second),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roster = append(roster, peer)
+	}
+	seed := agentIdentitySeed(active, roster)
+	if count := strings.Count(seed, "\n- "); count != maxAgentRosterContextEntries {
+		t.Fatalf("peer context count = %d, want %d", count, maxAgentRosterContextEntries)
+	}
+	if !strings.Contains(seed, "Ещё peers вне текущего bounded roster: 5.") || strings.Contains(seed, "private-") {
+		t.Fatalf("bounded peer seed = %q", seed)
 	}
 }

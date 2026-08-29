@@ -60,18 +60,32 @@
     const originalGetOnboardingState = bridge.GetOnboardingState
     let onboarding = { completed: false, providerTested: false, agentConfigured: false }
     let activeAgent
+    let firstAgentId
+    let agentSequence = 0
+    let agents = []
 
     bridge.GetOnboardingState = async () => onboarding
-    bridge.ListAgents = async () => activeAgent ? [activeAgent] : []
+    bridge.ListAgents = async () => agents
     bridge.GetActiveAgent = async () => activeAgent
     bridge.CreateAgent = async (input) => {
       if (!input?.name) throw new Error('Agent name did not reach the typed bridge')
+      agentSequence += 1
       activeAgent = {
-        id: 'agent-ui-smoke', name: input.name, age: input.age, gender: input.gender,
+        id: `agent-ui-smoke-${agentSequence}`, name: input.name, age: input.age, gender: input.gender,
         preferences: input.preferences, traits: input.traits, active: true,
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       }
+      if (!firstAgentId) firstAgentId = activeAgent.id
+      agents = [...agents.map((agent) => ({ ...agent, active: false })), activeAgent]
       onboarding = { ...onboarding, agentConfigured: true, activeAgentId: activeAgent.id }
+      return activeAgent
+    }
+    bridge.SetActiveAgent = async (input) => {
+      const id = input?.id
+      const selected = agents.find((agent) => agent.id === id)
+      if (!selected) throw new Error(`Unknown agent ${id}`)
+      agents = agents.map((agent) => ({ ...agent, active: agent.id === id }))
+      activeAgent = agents.find((agent) => agent.id === id)
       return activeAgent
     }
     bridge.CompleteOnboarding = async (payload) => {
@@ -129,6 +143,29 @@
       openChat.click()
       await waitFor('chat screen', () => document.querySelector('[aria-label="Текущий диалог"]'))
       steps.push('chat-visible')
+
+      const profileButton = await waitFor('active agent selector', () => document.querySelector('.sidebar__profile'))
+      profileButton.click()
+      const createAnother = await waitFor('create another agent action', () => findButton('Создать агента'))
+      createAnother.click()
+      const secondName = await waitFor('second agent form', () => document.querySelector('#agent-name'))
+      if (!(secondName instanceof HTMLInputElement)) throw new Error('Second agent name input is unavailable')
+      setInputValue(secondName, 'Мира')
+      await wait(100)
+      const createAndSelect = findButton('Создать и выбрать')
+      if (!createAndSelect) throw new Error('Second agent submit action is unavailable')
+      createAndSelect.click()
+      await waitFor('second agent selected', () => document.querySelector('.sidebar__profile .profile-copy strong')?.textContent?.trim() === 'Мира')
+      steps.push('second-agent-created')
+
+      const switchedProfileButton = document.querySelector('.sidebar__profile')
+      if (!(switchedProfileButton instanceof HTMLButtonElement)) throw new Error('Agent selector disappeared after creation')
+      switchedProfileButton.click()
+      const firstOption = await waitFor('first agent option', () => Array.from(document.querySelectorAll('.sidebar__agent-option'))
+        .find((button) => button.textContent?.includes('Yuri')))
+      firstOption.click()
+      await waitFor('first agent restored', () => activeAgent?.id === firstAgentId && document.querySelector('.sidebar__profile .profile-copy strong')?.textContent?.trim() === 'Yuri')
+      steps.push('first-agent-restored')
 
       await report('passed')
     } finally {

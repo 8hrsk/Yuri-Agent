@@ -50,3 +50,46 @@ func TestAgentRepositoryCreateGetAndList(t *testing.T) {
 		t.Fatalf("List() = %#v", profiles)
 	}
 }
+
+func TestCreateAgentWithDefaultsRollsBackPartialProfile(t *testing.T) {
+	database, ctx := testDatabase(t)
+	repositories, err := NewRepositories(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	profile, err := domain.NewAgentProfile("agent_atomic", "Атоми", 22, "female", "Проверяет транзакции.", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persona, err := domain.NewMutablePersona(profile.ID, map[string]float64{"warmth": .5}, "initial", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relationship, err := domain.NewRelationshipState(profile.ID, map[string]float64{"trust": .2}, "initial", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	affect, err := domain.NewAffectiveState(profile.ID, map[string]float64{"joy": .1}, "initial", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Force the persona journal insert inside the aggregate transaction to
+	// conflict after the profile row has already been attempted.
+	if err := repositories.Persona.Create(ctx, persona); err != nil {
+		t.Fatal(err)
+	}
+	if err := repositories.CreateAgentWithDefaults(ctx, profile, persona, relationship, affect); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("CreateAgentWithDefaults() error = %v, want ErrConflict", err)
+	}
+	if _, err := repositories.Agents.Get(ctx, profile.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("partial profile survived rollback: %v", err)
+	}
+	if _, err := repositories.Relationship.Get(ctx, profile.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("partial relationship survived rollback: %v", err)
+	}
+	if _, err := repositories.Affect.Get(ctx, profile.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("partial affect survived rollback: %v", err)
+	}
+}

@@ -44,6 +44,75 @@ func (r *AgentRepository) Create(ctx context.Context, profile domain.AgentProfil
 	return wrappedSQLError("create agent profile", err)
 }
 
+// CreateAgentWithDefaults creates an owner-controlled profile and its initial
+// mutable personality projections as one transaction. The projections must
+// all belong to the same profile; this prevents a roster entry from becoming
+// active with only a partially initialized personality.
+func (repositories *Repositories) CreateAgentWithDefaults(ctx context.Context, profile domain.AgentProfile, persona domain.MutablePersona, relationship domain.RelationshipState, affect domain.AffectiveState) error {
+	if repositories == nil || repositories.Agents == nil || repositories.Persona == nil || repositories.Relationship == nil || repositories.Affect == nil {
+		return fmt.Errorf("%w: agent repositories are unavailable", domain.ErrInvalidArgument)
+	}
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+	if err := profile.Validate(); err != nil {
+		return err
+	}
+	if persona.ID != profile.ID || relationship.ID != profile.ID || affect.ID != profile.ID {
+		return fmt.Errorf("%w: agent defaults must share profile id", domain.ErrInvalidArgument)
+	}
+	persona = normalizePersonaForCreate(persona)
+	relationship = normalizeRelationshipForCreate(relationship)
+	affect = normalizeAffectForCreate(affect)
+	if err := persona.ValidateWithLimits(repositories.Persona.limits); err != nil {
+		return err
+	}
+	if err := relationship.Validate(); err != nil {
+		return err
+	}
+	if err := affect.Validate(); err != nil {
+		return err
+	}
+	tx, err := repositories.Agents.db.BeginTx(ctx, nil)
+	if err != nil {
+		return wrappedSQLError("begin create agent", err)
+	}
+	defer tx.Rollback()
+	var existing string
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM agent_profiles WHERE id = ?`, string(profile.ID)).Scan(&existing); err == nil {
+		return domain.ErrConflict
+	} else if !isNoRows(err) {
+		return wrappedSQLError("check agent profile", err)
+	}
+	createdAt, err := timeValue(profile.CreatedAt)
+	if err != nil {
+		return err
+	}
+	updatedAt, err := timeValue(profile.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_profiles(id, name, age, gender, preferences, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, string(profile.ID), strings.TrimSpace(profile.Name), profile.Age,
+		strings.TrimSpace(profile.Gender), strings.TrimSpace(profile.Preferences), createdAt, updatedAt); err != nil {
+		return wrappedSQLError("create agent profile", err)
+	}
+	if err := repositories.Persona.appendPersonaTx(ctx, tx, persona, 0, nil, false); err != nil {
+		return err
+	}
+	if err := repositories.Relationship.appendRelationshipTx(ctx, tx, relationship, 0, nil); err != nil {
+		return err
+	}
+	if err := repositories.Affect.appendAffectStateTx(ctx, tx, affect, 0, nil); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return wrappedSQLError("commit create agent", err)
+	}
+	return nil
+}
+
 func (r *AgentRepository) Get(ctx context.Context, id domain.ID) (domain.AgentProfile, error) {
 	if err := requireDatabase(r.db); err != nil {
 		return domain.AgentProfile{}, err

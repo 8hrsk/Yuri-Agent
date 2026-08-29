@@ -959,15 +959,40 @@ textarea:focus-visible {
   font-size: 9px;
 }
 
+.sidebar__agent-picker {
+  position: relative;
+  margin: 0 5px 25px;
+}
+
 .sidebar__profile {
   display: flex;
+  width: 100%;
   align-items: center;
   gap: 10px;
-  margin: 0 5px 25px;
   padding: 11px 11px 11px 9px;
   border: 1px solid var(--line);
   border-radius: 14px;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
   background: rgba(255, 255, 255, 0.025);
+}
+
+.sidebar__profile:hover,
+.sidebar__profile[aria-expanded='true'] {
+  border-color: rgba(185, 165, 255, 0.38);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar__profile-chevron {
+  flex: 0 0 auto;
+  color: #777185;
+  transform: rotate(90deg);
+  transition: transform 160ms ease;
+}
+
+.sidebar__profile[aria-expanded='true'] .sidebar__profile-chevron {
+  transform: rotate(-90deg);
 }
 
 .profile-orb {
@@ -1001,6 +1026,136 @@ textarea:focus-visible {
   border-radius: 50%;
   background: var(--mint);
   box-shadow: 0 0 0 3px rgba(147, 231, 200, 0.08), 0 0 10px rgba(147, 231, 200, 0.7);
+}
+
+.sidebar__agent-menu {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 7px);
+  right: 0;
+  left: 0;
+  display: grid;
+  gap: 4px;
+  max-height: min(65vh, 430px);
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid rgba(185, 165, 255, 0.28);
+  border-radius: 12px;
+  background: #1b1a2d;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+.sidebar__agent-menu-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 5px 6px;
+  color: #8f899f;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.sidebar__agent-menu-heading small {
+  color: var(--accent-light);
+  font-size: 8px;
+}
+
+.sidebar__agent-option,
+.sidebar__agent-create {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 7px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #bdb7c9;
+  cursor: pointer;
+  text-align: left;
+  background: transparent;
+}
+
+.sidebar__agent-option:hover,
+.sidebar__agent-option--active {
+  border-color: rgba(185, 165, 255, 0.2);
+  color: #f0edf8;
+  background: rgba(167, 141, 255, 0.1);
+}
+
+.sidebar__agent-option:disabled,
+.sidebar__agent-create:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.sidebar__agent-option-initial {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  place-items: center;
+  border-radius: 7px;
+  color: #f8f3ff;
+  font-size: 9px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #af95ff, #7061bc);
+}
+
+.sidebar__agent-option > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.sidebar__agent-option strong {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar__agent-option small {
+  overflow: hidden;
+  color: #777185;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar__agent-option > svg {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--mint);
+}
+
+.sidebar__agent-create {
+  justify-content: center;
+  margin-top: 3px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 7px 7px;
+  color: var(--accent-light);
+  font-size: 9px;
+}
+
+.sidebar__agent-create:hover {
+  color: #f0edf8;
+  background: rgba(167, 141, 255, 0.1);
+}
+
+.sidebar__agent-empty,
+.sidebar__agent-error {
+  padding: 7px 5px;
+  color: #777185;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.sidebar__agent-error {
+  color: var(--rose);
 }
 
 .sidebar__nav {
@@ -1972,6 +2127,7 @@ kbd {
 
   .brand-copy,
   .brand-version,
+  .sidebar__agent-picker,
   .sidebar__profile,
   .nav-group__label,
   .nav-item__copy,
@@ -2874,6 +3030,23 @@ kbd {
   border-radius: 16px;
   background: #1b1a2d;
   box-shadow: 0 25px 90px rgba(0, 0, 0, 0.42);
+}
+
+.agent-dialog {
+  width: min(100%, 620px);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
+.agent-dialog .agent-profile-form {
+  margin-top: 18px;
+}
+
+.agent-dialog__error {
+  margin-top: 12px;
+  color: var(--rose);
+  font-size: 9px;
+  line-height: 1.45;
 }
 
 .approval-dialog__mark {
