@@ -2626,6 +2626,21 @@ kbd {
   font-size: 7px;
 }
 
+.tool-availability__settings {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  color: var(--accent-light);
+  background: none;
+  cursor: pointer;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+}
+
+.tool-availability__settings:hover {
+  text-decoration: underline;
+}
+
 .tool-availability__mark {
   display: grid;
   width: 24px;

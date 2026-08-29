@@ -165,7 +165,7 @@ function ExecutionTrace({ trace }: { trace: RunTrace }) {
         <span className="run-trace__mark"><Icon name={waiting ? 'shield' : 'activity'} width={14} height={14} /></span>
         <span className="run-trace__heading">
           <strong>Выполнение</strong>
-          <small>{toolCount > 0 ? `${toolCount} ${toolCount === 1 ? 'tool-вызов' : 'tool-вызова'} · ` : ''}{traceStatusCopy(trace)}</small>
+          <small>{toolCount > 0 ? `${toolCount} ${toolCount === 1 ? 'tool-вызов' : 'tool-вызова'}` : 'Без вызовов tools'}</small>
         </span>
         <span className="run-trace__status">{traceStatusCopy(trace)}</span>
         <Icon name="chevron-right" width={14} height={14} />
@@ -180,7 +180,17 @@ function ExecutionTrace({ trace }: { trace: RunTrace }) {
   )
 }
 
-function ToolAvailabilityBar({ tools, allowedDirectories, loading }: { tools: ChatTool[]; allowedDirectories: string[]; loading: boolean }) {
+function ToolAvailabilityBar({
+  tools,
+  allowedDirectories,
+  loading,
+  onOpenSettings,
+}: {
+  tools: ChatTool[]
+  allowedDirectories: string[]
+  loading: boolean
+  onOpenSettings: () => void
+}) {
   const availableTools = tools.filter((tool) => tool.available)
   return (
     <div aria-label="Доступность инструментов" className="tool-availability">
@@ -201,7 +211,7 @@ function ToolAvailabilityBar({ tools, allowedDirectories, loading }: { tools: Ch
         <span className="tool-availability__scope-label">Разрешённые директории</span>
         {allowedDirectories.length > 0
           ? allowedDirectories.map((directory) => <code key={directory}>{directory}</code>)
-          : <span className="tool-availability__scope-empty">не настроены</span>}
+          : <button className="tool-availability__settings" onClick={onOpenSettings} type="button">не настроены · выдать доступ</button>}
       </div>
     </div>
   )
@@ -682,7 +692,7 @@ export function ChatView({ agentName, backend, onOpenSettings }: ChatViewProps) 
             </div>
           </header>
 
-          <ToolAvailabilityBar allowedDirectories={allowedDirectories} loading={toolsLoading} tools={chatTools} />
+          <ToolAvailabilityBar allowedDirectories={allowedDirectories} loading={toolsLoading} onOpenSettings={onOpenSettings} tools={chatTools} />
 
           <div aria-live="polite" className="messages" role="log">
             {timeline.length === 0 && (
