@@ -201,6 +201,17 @@ type ModelStream interface {
 	Close() error
 }
 
+// InteractiveToolStream is implemented by model transports that can receive
+// a tool result while the model turn is still in progress. This is useful for
+// harnesses such as the Codex app server, where a dynamic tool call is sent as
+// a server request and the same turn waits for the client response. The
+// runtime remains responsible for validating, authorizing, and executing the
+// tool before returning its bounded result to the transport.
+type InteractiveToolStream interface {
+	ModelStream
+	RespondToolResult(context.Context, string, ToolResult) error
+}
+
 // ModelBackend is the provider-neutral port used by Runtime. Start must not
 // execute local tools; it only asks an inference backend for model output.
 type ModelBackend interface {

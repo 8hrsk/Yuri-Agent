@@ -79,6 +79,20 @@ type ThreadOptions struct {
 	Model         string
 	CWD           string
 	ReadableRoots []string
+	DynamicTools  []DynamicToolSpec
+}
+
+// DynamicToolSpec is the Codex app-server representation of a Yuri tool.
+// Unlike the Responses/Chat Completions schema, the app-server protocol uses
+// camelCase inputSchema and accepts these tools on thread/start. The schema is
+// kept as raw JSON so the provider does not reinterpret or weaken the
+// provider-neutral tool contract.
+type DynamicToolSpec struct {
+	Type         string          `json:"type"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description"`
+	InputSchema  json.RawMessage `json:"inputSchema"`
+	DeferLoading bool            `json:"deferLoading,omitempty"`
 }
 
 func (client *Client) StartThreadWithOptions(ctx context.Context, options ThreadOptions) (Thread, error) {
@@ -104,6 +118,9 @@ func threadStartParams(options ThreadOptions) map[string]any {
 	}
 	if len(options.ReadableRoots) > 0 {
 		params["runtimeWorkspaceRoots"] = append([]string(nil), options.ReadableRoots...)
+	}
+	if len(options.DynamicTools) > 0 {
+		params["dynamicTools"] = append([]DynamicToolSpec(nil), options.DynamicTools...)
 	}
 	return params
 }

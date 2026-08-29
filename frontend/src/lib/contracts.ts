@@ -8,6 +8,25 @@ export type ToolRisk = 'low' | 'medium' | 'high' | 'critical'
 
 export type ToolStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'denied'
 
+/**
+ * A tool exposed by the local runtime. This is discovery metadata only: the
+ * model still has to request a call and the runtime applies policy immediately
+ * before execution.
+ */
+export interface ChatTool {
+  id: string
+  name: string
+  label: string
+  description?: string
+  risk: ToolRisk
+  available: boolean
+  requiresApproval?: boolean
+  capabilities?: string[]
+}
+
+/** Alias kept for callers that use the agent/runtime vocabulary. */
+export type ChatToolDescriptor = ChatTool
+
 export interface ToolCall {
   id: string
   name: string
@@ -30,6 +49,78 @@ export interface ApprovalRequest {
   expiresAt?: string
 }
 
+export type RunTraceStatus = 'queued' | 'running' | 'waiting_approval' | 'complete' | 'cancelled' | 'error'
+
+export type RunTraceStepStatus = 'pending' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'denied'
+
+interface RunTraceStepBase {
+  id: string
+  createdAt: string
+  finishedAt?: string
+}
+
+/**
+ * Thinking is deliberately a lifecycle marker, never a model reasoning
+ * payload. The renderer must not receive or display hidden chain-of-thought.
+ */
+export interface ThinkingTraceStep extends RunTraceStepBase {
+  kind: 'thinking'
+  status: Exclude<RunTraceStepStatus, 'pending' | 'waiting' | 'denied'>
+  label: string
+}
+
+export interface StatusTraceStep extends RunTraceStepBase {
+  kind: 'status'
+  status: RunStatus
+  label: string
+}
+
+export interface ToolTraceStep extends RunTraceStepBase {
+  kind: 'tool'
+  status: ToolStatus
+  toolCall: ToolCall
+}
+
+export type ApprovalTraceStatus = 'waiting' | 'approved' | 'denied' | 'expired'
+
+export interface ApprovalTraceStep extends RunTraceStepBase {
+  kind: 'approval'
+  status: ApprovalTraceStatus
+  approval: ApprovalRequest
+}
+
+export interface CompletionTraceStep extends RunTraceStepBase {
+  kind: 'completion'
+  status: 'complete' | 'cancelled' | 'error'
+  label: string
+  error?: string
+}
+
+export type RunTraceStep =
+  | ThinkingTraceStep
+  | StatusTraceStep
+  | ToolTraceStep
+  | ApprovalTraceStep
+  | CompletionTraceStep
+
+/**
+ * A persisted/live execution timeline. Only operational lifecycle, tool
+ * intents/results, and approval state belong here; hidden reasoning does not.
+ */
+export interface RunTrace {
+  id: string
+  runId: string
+  status: RunTraceStatus
+  startedAt: string
+  updatedAt?: string
+  finishedAt?: string
+  /** Optional persistence metadata retained for future trace screens. */
+  kind?: string
+  failure?: string
+  toolCalls?: ToolCall[]
+  steps: RunTraceStep[]
+}
+
 export interface ChatMessage {
   id: string
   role: MessageRole
@@ -46,6 +137,8 @@ export interface Conversation {
   preview: string
   updatedAt: string
   messages: ChatMessage[]
+  /** Historical traces are optional for backwards-compatible transcripts. */
+  traces?: RunTrace[]
 }
 
 export interface AgentProfile {
@@ -638,15 +731,25 @@ export interface EncryptedBackupInfo {
   restoredTo?: string
 }
 
+interface ChatEventMeta {
+  /** Optional on the Wails event bus; useful when several runs are active. */
+  conversationId?: string
+  /** Event time is advisory and falls back to renderer receipt time. */
+  createdAt?: string
+  timestamp?: string
+}
+
 export type ChatEvent =
-  | { type: 'run.started'; runId: string }
-  | { type: 'assistant.delta'; runId: string; messageId: string; delta: string }
-  | { type: 'assistant.completed'; runId: string; messageId: string }
-  | { type: 'tool.started'; runId: string; toolCall: ToolCall }
-  | { type: 'approval.required'; runId: string; approval: ApprovalRequest }
-  | { type: 'tool.updated'; runId: string; toolCall: ToolCall }
-  | { type: 'run.status'; runId: string; status: RunStatus; label: string }
-  | { type: 'run.completed'; runId: string; status: 'complete' | 'cancelled' | 'error'; error?: string }
+  | ({ type: 'run.started'; runId: string } & ChatEventMeta)
+  | ({ type: 'assistant.delta'; runId: string; messageId: string; delta: string } & ChatEventMeta)
+  | ({ type: 'assistant.completed'; runId: string; messageId: string } & ChatEventMeta)
+  | ({ type: 'tool.started'; runId: string; toolCall: ToolCall } & ChatEventMeta)
+  | ({ type: 'approval.required'; runId: string; approval: ApprovalRequest } & ChatEventMeta)
+  | ({ type: 'tool.updated'; runId: string; toolCall: ToolCall } & ChatEventMeta)
+  | ({ type: 'run.status'; runId: string; status: RunStatus; label: string } & ChatEventMeta)
+  | ({ type: 'run.completed'; runId: string; status: 'complete' | 'cancelled' | 'error'; error?: string } & ChatEventMeta)
+  /** Future backends may send a lifecycle-only trace step in one envelope. */
+  | ({ type: 'trace.step'; runId: string; step: RunTraceStep } & ChatEventMeta)
 
 export interface RunResult {
   runId: string
@@ -657,6 +760,7 @@ export interface YuriClient {
   readonly mode: 'wails' | 'mock'
   listConversations(): Promise<Conversation[]>
   createConversation(title: string): Promise<Conversation>
+  listChatTools(): Promise<ChatTool[]>
   listAgents(): Promise<AgentProfile[]>
   getActiveAgent(): Promise<AgentProfile | undefined>
   createAgent(input: AgentProfileInput): Promise<AgentProfile>

@@ -43,6 +43,46 @@ func TestCurrentAppServerThreadAndTurnPoliciesAreFailClosed(t *testing.T) {
 	}
 }
 
+func TestThreadStartParamsIncludesDynamicToolsInAppServerShape(t *testing.T) {
+	params := threadStartParams(ThreadOptions{
+		DynamicTools: []DynamicToolSpec{{
+			Type:        "function",
+			Name:        "filesystem.read",
+			Description: "Read an allowed local file",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`),
+		}},
+	})
+	tools, ok := params["dynamicTools"].([]DynamicToolSpec)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("dynamicTools = %#v", params["dynamicTools"])
+	}
+	if tools[0].Type != "function" || tools[0].Name != "filesystem.read" {
+		t.Fatalf("dynamic tool = %#v", tools[0])
+	}
+	if !json.Valid(tools[0].InputSchema) {
+		t.Fatalf("dynamic tool input schema is invalid: %s", tools[0].InputSchema)
+	}
+	encoded, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	encodedTool, ok := decoded["dynamicTools"].([]any)
+	if !ok || len(encodedTool) != 1 {
+		t.Fatalf("encoded dynamicTools = %#v", decoded["dynamicTools"])
+	}
+	toolObject, ok := encodedTool[0].(map[string]any)
+	if !ok || toolObject["inputSchema"] == nil {
+		t.Fatalf("encoded dynamic tool does not use inputSchema: %#v", encodedTool[0])
+	}
+	if _, legacy := toolObject["input_schema"]; legacy {
+		t.Fatalf("encoded dynamic tool contains provider-neutral input_schema: %#v", toolObject)
+	}
+}
+
 func assertRuntimeRoots(t *testing.T, params map[string]any, want []string) {
 	t.Helper()
 	got, ok := params["runtimeWorkspaceRoots"].([]string)

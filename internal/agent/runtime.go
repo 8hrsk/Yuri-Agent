@@ -95,6 +95,33 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 		if err != nil {
 			return r.fail(runCtx, input, result, fmt.Errorf("%w: %v", ErrBackend, redactRuntimeError(err)))
 		}
+		if interactive, ok := stream.(InteractiveToolStream); ok {
+			turnText, calls, usage, consumeErr := r.consumeInteractiveStream(
+				runCtx, input, interactive, step, budget, &toolCallsUsed, seenCalls, seenCallArgs,
+			)
+			closeErr := stream.Close()
+			if consumeErr == nil && closeErr != nil {
+				consumeErr = closeErr
+			}
+			if consumeErr != nil {
+				return r.fail(runCtx, input, result, consumeErr)
+			}
+			result.Steps = step
+			result.Usage = result.Usage.Add(usage)
+			result.ToolCalls = append(result.ToolCalls, calls...)
+			if budget.MaxTokens > 0 && result.Usage.TotalTokens > budget.MaxTokens {
+				return r.fail(runCtx, input, result, fmt.Errorf("%w: token limit %d exceeded", ErrBudgetExceeded, budget.MaxTokens))
+			}
+			assistant := Message{Role: RoleAssistant, Content: turnText}
+			if !assistant.Valid() {
+				return r.fail(runCtx, input, result, fmt.Errorf("%w: backend returned no assistant output", ErrBackend))
+			}
+			result.Message = assistant
+			if err := emit(runCtx, input.Sink, Event{Type: EventRunCompleted, RunID: input.RunID, Step: step, Text: turnText, Usage: result.Usage}); err != nil {
+				return RunResult{}, err
+			}
+			return result, nil
+		}
 		turnText, calls, usage, err := r.consumeStream(runCtx, input, stream, step, budget.MaxTokens)
 		closeErr := stream.Close()
 		if err == nil && closeErr != nil {
@@ -144,6 +171,103 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 	}
 
 	return r.fail(runCtx, input, result, fmt.Errorf("%w: maximum steps %d reached", ErrBudgetExceeded, budget.MaxSteps))
+}
+
+// consumeInteractiveStream handles transports where a tool request blocks the
+// current provider turn until Yuri returns the normalized result. Tool policy,
+// approvals, output limits, and audit events remain owned by Runtime exactly
+// as they are for the ordinary multi-request tool loop.
+func (r *Runtime) consumeInteractiveStream(
+	ctx context.Context,
+	input RunRequest,
+	stream InteractiveToolStream,
+	step int,
+	budget domain.RunBudget,
+	toolCallsUsed *int,
+	seenCalls map[string]ToolResult,
+	seenCallArgs map[string]string,
+) (string, []ToolCall, Usage, error) {
+	if stream == nil {
+		return "", nil, Usage{}, fmt.Errorf("%w: backend returned nil stream", ErrBackend)
+	}
+	var textBuilder strings.Builder
+	callBuilders := make(map[string]*toolCallBuilder)
+	started := make(map[string]bool)
+	var order []string
+	var usage Usage
+	executed := make([]ToolCall, 0)
+	for {
+		event, err := stream.Recv(ctx)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return "", executed, usage, err
+			}
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return "", executed, usage, fmt.Errorf("%w: %v", ErrBackend, redactRuntimeError(err))
+		}
+		usage = usage.Add(event.Usage)
+		if budget.MaxTokens > 0 && usage.TotalTokens > budget.MaxTokens {
+			return "", executed, usage, fmt.Errorf("%w: token limit %d exceeded", ErrBudgetExceeded, budget.MaxTokens)
+		}
+		switch event.Type {
+		case ModelEventStarted, ModelEventCompleted:
+		case ModelEventTextDelta:
+			textBuilder.WriteString(event.Delta)
+			if err := emit(ctx, input.Sink, Event{Type: EventModelTextDelta, RunID: input.RunID, Step: step, Text: event.Delta, Usage: event.Usage}); err != nil {
+				return "", executed, usage, err
+			}
+		case ModelEventToolCallStarted, ModelEventToolCallDelta, ModelEventToolCallDone:
+			id := normalizeCallID(event.ToolCallID, len(order)+1)
+			builder := callBuilders[id]
+			if builder == nil {
+				builder = &toolCallBuilder{id: id}
+				callBuilders[id] = builder
+				order = append(order, id)
+			}
+			if event.ToolName != "" {
+				builder.name = event.ToolName
+			}
+			if event.Type == ModelEventToolCallDelta {
+				builder.arguments += event.ArgumentsDelta
+			} else if event.Arguments != "" {
+				builder.arguments = event.Arguments
+			}
+			call := builder.call()
+			if !started[id] && event.Type != ModelEventToolCallDelta {
+				started[id] = true
+				if err := emit(ctx, input.Sink, Event{Type: EventToolCallStarted, RunID: input.RunID, Step: step, ToolCall: &call}); err != nil {
+					return "", executed, usage, err
+				}
+			}
+			if event.Type != ModelEventToolCallDone {
+				continue
+			}
+			if call.Name == "" {
+				return "", executed, usage, fmt.Errorf("%w: tool call %q has no name", ErrBackend, id)
+			}
+			if toolCallsUsed == nil || *toolCallsUsed >= budget.MaxToolCalls {
+				return "", executed, usage, fmt.Errorf("%w: tool call limit %d exceeded", ErrBudgetExceeded, budget.MaxToolCalls)
+			}
+			*toolCallsUsed = *toolCallsUsed + 1
+			executed = append(executed, call)
+			toolResult, executeErr := r.executeTool(ctx, input, call, step, budget.MaxToolOutputBytes, seenCalls, seenCallArgs)
+			if executeErr != nil {
+				if errors.Is(executeErr, context.Canceled) || errors.Is(executeErr, context.DeadlineExceeded) ||
+					errors.Is(executeErr, ErrBudgetExceeded) || errors.Is(executeErr, ErrApprovalRequired) {
+					return "", executed, usage, executeErr
+				}
+				toolResult = ToolResult{Content: redactRuntimeError(executeErr), IsError: true}
+			}
+			if err := stream.RespondToolResult(ctx, call.ID, toolResult); err != nil {
+				return "", executed, usage, fmt.Errorf("%w: return tool result: %v", ErrBackend, redactRuntimeError(err))
+			}
+		default:
+			return "", executed, usage, fmt.Errorf("%w: unknown stream event %q", ErrBackend, event.Type)
+		}
+	}
+	return textBuilder.String(), executed, usage, nil
 }
 
 func normalizedBudget(b domain.RunBudget) domain.RunBudget {
@@ -348,7 +472,14 @@ func (r *Runtime) executeTool(ctx context.Context, input RunRequest, call ToolCa
 			return ToolResult{}, err
 		}
 		if !approved {
-			return ToolResult{Content: "tool execution denied by user", IsError: true}, nil
+			denied := ToolResult{
+				Content: "tool execution denied by user", IsError: true,
+				Metadata: map[string]any{"decision": "denied"},
+			}
+			if err := emit(ctx, input.Sink, Event{Type: EventToolCompleted, RunID: input.RunID, Step: step, ToolCall: &call, ToolResult: &denied}); err != nil {
+				return ToolResult{}, err
+			}
+			return denied, nil
 		}
 		approvalGranted = true
 	case domain.PermissionAllow:

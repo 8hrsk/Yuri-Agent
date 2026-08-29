@@ -9,6 +9,7 @@ import type {
   ApprovalRequest,
   AgentProfile,
   AgentProfileInput,
+  ChatTool,
   ChatEvent,
   ChatRequest,
   CodexAccount,
@@ -51,6 +52,7 @@ import type {
   PeerDialogueMessage,
   PeerDialogueStatus,
   RunResult,
+  RunTrace,
   Schedule,
   ScheduleBudget,
   ScheduleInput,
@@ -63,6 +65,7 @@ import type {
   UsageLimits,
   YuriClient,
 } from './contracts'
+import { aggregateChatEvent, normalizeApproval, normalizeRunTrace, normalizeRunTraceStep, normalizeToolCall, sortRunTraces } from './chat-trace'
 import { normalizeAgentProfile } from './agents'
 import {
   clonePersonalitySnapshot,
@@ -343,10 +346,26 @@ function normalizeChatEvent(value: unknown): ChatEvent | undefined {
   if (!value || typeof value !== 'object') return undefined
   const source = value as UnknownRecord
   const nested = source.data && typeof source.data === 'object' ? source.data as UnknownRecord : source
-  const type = String(nested.type ?? nested.eventType ?? '')
+  const rawType = String(nested.type ?? nested.eventType ?? nested.event_type ?? '').toLowerCase().replace(/[-\s]/g, '_')
+  const type = rawType === 'run_start' || rawType === 'run_started' ? 'run.started'
+    : rawType === 'run_finish' || rawType === 'run_finished' || rawType === 'run_complete' || rawType === 'run_completed' ? 'run.completed'
+      : rawType === 'tool_start' || rawType === 'tool_started' ? 'tool.started'
+        : rawType === 'tool_update' || rawType === 'tool_updated' ? 'tool.updated'
+          : rawType === 'tool_complete' || rawType === 'tool_completed' || rawType === 'tool_result' || rawType === 'tool_finished' ? 'tool.updated'
+      : rawType === 'approval_waiting' || rawType === 'approval_required' ? 'approval.required'
+          : rawType === 'run_step' || rawType === 'trace_step' ? 'trace.step'
+            : rawType === 'status' ? 'run.status'
+              : rawType === 'thinking' || rawType === 'thinking_started' ? 'run.status'
+                : rawType
   const runId = String(nested.runId ?? nested.run_id ?? '')
   if (!type || !runId) return undefined
-  const base = { runId }
+  const base: { runId: string; conversationId?: string; createdAt?: string; timestamp?: string } = { runId }
+  const conversationId = optionalString(nested, 'conversationId', 'conversation_id')
+  const createdAt = optionalString(nested, 'createdAt', 'created_at')
+  const timestamp = optionalString(nested, 'timestamp', 'at')
+  if (conversationId) base.conversationId = conversationId
+  if (createdAt) base.createdAt = createdAt
+  if (timestamp) base.timestamp = timestamp
   switch (type) {
     case 'run.started':
       return { type, ...base }
@@ -356,44 +375,33 @@ function normalizeChatEvent(value: unknown): ChatEvent | undefined {
       return { type, ...base, messageId: String(nested.messageId ?? nested.message_id ?? '') }
     case 'tool.started':
     case 'tool.updated': {
-      const rawTool = nested.toolCall && typeof nested.toolCall === 'object' ? nested.toolCall as UnknownRecord : {}
-      const toolCall: ToolCall = {
-        id: String(rawTool.id ?? ''),
-        name: String(rawTool.name ?? ''),
-        label: String(rawTool.label ?? rawTool.name ?? 'Инструмент'),
-        risk: (rawTool.risk === 'medium' || rawTool.risk === 'high' || rawTool.risk === 'critical') ? rawTool.risk : 'low',
-        status: (rawTool.status === 'completed' || rawTool.status === 'failed' || rawTool.status === 'cancelled' || rawTool.status === 'denied') ? rawTool.status : type === 'tool.updated' ? 'completed' : 'running',
-        args: rawTool.args && typeof rawTool.args === 'object' ? rawTool.args as Record<string, unknown> : {},
-        result: rawTool.result ? String(rawTool.result) : undefined,
-        startedAt: rawTool.startedAt ? String(rawTool.startedAt) : undefined,
-        finishedAt: rawTool.finishedAt ? String(rawTool.finishedAt) : undefined,
-      }
+      const rawTool = nested.toolCall ?? nested.tool_call ?? nested.call ?? nested
+      const toolCall = normalizeToolCall(rawTool, type === 'tool.updated' ? 'completed' : 'running')
+      if (!toolCall) return undefined
       return { type, ...base, toolCall }
     }
     case 'approval.required': {
-      const rawApproval = nested.approval && typeof nested.approval === 'object' ? nested.approval as UnknownRecord : {}
-      return {
-        type,
-        ...base,
-        approval: {
-          id: String(rawApproval.id ?? ''),
-          toolCallId: String(rawApproval.toolCallId ?? rawApproval.tool_call_id ?? ''),
-          title: String(rawApproval.title ?? 'Требуется подтверждение'),
-          explanation: String(rawApproval.explanation ?? ''),
-          risk: (rawApproval.risk === 'medium' || rawApproval.risk === 'high' || rawApproval.risk === 'critical') ? rawApproval.risk : 'medium',
-          scope: String(rawApproval.scope ?? ''),
-          expiresAt: rawApproval.expiresAt ? String(rawApproval.expiresAt) : undefined,
-        },
-      }
+      const approval = normalizeApproval(nested.approval ?? nested)
+      return approval ? { type, ...base, approval } : undefined
     }
     case 'run.status': {
-      const status = nested.status
+      const requestedStatus = type === 'run.status' && (rawType === 'thinking' || rawType === 'thinking_started') ? 'thinking' : nested.status
+      const status = requestedStatus
       if (status !== 'thinking' && status !== 'tool_running' && status !== 'waiting_approval' && status !== 'speaking' && status !== 'idle' && status !== 'cancelled' && status !== 'error') return undefined
-      return { type, ...base, status, label: String(nested.label ?? '') }
+      return { type, ...base, status, label: status === 'thinking' ? 'Обрабатывает запрос…' : String(nested.label ?? '') }
     }
     case 'run.completed': {
-      const status = nested.status === 'cancelled' || nested.status === 'error' ? nested.status : 'complete'
+      const rawStatus = String(nested.status ?? '').toLowerCase()
+      const status = rawStatus === 'cancelled' || rawStatus === 'canceled'
+        ? 'cancelled'
+        : rawStatus === 'error' || rawStatus === 'failed'
+          ? 'error'
+          : 'complete'
       return { type, ...base, status, error: nested.error ? String(nested.error) : undefined }
+    }
+    case 'trace.step': {
+      const step = normalizeRunTraceStep(nested.step, 0, runId, createdAt ?? timestamp ?? nowIso())
+      return step ? { type, ...base, step } : undefined
     }
     default:
       return undefined
@@ -781,6 +789,39 @@ function optionalNumber(source: UnknownRecord, ...keys: string[]): number | unde
   return undefined
 }
 
+function normalizeChatTool(value: unknown): ChatTool | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as UnknownRecord
+  const source = raw.tool && typeof raw.tool === 'object' ? raw.tool as UnknownRecord : raw
+  const name = optionalString(source, 'name', 'toolName', 'tool_name', 'id', 'toolId', 'tool_id')
+  if (!name) return undefined
+  const riskValue = String(source.risk ?? '').toLowerCase()
+  const risk = riskValue === 'medium' || riskValue === 'high' || riskValue === 'critical' ? riskValue : 'low'
+  const availability = source.available ?? source.enabled ?? source.isAvailable ?? source.is_available
+  const requiresApproval = source.requiresApproval ?? source.requires_approval
+  return {
+    id: optionalString(source, 'id', 'toolId', 'tool_id') ?? name,
+    name,
+    label: optionalString(source, 'label', 'displayName', 'display_name', 'title') ?? name,
+    description: optionalString(source, 'description', 'detail'),
+    risk,
+    available: availability === undefined ? true : normalizeBoolean(availability, true),
+    requiresApproval: requiresApproval === undefined ? risk === 'medium' || risk === 'high' || risk === 'critical' : normalizeBoolean(requiresApproval, false),
+    capabilities: normalizeStringList(source.capabilities),
+  }
+}
+
+function normalizeChatToolList(value: unknown): ChatTool[] {
+  const rawItems = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object'
+      ? ((value as UnknownRecord).tools ?? (value as UnknownRecord).items ?? (value as UnknownRecord).results)
+      : undefined
+  return Array.isArray(rawItems)
+    ? rawItems.map(normalizeChatTool).filter((tool): tool is ChatTool => Boolean(tool))
+    : []
+}
+
 function normalizeBudget(value: unknown): ScheduleBudget | undefined {
   if (!value || typeof value !== 'object') return undefined
   const source = value as UnknownRecord
@@ -1100,6 +1141,71 @@ function normalizeProactivitySettings(value: unknown): ProactivitySettings {
   }
 }
 
+function cloneTrace(trace: RunTrace): RunTrace {
+  return {
+    ...trace,
+    toolCalls: trace.toolCalls?.map((toolCall) => ({ ...toolCall, args: { ...toolCall.args } })),
+    steps: trace.steps.map((step) => {
+      if (step.kind === 'tool') return { ...step, toolCall: { ...step.toolCall, args: { ...step.toolCall.args } } }
+      if (step.kind === 'approval') return { ...step, approval: { ...step.approval } }
+      return { ...step }
+    }),
+  }
+}
+
+function normalizeConversation(value: unknown): Conversation | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as UnknownRecord
+  const id = optionalString(source, 'id', 'conversationId', 'conversation_id')
+  if (!id) return undefined
+  const rawMessages = source.messages ?? source.items ?? []
+  const messages = Array.isArray(rawMessages)
+    ? rawMessages.flatMap((item): Conversation['messages'] => {
+        if (!item || typeof item !== 'object') return []
+        const message = item as UnknownRecord
+        const messageId = optionalString(message, 'id', 'messageId', 'message_id')
+        if (!messageId) return []
+        const roleValue = String(message.role ?? '').toLowerCase()
+        const role = roleValue === 'user' || roleValue === 'assistant' || roleValue === 'tool' ? roleValue : 'assistant'
+        const statusValue = String(message.status ?? '').toLowerCase()
+        const status = statusValue === 'streaming' || statusValue === 'cancelled' || statusValue === 'error' ? statusValue : 'complete'
+        const toolCall = normalizeToolCall(message.toolCall ?? message.tool_call, status === 'error' ? 'failed' : 'completed')
+        return [{
+          id: messageId,
+          role,
+          content: String(message.content ?? message.text ?? ''),
+          status,
+          createdAt: optionalString(message, 'createdAt', 'created_at', 'timestamp') ?? nowIso(),
+          runId: optionalString(message, 'runId', 'run_id'),
+          toolCall,
+        }]
+      })
+    : []
+  const rawTraces = source.traces ?? source.executionTraces ?? source.execution_traces ?? []
+  const traces = Array.isArray(rawTraces)
+    ? rawTraces.map((trace, index) => normalizeRunTrace(trace, index)).filter((trace): trace is RunTrace => Boolean(trace))
+    : []
+  return {
+    id,
+    title: optionalString(source, 'title', 'name') ?? 'Новый диалог',
+    preview: optionalString(source, 'preview', 'summary') ?? messages.at(-1)?.content ?? 'Пока нет сообщений',
+    updatedAt: optionalString(source, 'updatedAt', 'updated_at', 'createdAt', 'created_at') ?? nowIso(),
+    messages,
+    traces: traces.length > 0 ? sortRunTraces(traces.map(cloneTrace)) : undefined,
+  }
+}
+
+function normalizeConversationList(value: unknown): Conversation[] {
+  const rawItems = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object'
+      ? ((value as UnknownRecord).conversations ?? (value as UnknownRecord).items ?? (value as UnknownRecord).results)
+      : undefined
+  return Array.isArray(rawItems)
+    ? rawItems.map((item) => normalizeConversation(item)).filter((conversation): conversation is Conversation => Boolean(conversation))
+    : []
+}
+
 function cloneConversation(conversation: Conversation): Conversation {
   return {
     ...conversation,
@@ -1107,6 +1213,7 @@ function cloneConversation(conversation: Conversation): Conversation {
       ...message,
       toolCall: message.toolCall ? { ...message.toolCall, args: { ...message.toolCall.args } } : undefined,
     })),
+    traces: conversation.traces?.map(cloneTrace),
   }
 }
 
@@ -1347,6 +1454,31 @@ class MockYuriClient implements YuriClient {
     }
     this.conversations.set(conversation.id, conversation)
     return cloneConversation(conversation)
+  }
+
+  async listChatTools(): Promise<ChatTool[]> {
+    return [
+      {
+        id: 'filesystem.read',
+        name: 'filesystem.read',
+        label: 'Чтение файлов',
+        description: 'Читает текстовые файлы из разрешённых директорий.',
+        risk: 'low',
+        available: true,
+        requiresApproval: false,
+        capabilities: ['filesystem.read'],
+      },
+      {
+        id: 'filesystem.write',
+        name: 'filesystem.write',
+        label: 'Изменение файла',
+        description: 'Готовит запись в разрешённой директории после подтверждения.',
+        risk: 'medium',
+        available: true,
+        requiresApproval: true,
+        capabilities: ['filesystem.write'],
+      },
+    ]
   }
 
   async listAgents(): Promise<AgentProfile[]> {
@@ -1935,6 +2067,10 @@ class MockYuriClient implements YuriClient {
     const conversation = this.conversations.get(request.conversationId) ?? starterConversation()
     this.conversations.set(conversation.id, conversation)
     const runId = makeId('run')
+    const emit = (event: ChatEvent) => {
+      conversation.traces = aggregateChatEvent(conversation.traces ?? [], event, event.createdAt ?? event.timestamp ?? nowIso())
+      onEvent(event)
+    }
     const messageId = makeId('assistant')
     const userMessage: Conversation['messages'][number] = {
       id: makeId('user'),
@@ -1946,10 +2082,10 @@ class MockYuriClient implements YuriClient {
     conversation.messages.push(userMessage)
     conversation.updatedAt = nowIso()
     conversation.preview = request.text
-    onEvent({ type: 'run.started', runId })
-    onEvent({ type: 'run.status', runId, status: 'thinking', label: 'Yuri формирует ответ…' })
+    emit({ type: 'run.started', runId })
+    emit({ type: 'run.status', runId, status: 'thinking', label: 'Yuri формирует ответ…' })
     await sleep(260)
-    if (this.cancelledRuns.has(runId)) return this.finishCancelled(runId, onEvent)
+    if (this.cancelledRuns.has(runId)) return this.finishCancelled(runId, emit)
 
     const needsApproval = /(запиш|измени|перезапиши|удали|отправ|созда)/i.test(request.text)
     if (needsApproval) {
@@ -1962,7 +2098,7 @@ class MockYuriClient implements YuriClient {
         args: { path: '~/Documents/notes.txt', operation: 'append', bytes: 86 },
         startedAt: nowIso(),
       }
-      onEvent({ type: 'tool.started', runId, toolCall })
+      emit({ type: 'tool.started', runId, toolCall })
       const approval: ApprovalRequest = {
         id: makeId('approval'),
         toolCallId: toolCall.id,
@@ -1972,15 +2108,15 @@ class MockYuriClient implements YuriClient {
         scope: '~/Documents/notes.txt · добавить 86 байт',
       }
       const approvalDecision = new Promise<'approve' | 'deny'>((resolve) => this.pendingApprovals.set(approval.id, resolve))
-      onEvent({ type: 'approval.required', runId, approval })
-      onEvent({ type: 'run.status', runId, status: 'waiting_approval', label: 'Ожидается ваше разрешение' })
+      emit({ type: 'approval.required', runId, approval })
+      emit({ type: 'run.status', runId, status: 'waiting_approval', label: 'Ожидается ваше разрешение' })
       const decision = await approvalDecision
-      if (this.cancelledRuns.has(runId)) return this.finishCancelled(runId, onEvent)
+      if (this.cancelledRuns.has(runId)) return this.finishCancelled(runId, emit)
       if (decision === 'deny') {
-        onEvent({ type: 'tool.updated', runId, toolCall: { ...toolCall, status: 'denied', result: 'Операция отклонена пользователем.', finishedAt: nowIso() } })
-        return this.finishError(runId, onEvent, 'Операция отклонена пользователем.')
+        emit({ type: 'tool.updated', runId, toolCall: { ...toolCall, status: 'denied', result: 'Операция отклонена пользователем.', finishedAt: nowIso() } })
+        return this.finishError(runId, emit, 'Операция отклонена пользователем.')
       }
-      onEvent({ type: 'tool.updated', runId, toolCall: { ...toolCall, status: 'completed', result: 'Изменение подготовлено в mock режиме.', finishedAt: nowIso() } })
+      emit({ type: 'tool.updated', runId, toolCall: { ...toolCall, status: 'completed', result: 'Изменение подготовлено в mock режиме.', finishedAt: nowIso() } })
       await sleep(180)
     }
 
@@ -1997,12 +2133,12 @@ class MockYuriClient implements YuriClient {
     }
     conversation.messages.push(assistantMessage)
     for (const chunk of response.split(/(?<=\s)/)) {
-      if (this.cancelledRuns.has(runId)) return this.finishCancelled(runId, onEvent)
-      onEvent({ type: 'assistant.delta', runId, messageId, delta: chunk })
+      if (this.cancelledRuns.has(runId)) return this.finishCancelled(runId, emit)
+      emit({ type: 'assistant.delta', runId, messageId, delta: chunk })
       await sleep(22)
     }
-    onEvent({ type: 'assistant.completed', runId, messageId })
-    onEvent({ type: 'run.completed', runId, status: 'complete' })
+    emit({ type: 'assistant.completed', runId, messageId })
+    emit({ type: 'run.completed', runId, status: 'complete' })
     conversation.updatedAt = nowIso()
     conversation.preview = response.slice(0, 100)
     return { runId, status: 'complete' }
@@ -2023,17 +2159,22 @@ class WailsYuriClient implements YuriClient {
   readonly mode = 'wails' as const
 
   async listConversations(): Promise<Conversation[]> {
-    return (await callBridge<Conversation[]>(['ListConversations', 'GetConversations'])) ?? []
+    return normalizeConversationList(await callBridge<unknown>(['ListConversations', 'GetConversations']))
   }
 
   async createConversation(title: string): Promise<Conversation> {
-    return (await callBridge<Conversation>(['NewConversation', 'CreateConversation'], [title])) ?? {
+    const created = normalizeConversation(await callBridge<unknown>(['NewConversation', 'CreateConversation'], [title]))
+    return created ?? {
       id: makeId('conversation'),
       title: title || 'Новый диалог',
       preview: 'Пока нет сообщений',
       updatedAt: nowIso(),
       messages: [],
     }
+  }
+
+  async listChatTools(): Promise<ChatTool[]> {
+    return normalizeChatToolList(await callBridgeSafe<unknown>(['ListChatTools', 'ListTools', 'GetChatTools']))
   }
 
   async listAgents(): Promise<AgentProfile[]> {
@@ -2513,7 +2654,7 @@ let client: YuriClient | undefined
 
 export function createYuriClient(): YuriClient {
   if (client) return client
-  client = findBridgeMethod(['ListConversations', 'GetConversations', 'SendMessage', 'StartChat', 'GetOnboardingState', 'GetFirstRunState', 'CompleteOnboarding', 'CompleteFirstRun'])
+  client = findBridgeMethod(['ListConversations', 'GetConversations', 'SendMessage', 'StartChat', 'ListChatTools', 'AllowedDirectories', 'GetOnboardingState', 'GetFirstRunState', 'CompleteOnboarding', 'CompleteFirstRun'])
     ? new WailsYuriClient()
     : new MockYuriClient()
   return client

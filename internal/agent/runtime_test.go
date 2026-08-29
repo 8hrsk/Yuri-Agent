@@ -50,6 +50,49 @@ func (s *scriptedStream) Recv(ctx context.Context) (ModelEvent, error) {
 
 func (s *scriptedStream) Close() error { return nil }
 
+type interactiveBackend struct {
+	request ModelRequest
+	stream  *interactiveStream
+}
+
+func (backend *interactiveBackend) Start(_ context.Context, request ModelRequest) (ModelStream, error) {
+	backend.request = request
+	backend.stream = &interactiveStream{events: []ModelEvent{
+		{Type: ModelEventToolCallDone, ToolCallID: "dynamic-1", ToolName: "echo", Arguments: `{"value":"from codex"}`},
+		{Type: ModelEventTextDelta, Delta: "Файл прочитан."},
+		{Type: ModelEventCompleted},
+	}}
+	return backend.stream, nil
+}
+
+type interactiveStream struct {
+	events    []ModelEvent
+	index     int
+	responses map[string]ToolResult
+}
+
+func (stream *interactiveStream) Recv(context.Context) (ModelEvent, error) {
+	if stream.index >= len(stream.events) {
+		return ModelEvent{}, io.EOF
+	}
+	if stream.index > 0 && len(stream.responses) == 0 {
+		return ModelEvent{}, errors.New("provider resumed before tool result")
+	}
+	event := stream.events[stream.index]
+	stream.index++
+	return event, nil
+}
+
+func (stream *interactiveStream) RespondToolResult(_ context.Context, callID string, result ToolResult) error {
+	if stream.responses == nil {
+		stream.responses = make(map[string]ToolResult)
+	}
+	stream.responses[callID] = result
+	return nil
+}
+
+func (*interactiveStream) Close() error { return nil }
+
 type echoTool struct {
 	calls int
 }
@@ -136,6 +179,53 @@ func TestRuntimeRunsToolLoopAndKeepsToolResultsInNextRequest(t *testing.T) {
 	}
 	if events[len(events)-1].Type != EventRunCompleted {
 		t.Fatalf("last event = %s, want %s", events[len(events)-1].Type, EventRunCompleted)
+	}
+}
+
+func TestRuntimeExecutesInteractiveToolInsideOneProviderTurn(t *testing.T) {
+	backend := &interactiveBackend{}
+	registry := NewToolRegistry()
+	echo := &echoTool{}
+	if err := registry.Register(echo); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := NewRuntime(backend, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []Event
+	result, err := runtime.Run(context.Background(), RunRequest{
+		RunID: "run-interactive",
+		ModelRequest: ModelRequest{
+			Model: "codex-default", Messages: []Message{{Role: RoleUser, Content: "прочитай файл"}},
+		},
+		Budget: domain.RunBudget{MaxSteps: 2, MaxTokens: 100, MaxToolCalls: 2, MaxToolOutputBytes: 1000, MaxDurationSeconds: 2},
+		Sink: func(_ context.Context, event Event) error {
+			events = append(events, event)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Message.Content != "Файл прочитан." || result.Steps != 1 || len(result.ToolCalls) != 1 || echo.calls != 1 {
+		t.Fatalf("result = %#v, echo calls = %d", result, echo.calls)
+	}
+	response, ok := backend.stream.responses["dynamic-1"]
+	if !ok || response.IsError || response.Content != `{"value":"from codex"}` {
+		t.Fatalf("tool response = %#v", backend.stream.responses)
+	}
+	if len(backend.request.Tools) != 1 || backend.request.Tools[0].Name != "echo" {
+		t.Fatalf("provider tools = %#v", backend.request.Tools)
+	}
+	want := []EventType{EventRunStarted, EventToolCallStarted, EventToolStarted, EventToolCompleted, EventModelTextDelta, EventRunCompleted}
+	if len(events) != len(want) {
+		t.Fatalf("events = %#v", events)
+	}
+	for index := range want {
+		if events[index].Type != want[index] {
+			t.Fatalf("event[%d] = %s, want %s", index, events[index].Type, want[index])
+		}
 	}
 }
 

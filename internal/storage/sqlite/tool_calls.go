@@ -15,6 +15,7 @@ const (
 	ToolCallSucceeded = "succeeded"
 	ToolCallFailed    = "failed"
 	ToolCallCancelled = "cancelled"
+	ToolCallDenied    = "denied"
 )
 
 // ToolCallRepository persists redacted tool intents and outcomes.

@@ -50,6 +50,7 @@ func (backend *Backend) Start(ctx context.Context, request agent.ModelRequest) (
 	}
 	thread, err := backend.Client.StartThreadWithOptions(ctx, ThreadOptions{
 		Model: model, CWD: backend.CWD, ReadableRoots: backend.ReadableRoots,
+		DynamicTools: dynamicToolSpecs(request.Tools),
 	})
 	if err != nil {
 		release()
@@ -94,7 +95,9 @@ func encodeConversation(messages []agent.Message) (string, error) {
 		return "", fmt.Errorf("encode Codex transcript: %w", err)
 	}
 	return "Produce the assistant response for the final user request in this structured transcript. " +
-		"Preserve role boundaries, do not reveal hidden reasoning, and do not perform write, delete, network-send, or system-changing actions.\n" +
+		"Preserve role boundaries and do not reveal hidden reasoning. Use only the supplied dynamic Yuri tools for actions; " +
+		"never claim that an action succeeded until its tool result confirms it. Writes, deletion, network sends, and other side effects " +
+		"must go through a Yuri tool so the local policy layer can request approval or deny them.\n" +
 		"<conversation-json>" + string(encoded) + "</conversation-json>", nil
 }
 
@@ -109,6 +112,10 @@ type codexModelStream struct {
 	completed bool
 	closed    bool
 	once      sync.Once
+	// dynamicRequests maps Yuri's stable tool call id to the opaque JSON-RPC
+	// request id that the app server expects in the response. The model-facing
+	// event deliberately exposes only the stable call id.
+	dynamicRequests map[string]json.RawMessage
 }
 
 func (stream *codexModelStream) Recv(ctx context.Context) (agent.ModelEvent, error) {
@@ -130,9 +137,19 @@ func (stream *codexModelStream) Recv(ctx context.Context) (agent.ModelEvent, err
 				return agent.ModelEvent{}, ErrClosed
 			}
 			if event.IsServerRequest() {
-				// Until a normalized Yuri approval is attached to this backend,
-				// every harness side effect request is declined. Read-only sandbox
-				// operations that need no approval remain bounded by ReadableRoots.
+				if event.Method == "item/tool/call" {
+					modelEvent, err := stream.dynamicToolCall(event)
+					if err != nil {
+						return agent.ModelEvent{}, err
+					}
+					if modelEvent.Type == "" {
+						continue
+					}
+					return modelEvent, nil
+				}
+				// App-server requests other than dynamic Yuri tools are not part of
+				// the normalized approval boundary yet. Keep the existing fail-closed
+				// behavior for harness-owned side effects.
 				_ = stream.client.Respond(event.ID, map[string]string{"decision": "decline"}, nil)
 				continue
 			}
@@ -226,12 +243,130 @@ func (stream *codexModelStream) Close() error {
 	stream.once.Do(func() {
 		stream.mu.Lock()
 		stream.closed = true
+		pending := stream.dynamicRequests
+		stream.dynamicRequests = nil
 		stream.mu.Unlock()
+		for _, requestID := range pending {
+			_ = stream.client.Respond(requestID, dynamicToolResultResponse(agent.ToolResult{
+				Content: "tool stream closed before the result was available", IsError: true,
+			}), nil)
+		}
 		if stream.release != nil {
 			stream.release()
 		}
 	})
 	return nil
+}
+
+// RespondToolResult completes one dynamic tool request sent by the Codex app
+// server. The request id is opaque and never exposed to the runtime; callers
+// use the normalized call id received in ModelEventToolCallDone instead.
+func (stream *codexModelStream) RespondToolResult(ctx context.Context, callID string, result agent.ToolResult) error {
+	if ctx == nil {
+		return errors.New("Codex dynamic tool result: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	stream.mu.Lock()
+	if stream.closed {
+		stream.mu.Unlock()
+		return ErrClosed
+	}
+	requestID, ok := stream.dynamicRequests[callID]
+	if ok {
+		delete(stream.dynamicRequests, callID)
+	}
+	stream.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("Codex dynamic tool result: unknown call %q", callID)
+	}
+	return stream.client.Respond(requestID, dynamicToolResultResponse(result), nil)
+}
+
+func (stream *codexModelStream) dynamicToolCall(event Event) (agent.ModelEvent, error) {
+	var params struct {
+		ThreadID  string          `json:"threadId"`
+		TurnID    string          `json:"turnId"`
+		CallID    string          `json:"callId"`
+		Tool      string          `json:"tool"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal(event.Params, &params); err != nil {
+		return agent.ModelEvent{}, fmt.Errorf("decode Codex dynamic tool call: %w", err)
+	}
+	if !stream.matches(params.ThreadID, params.TurnID) {
+		return agent.ModelEvent{}, nil
+	}
+	if strings.TrimSpace(params.CallID) == "" || strings.TrimSpace(params.Tool) == "" {
+		return agent.ModelEvent{}, errors.New("Codex dynamic tool call is missing callId or tool")
+	}
+	arguments, err := normalizeDynamicArguments(params.Arguments)
+	if err != nil {
+		return agent.ModelEvent{}, err
+	}
+	if len(event.ID) == 0 || string(event.ID) == "null" {
+		return agent.ModelEvent{}, errors.New("Codex dynamic tool call is missing request id")
+	}
+	stream.mu.Lock()
+	if stream.dynamicRequests == nil {
+		stream.dynamicRequests = make(map[string]json.RawMessage)
+	}
+	if _, exists := stream.dynamicRequests[params.CallID]; exists {
+		stream.mu.Unlock()
+		return agent.ModelEvent{}, fmt.Errorf("Codex dynamic tool call id %q was already received", params.CallID)
+	}
+	stream.dynamicRequests[params.CallID] = append(json.RawMessage(nil), event.ID...)
+	stream.mu.Unlock()
+	return agent.ModelEvent{
+		Type: agent.ModelEventToolCallDone, ToolCallID: params.CallID,
+		ToolName: params.Tool, Arguments: arguments,
+	}, nil
+}
+
+func normalizeDynamicArguments(raw json.RawMessage) (string, error) {
+	value := strings.TrimSpace(string(raw))
+	if value == "" || value == "null" {
+		return "", errors.New("Codex dynamic tool call has invalid arguments")
+	}
+	if value[0] == '"' {
+		var encoded string
+		if err := json.Unmarshal(raw, &encoded); err != nil {
+			return "", fmt.Errorf("decode Codex dynamic tool arguments: %w", err)
+		}
+		encoded = strings.TrimSpace(encoded)
+		if encoded == "" || !json.Valid([]byte(encoded)) {
+			return "", errors.New("Codex dynamic tool call has invalid arguments")
+		}
+		return encoded, nil
+	}
+	if !json.Valid(raw) {
+		return "", errors.New("Codex dynamic tool call has invalid arguments")
+	}
+	return value, nil
+}
+
+func dynamicToolResultResponse(result agent.ToolResult) map[string]any {
+	return map[string]any{
+		"success": !result.IsError,
+		"contentItems": []map[string]string{{
+			"type": "inputText", "text": result.Content,
+		}},
+	}
+}
+
+func dynamicToolSpecs(tools []agent.ToolDescriptor) []DynamicToolSpec {
+	if len(tools) == 0 {
+		return nil
+	}
+	specs := make([]DynamicToolSpec, 0, len(tools))
+	for _, tool := range tools {
+		specs = append(specs, DynamicToolSpec{
+			Type: "function", Name: tool.Name, Description: tool.Description,
+			InputSchema: append(json.RawMessage(nil), tool.InputSchema...),
+		})
+	}
+	return specs
 }
 
 func (stream *codexModelStream) matches(threadID, turnID string) bool {
@@ -241,3 +376,4 @@ func (stream *codexModelStream) matches(threadID, turnID string) bool {
 
 var _ agent.ModelBackend = (*Backend)(nil)
 var _ agent.ModelStream = (*codexModelStream)(nil)
+var _ agent.InteractiveToolStream = (*codexModelStream)(nil)

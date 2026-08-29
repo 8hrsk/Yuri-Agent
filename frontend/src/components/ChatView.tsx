@@ -5,11 +5,15 @@ import { createYuriClient } from '../lib/client'
 import type {
   ApprovalRequest,
   ChatEvent,
+  ChatTool,
   ChatMessage,
   Conversation,
+  RunTrace,
+  RunTraceStep,
   RunStatus,
   ToolCall,
 } from '../lib/contracts'
+import { aggregateChatEvent, approvalStatusLabel, runStatusLabel, toolStatusLabel } from '../lib/chat-trace'
 import { mapAvatarState } from '../lib/personality'
 import { loadAutoSpeakPreference, saveAutoSpeakPreference } from '../lib/voice'
 import { useTTS, useVoice } from '../hooks/useVoice'
@@ -20,6 +24,21 @@ type ChatViewProps = {
   agentName: string
   backend: BackendConnection
   onOpenSettings: () => void
+}
+
+type ChatTimelineEntry =
+  | { kind: 'message'; message: ChatMessage }
+  | { kind: 'trace'; trace: RunTrace }
+
+function timelineTime(entry: ChatTimelineEntry): number {
+  const value = entry.kind === 'message' ? entry.message.createdAt : entry.trace.startedAt
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function timelinePriority(entry: ChatTimelineEntry): number {
+  if (entry.kind === 'trace') return 1
+  return entry.message.role === 'user' ? 0 : 2
 }
 
 const starterPrompts = (agentName: string) => [
@@ -65,17 +84,8 @@ function upsertMessage(messages: ChatMessage[], message: ChatMessage): ChatMessa
 }
 
 function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
-  const statusLabel: Record<ToolCall['status'], string> = {
-    pending: 'Подготовлено',
-    running: 'Выполняется',
-    completed: 'Завершено',
-    failed: 'Ошибка',
-    cancelled: 'Остановлено',
-    denied: 'Отклонено',
-  }
-
   return (
-    <div className={`tool-card tool-card--${toolCall.status}`}>
+    <article className={`tool-card tool-card--${toolCall.status}`}>
       <div className="tool-card__topline">
         <span className="tool-card__icon"><Icon name="command" width={15} height={15} /></span>
         <span className="tool-card__title">
@@ -85,10 +95,114 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
         <span className={`risk-pill risk-pill--${toolCall.risk}`}>{toolCall.risk}</span>
       </div>
       <div className="tool-card__body">
-        <div className="tool-card__status"><span className="tool-card__status-dot" /> {statusLabel[toolCall.status]}</div>
-        <code>{JSON.stringify(toolCall.args, null, 2)}</code>
+        <div className="tool-card__status"><span className="tool-card__status-dot" /> {toolStatusLabel(toolCall.status)}</div>
+        <div className="tool-card__payload">
+          <span className="tool-card__payload-label">Параметры</span>
+          <code>{JSON.stringify(toolCall.args, null, 2)}</code>
+        </div>
       </div>
-      {toolCall.result && <p className="tool-card__result">{toolCall.result}</p>}
+      {toolCall.result && (
+        <div className="tool-card__result-wrap">
+          <span className="tool-card__payload-label">Результат</span>
+          <p className="tool-card__result">{toolCall.result}</p>
+        </div>
+      )}
+    </article>
+  )
+}
+
+function traceStatusCopy(trace: RunTrace): string {
+  if (trace.status === 'queued') return 'В очереди'
+  if (trace.status === 'complete') return 'Завершено'
+  if (trace.status === 'cancelled') return 'Остановлено'
+  if (trace.status === 'error') return 'Ошибка'
+  if (trace.status === 'waiting_approval') return 'Ожидает разрешения'
+  const latestStatus = [...trace.steps].reverse().find((step): step is Extract<RunTraceStep, { kind: 'status' }> => step.kind === 'status')
+  return latestStatus ? runStatusLabel(latestStatus.status) : 'Выполняется'
+}
+
+function traceStepLabel(step: RunTraceStep): string {
+  switch (step.kind) {
+    case 'thinking': return step.label
+    case 'status': return step.label
+    case 'tool': return `${step.toolCall.label} · ${toolStatusLabel(step.status)}`
+    case 'approval': return `Подтверждение · ${approvalStatusLabel(step.status)}`
+    case 'completion': return step.label
+  }
+}
+
+function TraceStepCard({ step }: { step: RunTraceStep }) {
+  if (step.kind === 'tool') return <ToolCallCard toolCall={step.toolCall} />
+
+  const statusClass = step.status
+  const icon = step.kind === 'thinking'
+    ? 'spark'
+    : step.kind === 'approval'
+      ? 'shield'
+      : step.kind === 'completion' && step.status === 'error'
+        ? 'warning'
+        : step.kind === 'completion' && step.status === 'complete'
+          ? 'check'
+          : 'activity'
+  return (
+    <div className={`trace-step trace-step--${step.kind} trace-step--${statusClass}`}>
+      <span className="trace-step__icon"><Icon name={icon} width={14} height={14} /></span>
+      <span className="trace-step__copy">
+        <strong>{traceStepLabel(step)}</strong>
+        {step.kind === 'approval' && <small>{step.approval.scope || step.approval.explanation}</small>}
+        {step.kind === 'completion' && step.error && <small>{step.error}</small>}
+      </span>
+    </div>
+  )
+}
+
+function ExecutionTrace({ trace }: { trace: RunTrace }) {
+  const toolCount = trace.steps.filter((step) => step.kind === 'tool').length
+  const waiting = trace.status === 'waiting_approval'
+  return (
+    <details className={`run-trace run-trace--${trace.status}`}>
+      <summary className="run-trace__summary">
+        <span className="run-trace__mark"><Icon name={waiting ? 'shield' : 'activity'} width={14} height={14} /></span>
+        <span className="run-trace__heading">
+          <strong>Выполнение</strong>
+          <small>{toolCount > 0 ? `${toolCount} ${toolCount === 1 ? 'tool-вызов' : 'tool-вызова'} · ` : ''}{traceStatusCopy(trace)}</small>
+        </span>
+        <span className="run-trace__status">{traceStatusCopy(trace)}</span>
+        <Icon name="chevron-right" width={14} height={14} />
+      </summary>
+      <div className="run-trace__body">
+        <p className="run-trace__notice">Здесь показаны статусы выполнения, вызовы инструментов и их результаты. Скрытые рассуждения модели не отображаются.</p>
+        <div className="run-trace__steps">
+          {trace.steps.map((step) => <TraceStepCard key={step.id} step={step} />)}
+        </div>
+      </div>
+    </details>
+  )
+}
+
+function ToolAvailabilityBar({ tools, allowedDirectories, loading }: { tools: ChatTool[]; allowedDirectories: string[]; loading: boolean }) {
+  const availableTools = tools.filter((tool) => tool.available)
+  return (
+    <div aria-label="Доступность инструментов" className="tool-availability">
+      <div className="tool-availability__heading">
+        <span className="tool-availability__mark"><Icon name="command" width={13} height={13} /></span>
+        <span><strong>Инструменты</strong><small>{loading ? 'Проверяю доступность…' : tools.length > 0 ? `${availableTools.length} доступно` : 'Не подключены'}</small></span>
+      </div>
+      <div className="tool-availability__tools">
+        {tools.length === 0 && !loading && <span className="tool-availability__empty">Список tools появится после подключения runtime</span>}
+        {tools.map((tool) => (
+          <span className={`tool-availability__tool${tool.available ? '' : ' tool-availability__tool--disabled'}`} key={tool.id} title={tool.description}>
+            <i /> {tool.label}
+            {tool.requiresApproval && <em>approval</em>}
+          </span>
+        ))}
+      </div>
+      <div className="tool-availability__scope">
+        <span className="tool-availability__scope-label">Разрешённые директории</span>
+        {allowedDirectories.length > 0
+          ? allowedDirectories.map((directory) => <code key={directory}>{directory}</code>)
+          : <span className="tool-availability__scope-empty">не настроены</span>}
+      </div>
     </div>
   )
 }
@@ -194,6 +308,9 @@ export function ChatView({ agentName, backend, onOpenSettings }: ChatViewProps) 
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [conversationFilter, setConversationFilter] = useState('')
+  const [chatTools, setChatTools] = useState<ChatTool[]>([])
+  const [allowedDirectories, setAllowedDirectories] = useState<string[]>([])
+  const [toolsLoading, setToolsLoading] = useState(true)
   const [draft, setDraft] = useState('')
   const [runId, setRunId] = useState<string>()
   const [runStatus, setRunStatus] = useState<RunStatus>('idle')
@@ -219,6 +336,16 @@ export function ChatView({ agentName, backend, onOpenSettings }: ChatViewProps) 
 
   const selectedConversation = conversations.find((conversation) => conversation.id === selectedId)
   const lastMessageContent = selectedConversation?.messages.at(-1)?.content
+  const timeline = useMemo<ChatTimelineEntry[]>(() => {
+    if (!selectedConversation) return []
+    const entries: ChatTimelineEntry[] = [
+      ...selectedConversation.messages
+        .filter((message) => message.role !== 'tool')
+        .map((message) => ({ kind: 'message' as const, message })),
+      ...(selectedConversation.traces ?? []).map((trace) => ({ kind: 'trace' as const, trace })),
+    ]
+    return entries.sort((left, right) => timelineTime(left) - timelineTime(right) || timelinePriority(left) - timelinePriority(right))
+  }, [selectedConversation])
   const visibleConversations = conversations.filter((conversation) => {
     const query = conversationFilter.trim().toLocaleLowerCase('ru-RU')
     return !query || `${conversation.title} ${conversation.preview}`.toLocaleLowerCase('ru-RU').includes(query)
@@ -242,8 +369,27 @@ export function ChatView({ agentName, backend, onOpenSettings }: ChatViewProps) 
   }, [client])
 
   useEffect(() => {
+    let mounted = true
+    void Promise.all([client.listChatTools(), client.getAllowedDirectories()]).then(([tools, directories]) => {
+      if (!mounted) return
+      setChatTools(tools)
+      setAllowedDirectories(directories)
+    }).catch(() => {
+      // Discovery is advisory. A missing ListChatTools bridge must not block
+      // the conversation itself; the bar will show the unavailable state.
+      if (mounted) {
+        setChatTools([])
+        setAllowedDirectories([])
+      }
+    }).finally(() => {
+      if (mounted) setToolsLoading(false)
+    })
+    return () => { mounted = false }
+  }, [client])
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [selectedConversation?.messages.length, lastMessageContent])
+  }, [selectedConversation?.messages.length, selectedConversation?.traces?.length, lastMessageContent])
 
   useEffect(() => {
     const blob = voiceBlob
@@ -282,6 +428,22 @@ export function ChatView({ agentName, backend, onOpenSettings }: ChatViewProps) 
   }, [autoSpeak, selectedConversation?.messages, speakTTS, ttsSupported])
 
   const handleEvent = useCallback((conversationId: string, event: ChatEvent) => {
+    if (event.conversationId && event.conversationId !== conversationId) return
+
+    // Keep one operational timeline per run. Assistant output events are
+    // excluded: they belong to the visible answer and must never become a
+    // reasoning log.
+    if (event.type !== 'assistant.delta' && event.type !== 'assistant.completed') {
+      setConversations((current) => updateConversation(current, conversationId, (conversation) => ({
+        ...conversation,
+        traces: aggregateChatEvent(
+          conversation.traces ?? [],
+          event,
+          event.createdAt ?? event.timestamp ?? new Date().toISOString(),
+        ),
+      })))
+    }
+
     if (event.type === 'run.started') {
       setRunId(event.runId)
       setRunStatus('thinking')
@@ -327,28 +489,10 @@ export function ChatView({ agentName, backend, onOpenSettings }: ChatViewProps) 
     if (event.type === 'tool.started') {
       setRunStatus('tool_running')
       setRunLabel(`Инструмент: ${event.toolCall.name}`)
-      setConversations((current) => updateConversation(current, conversationId, (conversation) => ({
-        ...conversation,
-        messages: upsertMessage(conversation.messages, {
-          id: `tool-message-${event.toolCall.id}`,
-          role: 'tool',
-          content: '',
-          status: 'streaming',
-          createdAt: new Date().toISOString(),
-          runId: event.runId,
-          toolCall: event.toolCall,
-        }),
-      })))
       return
     }
 
     if (event.type === 'tool.updated') {
-      setConversations((current) => updateConversation(current, conversationId, (conversation) => ({
-        ...conversation,
-        messages: conversation.messages.map((message) => message.toolCall?.id === event.toolCall.id
-          ? { ...message, status: event.toolCall.status === 'completed' ? 'complete' : event.toolCall.status === 'denied' ? 'error' : message.status, toolCall: event.toolCall }
-          : message),
-      })))
       return
     }
 
@@ -361,6 +505,7 @@ export function ChatView({ agentName, backend, onOpenSettings }: ChatViewProps) 
 
     if (event.type === 'run.completed') {
       setRunId(undefined)
+      setPendingApproval(undefined)
       setRunStatus(event.status === 'complete' ? 'idle' : event.status)
       setRunLabel(event.status === 'complete' ? labels.idle : event.status === 'cancelled' ? labels.cancelled : event.error ?? labels.error)
       if (event.status === 'error') setError(event.error ?? 'Запуск завершился ошибкой.')
@@ -537,26 +682,28 @@ export function ChatView({ agentName, backend, onOpenSettings }: ChatViewProps) 
             </div>
           </header>
 
+          <ToolAvailabilityBar allowedDirectories={allowedDirectories} loading={toolsLoading} tools={chatTools} />
+
           <div aria-live="polite" className="messages" role="log">
-            {selectedConversation?.messages.length === 0 && (
+            {timeline.length === 0 && (
               <div className="empty-conversation">
                 <YuriAvatar label={`${agentName} · можно начинать диалог`} size="md" state="idle" />
                 <h3>С чего начнём?</h3>
                 <p>Напишите агенту {agentName} задачу. Ответ появится потоково, а рискованные действия будут показаны до выполнения.</p>
               </div>
             )}
-            {selectedConversation?.messages.map((message) => (
-              <MessageBubble
-                agentName={agentName}
-                key={message.id}
-                message={message}
-                onRetry={() => handleRetry(message)}
-                onSpeak={() => tts.speak(message.id, message.content)}
-                onStopSpeaking={tts.stop}
-                speaking={tts.speakingId === message.id}
-                speechSupported={tts.supported}
-              />
-            ))}
+            {timeline.map((entry) => entry.kind === 'trace'
+              ? <ExecutionTrace key={`trace-${entry.trace.id}`} trace={entry.trace} />
+              : <MessageBubble
+                  agentName={agentName}
+                  key={entry.message.id}
+                  message={entry.message}
+                  onRetry={() => handleRetry(entry.message)}
+                  onSpeak={() => tts.speak(entry.message.id, entry.message.content)}
+                  onStopSpeaking={tts.stop}
+                  speaking={tts.speakingId === entry.message.id}
+                  speechSupported={tts.supported}
+                />)}
             <div ref={messagesEndRef} />
           </div>
 

@@ -52,6 +52,29 @@ type ConversationView struct {
 	Preview   string            `json:"preview"`
 	UpdatedAt string            `json:"updatedAt"`
 	Messages  []ChatMessageView `json:"messages"`
+	Traces    []RunTraceView    `json:"traces"`
+}
+
+// RunTraceView is the user-visible execution history for one agent run. It
+// intentionally contains lifecycle events and redacted tool data, never
+// provider reasoning or hidden chain-of-thought.
+type RunTraceView struct {
+	ID         string         `json:"id"`
+	Kind       string         `json:"kind"`
+	Status     string         `json:"status"`
+	CreatedAt  string         `json:"createdAt"`
+	StartedAt  string         `json:"startedAt,omitempty"`
+	FinishedAt string         `json:"finishedAt,omitempty"`
+	Failure    string         `json:"failure,omitempty"`
+	ToolCalls  []ToolCallView `json:"toolCalls"`
+}
+
+type ChatToolDescriptorView struct {
+	Name         string   `json:"name"`
+	Label        string   `json:"label"`
+	Description  string   `json:"description"`
+	Risk         string   `json:"risk"`
+	Capabilities []string `json:"capabilities"`
 }
 
 type ToolCallView struct {
@@ -83,6 +106,7 @@ type ChatEvent struct {
 	Type           string        `json:"type"`
 	ConversationID string        `json:"conversationId,omitempty"`
 	RunID          string        `json:"runId"`
+	CreatedAt      string        `json:"createdAt"`
 	MessageID      string        `json:"messageId,omitempty"`
 	Delta          string        `json:"delta,omitempty"`
 	Status         string        `json:"status,omitempty"`
@@ -120,6 +144,7 @@ func (b *Bridge) ListConversations() ([]ConversationView, error) {
 			ID: string(conversation.ID), Title: conversation.Title,
 			UpdatedAt: conversation.UpdatedAt.UTC().Format(time.RFC3339Nano),
 			Messages:  make([]ChatMessageView, 0, len(messages)),
+			Traces:    make([]RunTraceView, 0),
 		}
 		for _, message := range messages {
 			view.Messages = append(view.Messages, ChatMessageView{
@@ -129,6 +154,17 @@ func (b *Bridge) ListConversations() ([]ConversationView, error) {
 			if message.Content != "" {
 				view.Preview = truncateRunes(message.Content, 100)
 			}
+		}
+		runs, err := b.repositories.Runs.ListByConversation(ctx, conversation.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, run := range runs {
+			trace, err := b.runTraceView(ctx, run)
+			if err != nil {
+				return nil, err
+			}
+			view.Traces = append(view.Traces, trace)
 		}
 		views = append(views, view)
 	}
@@ -154,8 +190,81 @@ func (b *Bridge) NewConversation(title string) (ConversationView, error) {
 	}
 	return ConversationView{
 		ID: string(id), Title: truncateRunes(title, 80), Preview: "Пока нет сообщений",
-		UpdatedAt: now.Format(time.RFC3339Nano), Messages: []ChatMessageView{},
+		UpdatedAt: now.Format(time.RFC3339Nano), Messages: []ChatMessageView{}, Traces: []RunTraceView{},
 	}, nil
+}
+
+func (b *Bridge) runTraceView(ctx context.Context, run domain.AgentRun) (RunTraceView, error) {
+	view := RunTraceView{
+		ID: string(run.ID), Kind: string(run.Kind), Status: string(run.State),
+		CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339Nano), Failure: safeError(run.Failure),
+		ToolCalls: make([]ToolCallView, 0),
+	}
+	if !run.StartedAt.IsZero() {
+		view.StartedAt = run.StartedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !run.FinishedAt.IsZero() {
+		view.FinishedAt = run.FinishedAt.UTC().Format(time.RFC3339Nano)
+	}
+	calls, err := b.repositories.ToolCalls.ListByRun(ctx, run.ID)
+	if err != nil {
+		return RunTraceView{}, err
+	}
+	for _, call := range calls {
+		args := make(map[string]any)
+		_ = json.Unmarshal([]byte(call.ArgsRedacted), &args)
+		toolView := ToolCallView{
+			ID: string(call.ID), Name: call.ToolID, Label: toolLabel(call.ToolID),
+			Risk: string(call.Risk), Status: toolCallStatus(call.Status), Args: args,
+			Result: call.ResultRef, StartedAt: call.CreatedAt.UTC().Format(time.RFC3339Nano),
+		}
+		if call.Status != storage.ToolCallRunning && call.Status != storage.ToolCallPending {
+			toolView.FinishedAt = call.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		}
+		view.ToolCalls = append(view.ToolCalls, toolView)
+	}
+	return view, nil
+}
+
+func toolCallStatus(status string) string {
+	switch status {
+	case storage.ToolCallSucceeded:
+		return "completed"
+	case storage.ToolCallFailed:
+		return "failed"
+	default:
+		return status
+	}
+}
+
+// ListChatTools reports only tools currently available to a new foreground
+// run. In particular, filesystem tools are absent until the owner grants at
+// least one directory.
+func (b *Bridge) ListChatTools() ([]ChatToolDescriptorView, error) {
+	registry, err := b.chatTools(time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	descriptors := registry.Descriptors()
+	views := make([]ChatToolDescriptorView, 0, len(descriptors)+2)
+	for _, descriptor := range descriptors {
+		capabilities := make([]string, 0, len(descriptor.Capabilities))
+		for _, capability := range descriptor.Capabilities {
+			capabilities = append(capabilities, string(capability))
+		}
+		views = append(views, ChatToolDescriptorView{
+			Name: descriptor.Name, Label: toolLabel(descriptor.Name), Description: descriptor.Description,
+			Risk: string(descriptor.Risk), Capabilities: capabilities,
+		})
+	}
+	// These two normalized agent tools are added per run because they carry the
+	// active agent and parent run IDs, but they are always available in a normal
+	// foreground conversation.
+	views = append(views,
+		ChatToolDescriptorView{Name: delegationToolID, Label: toolLabel(delegationToolID), Description: "Делегировать ограниченную задачу обезличенному субагенту.", Risk: string(domain.RiskLow)},
+		ChatToolDescriptorView{Name: peerDialogueToolID, Label: toolLabel(peerDialogueToolID), Description: "Запустить ограниченный фоновый диалог с другим агентом.", Risk: string(domain.RiskLow)},
+	)
+	return views, nil
 }
 
 // SendMessage performs one durable interactive run. Events are both emitted
@@ -673,17 +782,25 @@ func newChatEmitter(b *Bridge, conversationID, runID, messageID string) *chatEmi
 }
 
 func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
-	view := ChatEvent{ConversationID: emitter.conversationID, RunID: emitter.runID}
+	now := time.Now().UTC()
+	view := ChatEvent{ConversationID: emitter.conversationID, RunID: emitter.runID, CreatedAt: now.Format(time.RFC3339Nano)}
 	switch event.Type {
 	case agent.EventRunStarted:
 		view.Type = "run.started"
 	case agent.EventModelTextDelta:
 		view.Type, view.MessageID, view.Delta = "assistant.delta", emitter.messageID, event.Text
-	case agent.EventToolStarted:
+	case agent.EventToolCallStarted:
 		view.Type = "tool.started"
-		view.ToolCall = toolCallView(event.ToolCall, "running", "", time.Now().UTC())
+		view.ToolCall = toolCallView(event.ToolCall, "pending", "", now)
 		emitter.applyToolRisk(view.ToolCall)
 		if err := emitter.createToolRecord(ctx, event); err != nil {
+			return err
+		}
+	case agent.EventToolStarted:
+		view.Type = "tool.updated"
+		view.ToolCall = toolCallView(event.ToolCall, "running", "", now)
+		emitter.applyToolRisk(view.ToolCall)
+		if err := emitter.startToolRecord(ctx, event); err != nil {
 			return err
 		}
 	case agent.EventToolCompleted:
@@ -692,11 +809,16 @@ func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
 		status := "completed"
 		if event.ToolResult != nil {
 			result = event.ToolResult.Content
+			if decision, _ := event.ToolResult.Metadata["decision"].(string); decision == "denied" {
+				status = "denied"
+			}
 			if event.ToolResult.IsError {
-				status = "failed"
+				if status != "denied" {
+					status = "failed"
+				}
 			}
 		}
-		view.ToolCall = toolCallView(event.ToolCall, status, truncateRunes(result, 512), time.Now().UTC())
+		view.ToolCall = toolCallView(event.ToolCall, status, truncateRunes(result, 4096), now)
 		emitter.applyToolRisk(view.ToolCall)
 		if err := emitter.finishToolRecord(ctx, event, status); err != nil {
 			return err
@@ -869,6 +991,15 @@ func (emitter *chatEmitter) createApproval(ctx context.Context, event agent.Even
 	emitter.b.approvals[string(id)] = make(chan bool, 1)
 	emitter.b.mu.Unlock()
 	emitter.approvalRecords[event.ToolCall.ID] = id
+	if toolRecord, exists := emitter.toolRecords[event.ToolCall.ID]; exists {
+		toolRecord.ApprovalID = id
+		toolRecord.Version++
+		toolRecord.UpdatedAt = now
+		if err := emitter.b.repositories.ToolCalls.Save(ctx, toolRecord); err != nil {
+			return nil, err
+		}
+		emitter.toolRecords[event.ToolCall.ID] = toolRecord
+	}
 	return &ApprovalView{
 		ID: string(id), ToolCallID: event.ToolCall.ID, Title: "Разрешить действие Yuri?",
 		Explanation: event.Error, Risk: string(risk), Scope: approvalScope,
@@ -900,6 +1031,9 @@ func approvalIDFor(runID domain.ID, callID string) domain.ID {
 }
 
 func (emitter *chatEmitter) emit(event ChatEvent) {
+	if event.CreatedAt == "" {
+		event.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
 	emitter.mu.Lock()
 	emitter.events = append(emitter.events, event)
 	emitter.mu.Unlock()
@@ -921,6 +1055,9 @@ func (emitter *chatEmitter) createToolRecord(ctx context.Context, event agent.Ev
 	if event.ToolCall == nil {
 		return nil
 	}
+	if _, exists := emitter.toolRecords[event.ToolCall.ID]; exists {
+		return nil
+	}
 	id, err := domain.NewID("tool")
 	if err != nil {
 		return err
@@ -935,7 +1072,7 @@ func (emitter *chatEmitter) createToolRecord(ctx context.Context, event agent.Ev
 	record := storage.ToolCall{
 		ID: id, RunID: domain.ID(emitter.runID), ToolID: event.ToolCall.Name,
 		ArgsRedacted: redactedToolArguments(event.ToolCall.Name, event.ToolCall.Arguments, 4096), Risk: risk,
-		Status: storage.ToolCallRunning, IdempotencyKey: event.ToolCall.ID,
+		Status: storage.ToolCallPending, IdempotencyKey: event.ToolCall.ID,
 		Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	record.ApprovalID = emitter.approvalRecords[event.ToolCall.ID]
@@ -947,10 +1084,43 @@ func (emitter *chatEmitter) createToolRecord(ctx context.Context, event agent.Ev
 	if err != nil {
 		return err
 	}
+	decision := domain.PermissionAllow
+	if risk == domain.RiskMedium || risk == domain.RiskHigh {
+		decision = domain.PermissionNeedsApproval
+	}
 	return emitter.b.repositories.Audit.Append(ctx, storage.AuditEvent{
 		ID: auditID, RunID: domain.ID(emitter.runID), ToolCallID: record.ID,
+		Actor: domain.ActorAgent, Action: "tool.proposed", Target: event.ToolCall.Name,
+		Decision: decision, PayloadRedacted: record.ArgsRedacted, CreatedAt: now,
+	})
+}
+
+func (emitter *chatEmitter) startToolRecord(ctx context.Context, event agent.Event) error {
+	if event.ToolCall == nil {
+		return nil
+	}
+	if err := emitter.createToolRecord(ctx, event); err != nil {
+		return err
+	}
+	record, exists := emitter.toolRecords[event.ToolCall.ID]
+	if !exists {
+		return nil
+	}
+	record.Status = storage.ToolCallRunning
+	record.Version++
+	record.UpdatedAt = time.Now().UTC()
+	if err := emitter.b.repositories.ToolCalls.Save(ctx, record); err != nil {
+		return err
+	}
+	emitter.toolRecords[event.ToolCall.ID] = record
+	auditID, err := domain.NewID("audit")
+	if err != nil {
+		return err
+	}
+	return emitter.b.repositories.Audit.Append(ctx, storage.AuditEvent{
+		ID: auditID, RunID: domain.ID(emitter.runID), ToolCallID: record.ID, ApprovalID: record.ApprovalID,
 		Actor: domain.ActorAgent, Action: "tool.execute", Target: event.ToolCall.Name,
-		Decision: domain.PermissionAllow, PayloadRedacted: record.ArgsRedacted, CreatedAt: now,
+		Decision: domain.PermissionAllow, PayloadRedacted: record.ArgsRedacted, CreatedAt: record.UpdatedAt,
 	})
 }
 
@@ -1000,6 +1170,8 @@ func (emitter *chatEmitter) finishToolRecord(ctx context.Context, event agent.Ev
 	record.Status = storage.ToolCallSucceeded
 	if status == "failed" {
 		record.Status = storage.ToolCallFailed
+	} else if status == "denied" {
+		record.Status = storage.ToolCallDenied
 	}
 	if event.ToolResult != nil && event.ToolResult.Metadata != nil {
 		if delegationID, ok := event.ToolResult.Metadata["delegation_id"].(string); ok && strings.TrimSpace(delegationID) != "" {
@@ -1019,7 +1191,7 @@ func (emitter *chatEmitter) finishToolRecord(ctx context.Context, event agent.Ev
 		return err
 	}
 	decision := domain.PermissionAllow
-	if status == "failed" {
+	if status == "failed" || status == "denied" {
 		decision = domain.PermissionDeny
 	}
 	payload, _ := json.Marshal(map[string]string{"status": record.Status})
@@ -1036,13 +1208,33 @@ func toolCallView(call *agent.ToolCall, status, result string, now time.Time) *T
 	}
 	args := make(map[string]any)
 	_ = json.Unmarshal([]byte(redactedToolArguments(call.Name, call.Arguments, 4096)), &args)
-	view := &ToolCallView{ID: call.ID, Name: call.Name, Label: call.Name, Risk: string(domain.RiskLow), Status: status, Args: args, Result: result}
-	if status == "running" {
+	view := &ToolCallView{ID: call.ID, Name: call.Name, Label: toolLabel(call.Name), Risk: string(domain.RiskLow), Status: status, Args: args, Result: result}
+	if status == "running" || status == "pending" {
 		view.StartedAt = now.Format(time.RFC3339Nano)
 	} else {
 		view.FinishedAt = now.Format(time.RFC3339Nano)
 	}
 	return view
+}
+
+func toolLabel(name string) string {
+	switch name {
+	case builtintools.FilesystemReadToolID:
+		return "Работа с файлами"
+	case builtintools.FilesystemWriteToolID:
+		return "Изменение файла"
+	case scheduleCreateToolID:
+		return "Создание задачи"
+	case delegationToolID:
+		return "Субагент"
+	case peerDialogueToolID:
+		return "Диалог с агентом"
+	default:
+		if strings.TrimSpace(name) == "" {
+			return "Инструмент"
+		}
+		return name
+	}
 }
 
 func (b *Bridge) failChatRun(ctx context.Context, run *domain.AgentRun, emitter *chatEmitter, cause error) ChatRunResult {

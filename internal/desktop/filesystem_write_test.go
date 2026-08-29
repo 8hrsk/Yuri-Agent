@@ -202,8 +202,8 @@ func TestFilesystemWriteApprovalAuditFlow(t *testing.T) {
 				if strings.Contains(calls[0].ArgsRedacted, secretContent) || !strings.Contains(calls[0].ArgsRedacted, "content_sha256") {
 					t.Fatalf("tool args were not redacted: %s", calls[0].ArgsRedacted)
 				}
-			} else if len(calls) != 0 {
-				t.Fatalf("denied write created tool execution record: %#v", calls)
+			} else if len(calls) != 1 || calls[0].Status != storage.ToolCallDenied || calls[0].ApprovalID != approvals[0].ID {
+				t.Fatalf("denied tool intent was not retained as failed: %#v", calls)
 			}
 
 			audits, err := repositories.Audit.ListByRun(ctx, runID)
@@ -220,7 +220,10 @@ func TestFilesystemWriteApprovalAuditFlow(t *testing.T) {
 			if !actions["approval.requested"] || !actions["approval.resolved"] {
 				t.Fatalf("approval audit trail = %#v", audits)
 			}
-			if test.created && (!actions["tool.execute"] || !actions["tool.completed"]) {
+			if !actions["tool.proposed"] || !actions["tool.completed"] {
+				t.Fatalf("tool intent audit trail = %#v", audits)
+			}
+			if test.created && !actions["tool.execute"] {
 				t.Fatalf("tool audit trail = %#v", audits)
 			}
 		})

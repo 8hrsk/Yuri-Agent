@@ -1,0 +1,101 @@
+package desktop
+
+import (
+	"context"
+	"encoding/json"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/OrdoAI/yuri-agent/internal/config"
+	"github.com/OrdoAI/yuri-agent/internal/domain"
+	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
+	builtintools "github.com/OrdoAI/yuri-agent/internal/tools"
+)
+
+func TestRunTraceViewRestoresRedactedToolHistory(t *testing.T) {
+	ctx := context.Background()
+	database, err := storage.Open(ctx, filepath.Join(t.TempDir(), "yuri.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	repositories, err := storage.NewRepositories(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 29, 10, 0, 0, 0, time.UTC)
+	conversationID := domain.ID("conversation-trace")
+	if err := repositories.Conversations.Create(ctx, storage.Conversation{
+		ID: conversationID, AgentID: "owner", Title: "Trace", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := domain.NewRunForAgent("owner", "run-trace", domain.RunKindInteractive, conversationID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Transition(domain.RunStateQueued, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Transition(domain.RunStateRunning, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Transition(domain.RunStateCompleted, now.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repositories.Runs.Create(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal(map[string]any{"operation": "read", "path": "/allowed/note.txt"})
+	if err := repositories.ToolCalls.Create(ctx, storage.ToolCall{
+		ID: "tool-trace", RunID: run.ID, ToolID: builtintools.FilesystemReadToolID,
+		ArgsRedacted: string(args), Risk: domain.RiskLow, Status: storage.ToolCallSucceeded,
+		ResultRef: "blob:result", IdempotencyKey: "call-1", Version: 1,
+		CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2500 * time.Millisecond),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	bridge := &Bridge{database: database, repositories: repositories}
+	trace, err := bridge.runTraceView(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trace.Status != string(domain.RunStateCompleted) || len(trace.ToolCalls) != 1 {
+		t.Fatalf("trace = %#v", trace)
+	}
+	call := trace.ToolCalls[0]
+	if call.Label != "Работа с файлами" || call.Status != "completed" || call.Result != "blob:result" || call.Args["path"] != "/allowed/note.txt" {
+		t.Fatalf("tool call = %#v", call)
+	}
+}
+
+func TestListChatToolsReflectsFilesystemPermission(t *testing.T) {
+	bridge := &Bridge{config: config.Config{}}
+	withoutRoots, err := bridge.ListChatTools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasTool(withoutRoots, builtintools.FilesystemReadToolID) {
+		t.Fatal("filesystem tool must stay unavailable without an allowed directory")
+	}
+
+	bridge.config.AllowedDirectories = []string{t.TempDir()}
+	withRoots, err := bridge.ListChatTools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasTool(withRoots, builtintools.FilesystemReadToolID) || !hasTool(withRoots, builtintools.FilesystemWriteToolID) {
+		t.Fatalf("filesystem tools missing: %#v", withRoots)
+	}
+}
+
+func hasTool(items []ChatToolDescriptorView, name string) bool {
+	for _, item := range items {
+		if item.Name == name {
+			return true
+		}
+	}
+	return false
+}

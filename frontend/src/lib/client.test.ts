@@ -249,6 +249,45 @@ describe('Yuri client contract', () => {
     }
   })
 
+  it('normalizes persisted execution traces and available chat tools from Wails', async () => {
+    const bridge = {
+      ListConversations: () => [{
+        id: 'conversation-trace',
+        title: 'История tools',
+        updatedAt: '2026-08-29T10:00:05Z',
+        messages: [],
+        traces: [{
+          id: 'run-history',
+          kind: 'interactive',
+          status: 'completed',
+          createdAt: '2026-08-29T10:00:00Z',
+          startedAt: '2026-08-29T10:00:01Z',
+          finishedAt: '2026-08-29T10:00:05Z',
+          toolCalls: [{ id: 'call-history', name: 'filesystem.read', risk: 'low', status: 'completed', args: { path: '/allowed/readme.txt' }, result: 'ok' }],
+        }],
+      }],
+      ListChatTools: () => [{ name: 'filesystem.read', label: 'Чтение файлов', risk: 'low', capabilities: ['filesystem.read'] }],
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      const client = createYuriClient()
+      await expect(client.listChatTools()).resolves.toEqual([{
+        id: 'filesystem.read', name: 'filesystem.read', label: 'Чтение файлов', risk: 'low', available: true,
+        requiresApproval: false, description: undefined, capabilities: ['filesystem.read'],
+      }])
+      const conversation = (await client.listConversations())[0]
+      expect(conversation?.traces?.[0]?.steps.map((step) => step.kind)).toEqual(['thinking', 'tool', 'completion'])
+      expect(conversation?.traces?.[0]?.steps.find((step) => step.kind === 'tool')).toMatchObject({ toolCall: { name: 'filesystem.read', result: 'ok' } })
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
   it('preserves repeated live streaming deltas while suppressing returned replay events', async () => {
     const listeners = new Map<string, (value: unknown) => void>()
     const streamed = [
