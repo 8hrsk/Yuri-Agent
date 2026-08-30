@@ -8,13 +8,14 @@ import (
 	"time"
 
 	"github.com/OrdoAI/yuri-agent/internal/agent"
+	"github.com/OrdoAI/yuri-agent/internal/config"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 	"github.com/OrdoAI/yuri-agent/internal/plugins"
 	"github.com/OrdoAI/yuri-agent/internal/security"
 	builtintools "github.com/OrdoAI/yuri-agent/internal/tools"
 )
 
-const filesystemSubjectID = domain.ID("yuri-core-agent")
+const coreAgentSubjectID = domain.ID("yuri-core-agent")
 
 func (b *Bridge) chatTools(_ time.Time) (*agent.ToolRegistry, error) {
 	registry := agent.NewToolRegistry()
@@ -23,6 +24,7 @@ func (b *Bridge) chatTools(_ time.Time) (*agent.ToolRegistry, error) {
 	for id, supervisor := range b.pluginSupervisors {
 		supervisors[id] = supervisor
 	}
+	webSearchConfig := b.config.WebSearch
 	b.mu.RUnlock()
 
 	// Filesystem tools are always discoverable. Their adapters read the current
@@ -33,6 +35,22 @@ func (b *Bridge) chatTools(_ time.Time) (*agent.ToolRegistry, error) {
 	}
 	if err := registry.Register(filesystemWriteAgentTool{bridge: b}); err != nil {
 		return nil, err
+	}
+	webFetch, err := newWebFetch()
+	if err != nil {
+		return nil, err
+	}
+	if err := registry.Register(webFetchAgentTool{tool: webFetch}); err != nil {
+		return nil, err
+	}
+	if webSearchConfig.Enabled {
+		webSearch, err := newWebSearch(webSearchConfig)
+		if err != nil {
+			return nil, err
+		}
+		if err := registry.Register(webSearchAgentTool{tool: webSearch, defaultLimit: webSearchConfig.DefaultResultLimit}); err != nil {
+			return nil, err
+		}
 	}
 	if b.scheduler != nil {
 		if err := registry.Register(scheduleAgentTool{bridge: b}); err != nil {
@@ -60,7 +78,7 @@ func filesystemPolicy(roots []string, capability domain.Capability) (domain.Poli
 		return nil, err
 	}
 	return security.NewPolicyEvaluator(security.WithPolicyGrants([]domain.PermissionGrant{{
-		ID: grantID, SubjectID: filesystemSubjectID, Capability: capability,
+		ID: grantID, SubjectID: coreAgentSubjectID, Capability: capability,
 		Scope: domain.CapabilityScope{Kind: domain.ScopeFilesystem, Values: roots}, GrantedAt: time.Now().UTC(),
 	}})), nil
 }
@@ -71,7 +89,7 @@ func newReadFilesystem(roots []string) (*builtintools.ReadOnlyFilesystemTool, er
 		return nil, err
 	}
 	return builtintools.NewReadOnlyFilesystem(builtintools.ReadOnlyFilesystemConfig{
-		Roots: roots, Policy: policy, SubjectID: filesystemSubjectID,
+		Roots: roots, Policy: policy, SubjectID: coreAgentSubjectID,
 	})
 }
 
@@ -81,12 +99,96 @@ func newWriteFilesystem(roots []string) (*builtintools.WriteFilesystemTool, erro
 		return nil, err
 	}
 	return builtintools.NewWriteFilesystem(builtintools.WriteFilesystemConfig{
-		Roots: roots, Policy: policy, SubjectID: filesystemSubjectID,
+		Roots: roots, Policy: policy, SubjectID: coreAgentSubjectID,
 	})
+}
+
+func newWebFetch() (*builtintools.WebFetchTool, error) {
+	grantID, err := domain.NewID("grant")
+	if err != nil {
+		return nil, err
+	}
+	policy := security.NewPolicyEvaluator(security.WithPolicyGrants([]domain.PermissionGrant{{
+		ID: grantID, SubjectID: coreAgentSubjectID, Capability: domain.CapabilityNetworkHTTP,
+		Scope: domain.CapabilityScope{Kind: domain.ScopeNetwork, Values: []string{"*"}}, GrantedAt: time.Now().UTC(),
+	}}))
+	return builtintools.NewWebFetch(builtintools.WebFetchConfig{Policy: policy, SubjectID: coreAgentSubjectID})
+}
+
+func newWebSearch(value config.WebSearchConfig) (*builtintools.WebSearchTool, error) {
+	provider, err := builtintools.NewSearXNGProvider(builtintools.SearXNGConfig{Endpoint: value.Endpoint})
+	if err != nil {
+		return nil, err
+	}
+	return builtintools.NewWebSearch(provider)
 }
 
 type filesystemAgentTool struct{ bridge *Bridge }
 type filesystemWriteAgentTool struct{ bridge *Bridge }
+type webFetchAgentTool struct{ tool *builtintools.WebFetchTool }
+type webSearchAgentTool struct {
+	tool         *builtintools.WebSearchTool
+	defaultLimit int
+}
+
+func (webSearchAgentTool) Descriptor() agent.ToolDescriptor {
+	definition := (&builtintools.WebSearchTool{}).Definition()
+	schema, _ := json.Marshal(definition.InputSchema)
+	return agent.ToolDescriptor{
+		Name: definition.ID, Description: definition.Description, InputSchema: schema,
+		Risk: definition.Risk, Capabilities: domain.CapabilitySet(definition.Capabilities),
+	}
+}
+
+func (adapter webSearchAgentTool) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
+	if adapter.tool == nil {
+		return agent.ToolResult{}, fmt.Errorf("web search tool is unavailable")
+	}
+	var request builtintools.WebSearchRequest
+	if err := json.Unmarshal(call.Arguments, &request); err != nil {
+		return agent.ToolResult{}, fmt.Errorf("decode web search request: %w", err)
+	}
+	if request.Limit == 0 {
+		request.Limit = adapter.defaultLimit
+	}
+	result, err := adapter.tool.Execute(ctx, request)
+	if err != nil {
+		return agent.ToolResult{}, err
+	}
+	content, err := json.Marshal(result)
+	if err != nil {
+		return agent.ToolResult{}, fmt.Errorf("encode web search result: %w", err)
+	}
+	return agent.ToolResult{Content: string(content)}, nil
+}
+
+func (webFetchAgentTool) Descriptor() agent.ToolDescriptor {
+	definition := (&builtintools.WebFetchTool{}).Definition()
+	schema, _ := json.Marshal(definition.InputSchema)
+	return agent.ToolDescriptor{
+		Name: definition.ID, Description: definition.Description, InputSchema: schema,
+		Risk: definition.Risk, Capabilities: domain.CapabilitySet(definition.Capabilities),
+	}
+}
+
+func (adapter webFetchAgentTool) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
+	if adapter.tool == nil {
+		return agent.ToolResult{}, fmt.Errorf("web fetch tool is unavailable")
+	}
+	var request builtintools.WebFetchRequest
+	if err := json.Unmarshal(call.Arguments, &request); err != nil {
+		return agent.ToolResult{}, fmt.Errorf("decode web fetch request: %w", err)
+	}
+	result, err := adapter.tool.Execute(ctx, request)
+	if err != nil {
+		return agent.ToolResult{}, err
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return agent.ToolResult{}, fmt.Errorf("encode web fetch result: %w", err)
+	}
+	return agent.ToolResult{Content: string(encoded)}, nil
+}
 
 func (filesystemWriteAgentTool) Descriptor() agent.ToolDescriptor {
 	definition := (&builtintools.WriteFilesystemTool{}).Definition()

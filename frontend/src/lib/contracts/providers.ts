@@ -25,6 +25,13 @@ export interface ProviderSettings {
   streamResponses: boolean
 }
 
+export interface WebSearchSettings {
+  enabled: boolean
+  provider: 'searxng'
+  endpoint: string
+  defaultResultLimit: number
+}
+
 export interface CodexAccount {
   connected: boolean
   email?: string

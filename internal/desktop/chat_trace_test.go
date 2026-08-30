@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,7 +114,7 @@ func TestRunTraceViewRestoresRedactedToolHistory(t *testing.T) {
 	}
 }
 
-func TestListChatToolsAlwaysOffersFilesystemPermissionFlow(t *testing.T) {
+func TestListChatToolsAlwaysOffersBuiltInReadTools(t *testing.T) {
 	bridge := &Bridge{config: config.Config{}}
 	withoutRoots, err := bridge.ListChatTools()
 	if err != nil {
@@ -121,6 +122,23 @@ func TestListChatToolsAlwaysOffersFilesystemPermissionFlow(t *testing.T) {
 	}
 	if !hasTool(withoutRoots, builtintools.FilesystemReadToolID) || !hasTool(withoutRoots, builtintools.FilesystemWriteToolID) {
 		t.Fatalf("filesystem tools must be discoverable so they can request access: %#v", withoutRoots)
+	}
+	if !hasTool(withoutRoots, builtintools.WebFetchToolID) {
+		t.Fatalf("public web fetch must be available without a filesystem grant: %#v", withoutRoots)
+	}
+	if !hasTool(withoutRoots, delegationToolID) || !hasTool(withoutRoots, peerDialogueToolID) {
+		t.Fatalf("per-run agent tools must remain visible in the chat tool list: %#v", withoutRoots)
+	}
+	if hasTool(withoutRoots, builtintools.WebSearchToolID) {
+		t.Fatalf("web search must remain unavailable until an endpoint is configured: %#v", withoutRoots)
+	}
+	bridge.config.WebSearch = config.WebSearchConfig{Enabled: true, Provider: "searxng", Endpoint: "https://search.example.com", DefaultResultLimit: 5}
+	withSearch, err := bridge.ListChatTools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasTool(withSearch, builtintools.WebSearchToolID) {
+		t.Fatalf("configured web search is missing: %#v", withSearch)
 	}
 
 	bridge.config.AllowedDirectories = []string{t.TempDir()}
@@ -130,6 +148,24 @@ func TestListChatToolsAlwaysOffersFilesystemPermissionFlow(t *testing.T) {
 	}
 	if !hasTool(withRoots, builtintools.FilesystemReadToolID) || !hasTool(withRoots, builtintools.FilesystemWriteToolID) {
 		t.Fatalf("filesystem tools missing: %#v", withRoots)
+	}
+}
+
+func TestWebFetchTraceRedactsURLQueryValues(t *testing.T) {
+	arguments := json.RawMessage(`{"url":"https://example.com/article?token=private-token&q=secret-search#fragment","max_bytes":4096}`)
+	redacted := redactedToolArguments(builtintools.WebFetchToolID, arguments, 4096)
+	if strings.Contains(redacted, "private-token") || strings.Contains(redacted, "secret-search") || strings.Contains(redacted, "fragment") {
+		t.Fatalf("web fetch trace leaked query data: %s", redacted)
+	}
+	if !strings.Contains(redacted, "example.com/article") || !strings.Contains(redacted, "token") || !strings.Contains(redacted, "q") {
+		t.Fatalf("web fetch trace lost useful target metadata: %s", redacted)
+	}
+}
+
+func TestWebSearchTraceRedactsQuery(t *testing.T) {
+	redacted := redactedToolArguments(builtintools.WebSearchToolID, json.RawMessage(`{"query":"private question","limit":3,"language":"ru"}`), 4096)
+	if strings.Contains(redacted, "private question") || !strings.Contains(redacted, "redacted 16 chars") || !strings.Contains(redacted, `"limit":3`) {
+		t.Fatalf("web search trace redaction = %s", redacted)
 	}
 }
 

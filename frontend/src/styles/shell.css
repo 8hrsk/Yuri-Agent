@@ -18,6 +18,101 @@
   padding: 25px 15px 17px;
 }
 
+/*
+ * Icon-only rail. Applied from a class rather than a media query so that the
+ * owner's toggle and a window too narrow for the labels reach the same layout
+ * through one code path (useSidebarCollapse owns which of the two it is).
+ *
+ * The width change is deliberately not transitioned. The labels leave the flow
+ * the instant the class flips, so an animated width spends its whole duration
+ * showing full-width text over a rail too narrow to hold it -- and the rail
+ * cannot clip the overflow, because the agent roster popover has to escape it.
+ */
+.sidebar--collapsed {
+  width: 76px;
+  flex: 0 0 76px;
+  padding: 25px 9px 17px;
+}
+
+.sidebar--collapsed .brand-copy,
+.sidebar--collapsed .brand-version,
+.sidebar--collapsed .profile-copy,
+.sidebar--collapsed .profile-status,
+.sidebar--collapsed .sidebar__profile-chevron,
+.sidebar--collapsed .nav-group__label,
+.sidebar--collapsed .nav-item__copy,
+.sidebar--collapsed .nav-item__active-dot,
+.sidebar--collapsed .sidebar__footer-copy,
+.sidebar--collapsed .sidebar__footer .connection-badge span:last-child {
+  display: none;
+}
+
+.sidebar--collapsed .sidebar__brand {
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 0 22px;
+}
+
+.sidebar--collapsed .sidebar__agent-picker {
+  margin: 0 0 22px;
+}
+
+.sidebar--collapsed .sidebar__profile {
+  justify-content: center;
+  padding: 8px 0;
+}
+
+/*
+ * The roster popover is anchored to a 58px-wide trigger, so it has to break out
+ * of the rail instead of inheriting its width -- otherwise agent names collapse
+ * to one character each and switching agents becomes guesswork.
+ */
+.sidebar--collapsed .sidebar__agent-menu {
+  right: auto;
+  left: 0;
+  width: 232px;
+}
+
+.sidebar--collapsed .sidebar__nav {
+  gap: 22px;
+}
+
+.sidebar--collapsed .nav-item {
+  justify-content: center;
+  padding: 7px;
+}
+
+.sidebar--collapsed .nav-item__icon {
+  width: 34px;
+  height: 34px;
+  flex-basis: 34px;
+}
+
+.sidebar--collapsed .sidebar__footer {
+  justify-items: center;
+  padding: 15px 0 0;
+}
+
+.sidebar__collapse {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #6d6b80;
+  cursor: pointer;
+  background: transparent;
+  transition: border-color 160ms ease, color 160ms ease;
+}
+
+.sidebar__collapse:hover {
+  border-color: var(--line);
+  color: var(--accent-light);
+}
+
 .sidebar::after {
   position: absolute;
   right: -1px;

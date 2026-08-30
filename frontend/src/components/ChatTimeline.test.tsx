@@ -55,6 +55,17 @@ function traceWith(toolCall: ToolCall): RunTrace {
 }
 
 describe('a collapsed execution trace renders nothing (H-18/M-40)', () => {
+  it.each([
+    ['web.fetch', 'Чтение веб-страницы'],
+    ['agent.delegate', 'Субагент'],
+  ])('names the %s call while the trace remains collapsed', (name, label) => {
+    const { toolCall } = spyingToolCall()
+    render(<ExecutionTrace trace={traceWith({ ...toolCall, name, label })} />)
+
+    expect(screen.getByText(label)).toBeInTheDocument()
+    expect(document.querySelector('.run-trace__body')).toBeNull()
+  })
+
   it('does not serialize tool arguments until the block is opened', async () => {
     const user = userEvent.setup()
     const { serialized, toolCall } = spyingToolCall()
@@ -73,7 +84,7 @@ describe('a collapsed execution trace renders nothing (H-18/M-40)', () => {
     // once — the memo keeps a re-render from serializing them again.
     expect(document.querySelector('.run-trace__body')).not.toBeNull()
     expect(screen.getByText('Планирую')).toBeInTheDocument()
-    expect(screen.getByText('Записать файл')).toBeInTheDocument()
+    expect(screen.getAllByText('Записать файл')).toHaveLength(2)
     const payload = document.querySelector('.tool-card__payload code')
     expect(payload?.textContent).toBe(JSON.stringify({ path: '/Users/dev/notes.md', contents: 'полное содержимое файла' }, null, 2))
     expect(serialized).toHaveBeenCalledTimes(1)
@@ -99,7 +110,7 @@ describe('a collapsed execution trace renders nothing (H-18/M-40)', () => {
       steps: trace.steps.map((step) => step.kind === 'tool' ? { ...step, toolCall: { ...step.toolCall } } : { ...step }),
     }} />)
 
-    expect(screen.getByText('Записать файл')).toBeInTheDocument()
+    expect(screen.getAllByText('Записать файл')).toHaveLength(2)
     expect(serialized).toHaveBeenCalledTimes(1)
   })
 
@@ -109,10 +120,10 @@ describe('a collapsed execution trace renders nothing (H-18/M-40)', () => {
     render(<ExecutionTrace trace={traceWith(toolCall)} />)
 
     await user.click(screen.getByText('Выполнение'))
-    expect(screen.getByText('Записать файл')).toBeInTheDocument()
+    expect(screen.getAllByText('Записать файл')).toHaveLength(2)
 
     await user.click(screen.getByText('Выполнение'))
-    expect(screen.queryByText('Записать файл')).not.toBeInTheDocument()
+    expect(screen.getByText('Записать файл')).toBeInTheDocument()
     expect(document.querySelector('.run-trace__body')).toBeNull()
     expect(document.querySelector('details')).not.toHaveAttribute('open')
   })

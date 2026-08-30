@@ -18,6 +18,12 @@ export type PersonaRelationshipSection = 'personality' | 'relationship'
 
 type PersonaRelationshipViewProps = {
   section: PersonaRelationshipSection
+  /**
+   * The two sections are two shell destinations. The in-view tabs move the
+   * whole shell rather than swapping content behind a nav rail that still
+   * highlights the other entry.
+   */
+  onSelectSection?: (section: PersonaRelationshipSection) => void
 }
 
 type Feedback = { kind: 'success' | 'error'; text: string }
@@ -126,15 +132,12 @@ function SnapshotHeader({ snapshot, busy, onEvolution }: { snapshot: Personality
   </section>
 }
 
-export function PersonaRelationshipView({ section }: PersonaRelationshipViewProps) {
+export function PersonaRelationshipView({ section, onSelectSection }: PersonaRelationshipViewProps) {
   const client = useMemo(() => createYuriClient(), [])
-  const [activeSection, setActiveSection] = useState<PersonaRelationshipSection>(section)
   const [snapshot, setSnapshot] = useState<PersonalitySnapshot>(() => createStarterPersonalitySnapshot())
   const [busy, setBusy] = useState<BusyAction>('loading')
   const [error, setError] = useState<string>()
   const [feedback, setFeedback] = useState<Feedback>()
-
-  useEffect(() => setActiveSection(section), [section])
 
   const load = useCallback(async () => {
     setBusy('loading')
@@ -212,49 +215,84 @@ export function PersonaRelationshipView({ section }: PersonaRelationshipViewProp
   const opinions = snapshot.opinions.length > 0 ? snapshot.opinions : snapshot.relationship.opinions
   const loading = busy === 'loading'
 
+  const relationship = section === 'relationship'
+
   return <div className="persona-view">
     <div className="ambient-glow ambient-glow--one" />
     <div className="ambient-glow ambient-glow--two" />
-    <header className="persona-view__hero"><div><span className="welcome-card__eyebrow"><span className="eyebrow-dot" /> YURI PERSONALITY SYSTEM</span><h1>{activeSection === 'relationship' ? 'Связь' : 'Персона'}<span className="title-dot">.</span></h1><p>Версионируемая личность, субъективные выводы и affective state. Субъективное мнение Yuri всегда помечено как opinion/inference и связано с evidence.</p></div><div className="persona-view__metric"><strong>v{snapshot.currentVersion}</strong><span>текущая persona</span></div></header>
+    <header className="persona-view__hero">
+      <div>
+        <span className="welcome-card__eyebrow"><span className="eyebrow-dot" /> {relationship ? 'YURI RELATIONSHIP MODEL' : 'YURI PERSONALITY SYSTEM'}</span>
+        <h1>{relationship ? 'Связь' : 'Персона'}<span className="title-dot">.</span></h1>
+        <p>{relationship
+          ? 'Как Yuri моделирует отношения с вами: сигналы связи и субъективные выводы. Любое мнение помечено как opinion/inference и связано с evidence — оно может быть неверным.'
+          : 'Версионируемая личность в границах identity seed: bounded traits, affective state и полная история изменений с возможностью отката.'}</p>
+      </div>
+      <div className="persona-view__metric">
+        <strong>v{relationship ? snapshot.relationship.version : snapshot.currentVersion}</strong>
+        <span>{relationship ? 'версия связи' : 'текущая persona'}</span>
+      </div>
+    </header>
 
-    <div className="persona-tabs" role="tablist" aria-label="Персона и связь"><button aria-selected={activeSection === 'personality'} className={activeSection === 'personality' ? 'persona-tab persona-tab--active' : 'persona-tab'} onClick={() => setActiveSection('personality')} role="tab" type="button"><Icon name="personality" width={15} height={15} /> Personality</button><button aria-selected={activeSection === 'relationship'} className={activeSection === 'relationship' ? 'persona-tab persona-tab--active' : 'persona-tab'} onClick={() => setActiveSection('relationship')} role="tab" type="button"><Icon name="relationship" width={15} height={15} /> Relationship</button></div>
+    {/*
+      * Two shell destinations, not two panes of one page: the tabs move the
+      * nav rail with them so the highlighted entry always matches what is on
+      * screen. Without `onSelectSection` (a standalone render) they are inert
+      * labels rather than a control that lies about where the user is.
+      */}
+    <div className="persona-tabs" role="tablist" aria-label="Персона и связь">
+      <button aria-selected={!relationship} className={relationship ? 'persona-tab' : 'persona-tab persona-tab--active'} disabled={!onSelectSection} onClick={() => onSelectSection?.('personality')} role="tab" type="button"><Icon name="personality" width={15} height={15} /> Personality</button>
+      <button aria-selected={relationship} className={relationship ? 'persona-tab persona-tab--active' : 'persona-tab'} disabled={!onSelectSection} onClick={() => onSelectSection?.('relationship')} role="tab" type="button"><Icon name="relationship" width={15} height={15} /> Relationship</button>
+    </div>
 
-    {loading && <div className="persona-loading" role="status"><span className="memory-spinner" /> Загружаю состояние личности…</div>}
+    {loading && <div className="persona-loading" role="status"><span className="memory-spinner" /> {relationship ? 'Загружаю состояние связи…' : 'Загружаю состояние личности…'}</div>}
     {error && <div className="tasks-feedback tasks-feedback--error" role="alert"><Icon name="warning" width={14} height={14} /> {error}<button aria-label="Закрыть ошибку" className="icon-button icon-button--small" onClick={() => setError(undefined)} type="button"><Icon name="x" width={13} height={13} /></button></div>}
 
-    <SnapshotHeader busy={busy !== undefined} onEvolution={() => void toggleAutoEvolution()} snapshot={snapshot} />
+    {!relationship && <SnapshotHeader busy={busy !== undefined} onEvolution={() => void toggleAutoEvolution()} snapshot={snapshot} />}
 
     <div className="persona-grid">
       <main className="persona-main">
-        <section aria-labelledby="persona-traits-title" className={`persona-panel${activeSection === 'personality' ? ' persona-panel--selected' : ''}`}>
-          <div className="persona-panel__heading"><div><span className="section-heading__overline">BOUNDED TRAITS</span><h2 id="persona-traits-title">Черты характера</h2></div><span className="persona-panel__count">{snapshot.traits.length} traits · max delta protected</span></div>
-          <p className="persona-panel__lead">Диапазон каждой черты задан seed/policy и не может быть расширен моделью. Закреплённые traits не исчезают при обычной рефлексии.</p>
-          <div className="persona-traits">{snapshot.traits.map((trait) => <TraitRow busy={busy !== undefined} key={trait.id} onPin={(next) => void togglePinned(next)} trait={trait} />)}</div>
-          {snapshot.traits.length === 0 && <div className="persona-empty">Traits ещё не загружены из reflection service.</div>}
-        </section>
+        {relationship ? (
+          <>
+            <section aria-labelledby="relationship-state-title" className="persona-panel persona-relationship-panel persona-panel--selected">
+              <div className="persona-panel__heading"><div><span className="section-heading__overline">RELATIONSHIP STATE · v{snapshot.relationship.version}</span><h2 id="relationship-state-title">Сигналы связи</h2></div><Icon name="relationship" width={18} height={18} /></div>
+              <p className="persona-panel__lead">{snapshot.relationship.summary}</p>
+              <div className="relationship-signals">{snapshot.relationship.dimensions.map((dimension) => <RelationshipBar dimension={dimension} key={dimension.id} />)}</div>
+              {snapshot.relationship.dimensions.length === 0 && <div className="persona-empty">Сигналы связи ещё не рассчитаны.</div>}
+              <div className="persona-relationship-panel__meta"><span>Обновлено</span><time dateTime={snapshot.relationship.updatedAt}>{formatDate(snapshot.relationship.updatedAt)}</time></div>
+            </section>
 
-        <section aria-labelledby="persona-opinions-title" className={`persona-panel${activeSection === 'relationship' ? ' persona-panel--selected' : ''}`}>
-          <div className="persona-panel__heading"><div><span className="section-heading__overline">SUBJECTIVE MODEL</span><h2 id="persona-opinions-title">Мнение о пользователе</h2></div><span className="persona-panel__count">opinion ≠ fact</span></div>
-          <p className="persona-panel__lead">Эти выводы могут быть неверными или противоречить фактам. Они не переписывают memory и не получают authority над policy.</p>
-          <div className="persona-opinions">{opinions.map((opinion) => <OpinionCard key={opinion.id} opinion={opinion} />)}</div>
-          {opinions.length === 0 && <div className="persona-empty">Субъективных выводов пока нет.</div>}
-        </section>
+            <section aria-labelledby="persona-opinions-title" className="persona-panel">
+              <div className="persona-panel__heading"><div><span className="section-heading__overline">SUBJECTIVE MODEL</span><h2 id="persona-opinions-title">Мнение о пользователе</h2></div><span className="persona-panel__count">opinion ≠ fact</span></div>
+              <p className="persona-panel__lead">Эти выводы могут быть неверными или противоречить фактам. Они не переписывают memory и не получают authority над policy.</p>
+              <div className="persona-opinions">{opinions.map((opinion) => <OpinionCard key={opinion.id} opinion={opinion} />)}</div>
+              {opinions.length === 0 && <div className="persona-empty">Субъективных выводов пока нет.</div>}
+            </section>
+          </>
+        ) : (
+          <>
+            <section aria-labelledby="persona-traits-title" className="persona-panel persona-panel--selected">
+              <div className="persona-panel__heading"><div><span className="section-heading__overline">BOUNDED TRAITS</span><h2 id="persona-traits-title">Черты характера</h2></div><span className="persona-panel__count">{snapshot.traits.length} traits · max delta protected</span></div>
+              <p className="persona-panel__lead">Диапазон каждой черты задан seed/policy и не может быть расширен моделью. Закреплённые traits не исчезают при обычной рефлексии.</p>
+              <div className="persona-traits">{snapshot.traits.map((trait) => <TraitRow busy={busy !== undefined} key={trait.id} onPin={(next) => void togglePinned(next)} trait={trait} />)}</div>
+              {snapshot.traits.length === 0 && <div className="persona-empty">Traits ещё не загружены из reflection service.</div>}
+            </section>
 
-        <section aria-labelledby="persona-history-title" className="persona-panel persona-history-panel">
-          <div className="persona-panel__heading"><div><span className="section-heading__overline">VERSION HISTORY</span><h2 id="persona-history-title">История и причины</h2></div><button aria-label="Обновить историю persona" className="icon-button" disabled={busy !== undefined} onClick={() => void load()} type="button"><Icon name="refresh" width={15} height={15} /></button></div>
-          <p className="persona-panel__lead">Rollback создаёт наблюдаемое изменение и не удаляет исходные версии. Выберите версию, если нужно вернуть прежний bounded prompt stack.</p>
-          <div className="persona-history">{versions.map((version) => <VersionItem busy={busy !== undefined} currentVersion={snapshot.currentVersion} key={`${version.id}-${version.version}`} onRollback={(next) => void rollback(next)} version={version} />)}</div>
-        </section>
+            <section aria-labelledby="persona-history-title" className="persona-panel persona-history-panel">
+              <div className="persona-panel__heading"><div><span className="section-heading__overline">VERSION HISTORY</span><h2 id="persona-history-title">История и причины</h2></div><button aria-label="Обновить историю persona" className="icon-button" disabled={busy !== undefined} onClick={() => void load()} type="button"><Icon name="refresh" width={15} height={15} /></button></div>
+              <p className="persona-panel__lead">Rollback создаёт наблюдаемое изменение и не удаляет исходные версии. Выберите версию, если нужно вернуть прежний bounded prompt stack.</p>
+              <div className="persona-history">{versions.map((version) => <VersionItem busy={busy !== undefined} currentVersion={snapshot.currentVersion} key={`${version.id}-${version.version}`} onRollback={(next) => void rollback(next)} version={version} />)}</div>
+            </section>
+          </>
+        )}
       </main>
 
       <aside className="persona-side">
-        <section aria-labelledby="relationship-state-title" className="persona-panel persona-relationship-panel"><div className="persona-panel__heading"><div><span className="section-heading__overline">RELATIONSHIP STATE · v{snapshot.relationship.version}</span><h2 id="relationship-state-title">Связь</h2></div><Icon name="relationship" width={18} height={18} /></div><p className="persona-panel__lead">{snapshot.relationship.summary}</p><div className="relationship-signals">{snapshot.relationship.dimensions.map((dimension) => <RelationshipBar dimension={dimension} key={dimension.id} />)}</div><div className="persona-relationship-panel__meta"><span>Обновлено</span><time dateTime={snapshot.relationship.updatedAt}>{formatDate(snapshot.relationship.updatedAt)}</time></div></section>
-
         <section aria-labelledby="affect-dimensions-title" className="persona-panel"><div className="persona-panel__heading"><div><span className="section-heading__overline">AFFECT DIMENSIONS</span><h2 id="affect-dimensions-title">Сигналы affect</h2></div><span className="persona-panel__count">intensity</span></div><div className="persona-affect">{snapshot.affect.dimensions.map((dimension) => <AffectBar dimension={dimension} key={dimension.id} />)}</div></section>
 
         <section className="persona-safety-note"><span className="persona-safety-note__icon"><Icon name="shield" width={16} height={16} /></span><div><strong>Security boundary</strong><p>Негативный affect, ревность и tsundere-поведение не могут выполнять месть, саботаж, угрозы, шантаж или скрывать данные. Все внешние действия проходят обычный policy/approval flow.</p></div></section>
 
-        <section aria-labelledby="persona-controls-title" className="persona-panel persona-controls"><div className="persona-panel__heading"><div><span className="section-heading__overline">RECOVERY</span><h2 id="persona-controls-title">Управление состоянием</h2></div><Icon name="refresh" width={17} height={17} /></div><p>Сброс возвращает исходный identity seed. Запись истории и evidence остаётся доступной для проверки.</p><button className="button button--quiet" disabled={busy !== undefined} onClick={() => void reset()} type="button"><Icon name="refresh" width={13} height={13} /> Сбросить к identity seed</button><span className="persona-controls__mode"><i /> {client.mode === 'wails' ? 'Wails backend' : 'Локальный preview'}</span></section>
+        {!relationship && <section aria-labelledby="persona-controls-title" className="persona-panel persona-controls"><div className="persona-panel__heading"><div><span className="section-heading__overline">RECOVERY</span><h2 id="persona-controls-title">Управление состоянием</h2></div><Icon name="refresh" width={17} height={17} /></div><p>Сброс возвращает исходный identity seed. Запись истории и evidence остаётся доступной для проверки.</p><button className="button button--quiet" disabled={busy !== undefined} onClick={() => void reset()} type="button"><Icon name="refresh" width={13} height={13} /> Сбросить к identity seed</button><span className="persona-controls__mode"><i /> {client.mode === 'wails' ? 'Wails backend' : 'Локальный preview'}</span></section>}
       </aside>
     </div>
 

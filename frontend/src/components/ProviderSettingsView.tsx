@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
-import type { CodexAccount, CodexModel, ProviderSettings, UsageLimits } from '../lib/contracts'
+import type { CodexAccount, CodexModel, ProviderSettings, UsageLimits, WebSearchSettings } from '../lib/contracts'
 import { EncryptedBackupCard } from './EncryptedBackupCard'
 import { Icon } from './Icon'
 
@@ -16,6 +16,13 @@ const initialSettings: ProviderSettings = {
   apiKeyConfigured: false,
   timeoutSeconds: 90,
   streamResponses: true,
+}
+
+const initialWebSearch: WebSearchSettings = {
+  enabled: false,
+  provider: 'searxng',
+  endpoint: '',
+  defaultResultLimit: 5,
 }
 
 function UsageMeter({ limits }: { limits: UsageLimits }) {
@@ -42,24 +49,27 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
   const [settings, setSettings] = useState<ProviderSettings>(initialSettings)
   const [apiKey, setApiKey] = useState('')
   const [allowedDirectories, setAllowedDirectories] = useState('')
+  const [webSearch, setWebSearch] = useState<WebSearchSettings>(initialWebSearch)
   const [codex, setCodex] = useState<CodexAccount>({ connected: false })
   const [codexModels, setCodexModels] = useState<CodexModel[]>([])
   const [limits, setLimits] = useState<UsageLimits>()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
+  const [testingSearch, setTestingSearch] = useState(false)
   const [loggingIn, setLoggingIn] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
   const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; text: string }>()
 
   useEffect(() => {
     let mounted = true
-    void Promise.all([client.getProviderSnapshot(), client.getAllowedDirectories()]).then(([snapshot, directories]) => {
+    void Promise.all([client.getProviderSnapshot(), client.getAllowedDirectories(), client.getWebSearchSettings()]).then(([snapshot, directories, search]) => {
       if (!mounted) return
       setSettings(snapshot.settings)
       setCodex(snapshot.codex)
       setLimits(snapshot.codex.limits)
       setAllowedDirectories(directories.join('\n'))
+      setWebSearch(search)
       setLoading(false)
       if (snapshot.codex.connected) void client.getCodexModels().then(setCodexModels).catch(() => setCodexModels([]))
     }).catch(() => {
@@ -82,6 +92,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
     try {
       await client.saveProviderSettings(settings, apiKey)
       await client.saveAllowedDirectories(allowedDirectories.split('\n').map((item) => item.trim()).filter(Boolean))
+      await client.saveWebSearchSettings(webSearch)
       setSettings((current) => ({ ...current, apiKeyConfigured: current.apiKeyConfigured || Boolean(apiKey.trim()) }))
       setApiKey('')
       setFeedback({ kind: 'success', text: 'Настройки сохранены. Секрет передан только в защищённый backend-вызов.' })
@@ -102,6 +113,19 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
       setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Проверка завершилась ошибкой.' })
     } finally {
       setTesting(false)
+    }
+  }
+
+  const handleTestSearch = async () => {
+    setTestingSearch(true)
+    setFeedback(undefined)
+    try {
+      const result = await client.testWebSearchSettings(webSearch)
+      setFeedback({ kind: result.ok ? 'success' : 'error', text: result.message })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Проверка SearXNG завершилась ошибкой.' })
+    } finally {
+      setTestingSearch(false)
     }
   }
 
@@ -222,6 +246,22 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
                 />
               </label>
               <p className="settings-footnote"><Icon name="lock" width={13} height={13} /> В этих корнях Yuri может читать файлы. Каждая операция <code>filesystem.write</code> показывает точный путь и требует отдельного подтверждения; удаление и symlink escape запрещены.</p>
+            </div>
+            <div className="settings-form settings-form--permissions">
+              <label className="toggle-label">
+                <span>Поиск в интернете <small>· SearXNG JSON API</small></span>
+                <button aria-checked={webSearch.enabled} className={`toggle${webSearch.enabled ? ' toggle--on' : ''}`} onClick={() => setWebSearch((current) => ({ ...current, enabled: !current.enabled }))} role="switch" type="button"><i /></button>
+              </label>
+              <label>
+                <span>SearXNG endpoint</span>
+                <input disabled={!webSearch.enabled} onChange={(event) => setWebSearch((current) => ({ ...current, endpoint: event.target.value }))} placeholder="https://search.example.com" spellCheck={false} type="url" value={webSearch.endpoint} />
+              </label>
+              <label>
+                <span>Результатов по умолчанию <small>· от 3 до 10</small></span>
+                <input disabled={!webSearch.enabled} max={10} min={3} onChange={(event) => setWebSearch((current) => ({ ...current, defaultResultLimit: Math.max(3, Math.min(10, Number(event.target.value) || 5)) }))} type="number" value={webSearch.defaultResultLimit} />
+              </label>
+              <button className="button button--quiet" disabled={!webSearch.enabled || testingSearch || !webSearch.endpoint.trim()} onClick={() => void handleTestSearch()} type="button">{testingSearch ? 'Проверяю SearXNG…' : 'Проверить поиск'}</button>
+              <p className="settings-footnote"><Icon name="search" width={13} height={13} /> <code>web.search</code> возвращает только заголовки, ссылки и snippets. Чтение выбранной страницы выполняется отдельным вызовом <code>web.fetch</code>.</p>
             </div>
             <div className="settings-card__actions"><button className="button button--quiet" disabled={testing || settings.kind === 'antigravity'} onClick={() => void handleTest()} type="button">{testing ? 'Проверяю…' : 'Проверить соединение'}</button><button className="button button--accent" disabled={saving || settings.kind === 'antigravity'} onClick={() => void handleSave()} type="button">{saving ? 'Сохраняю…' : 'Сохранить'}</button></div>
           </section>

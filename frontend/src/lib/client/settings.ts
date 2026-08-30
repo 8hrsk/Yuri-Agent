@@ -5,6 +5,7 @@ import type {
   ProactivitySettings,
   ProviderSettings,
   UsageLimits,
+  WebSearchSettings,
 } from '../contracts'
 import { normalizeBoolean, optionalNumber, optionalString } from './primitives'
 import type { UnknownRecord } from './primitives'
@@ -41,6 +42,25 @@ const defaultProactivitySettings: ProactivitySettings = {
   dailyLimit: 5,
   cooldownMinutes: 30,
   allowLocalNotifications: true,
+}
+
+const defaultWebSearchSettings: WebSearchSettings = {
+  enabled: false,
+  provider: 'searxng',
+  endpoint: '',
+  defaultResultLimit: 5,
+}
+
+function normalizeWebSearchSettings(value: unknown): WebSearchSettings {
+  if (!value || typeof value !== 'object') return { ...defaultWebSearchSettings }
+  const source = value as UnknownRecord
+  const limit = optionalNumber(source, 'defaultResultLimit', 'default_result_limit')
+  return {
+    enabled: normalizeBoolean(source.enabled, false),
+    provider: 'searxng',
+    endpoint: optionalString(source, 'endpoint', 'baseUrl', 'base_url') ?? '',
+    defaultResultLimit: Math.max(3, Math.min(10, Math.round(limit ?? 5))),
+  }
 }
 
 function normalizeEncryptedBackup(value: unknown): EncryptedBackupInfo | undefined {
@@ -163,11 +183,13 @@ export {
   defaultLimits,
   defaultOnboardingState,
   defaultProactivitySettings,
+  defaultWebSearchSettings,
   defaultSettings,
   normalizeEncryptedBackup,
   normalizeOnboardingResult,
   normalizeOnboardingState,
   normalizeProactivitySettings,
+  normalizeWebSearchSettings,
   onboardingSettingsWire,
   proactivityWire,
 }

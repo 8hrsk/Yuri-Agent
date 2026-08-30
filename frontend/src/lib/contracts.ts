@@ -112,6 +112,7 @@ export type {
   OnboardingState,
   OnboardingResult,
   ProviderTestResult,
+  WebSearchSettings,
 } from './contracts/providers'
 export type {
   EncryptedBackupInput,

@@ -62,6 +62,15 @@ function traceStatusCopy(trace: RunTrace): string {
   return latestStatus ? runStatusLabel(latestStatus.status) : 'Выполняется'
 }
 
+function traceToolCopy(trace: RunTrace): string {
+  const labels = trace.steps
+    .filter((step): step is Extract<RunTraceStep, { kind: 'tool' }> => step.kind === 'tool')
+    .map((step) => step.toolCall.label || step.toolCall.name)
+    .filter((label, index, all) => all.indexOf(label) === index)
+  if (labels.length === 0) return 'Обработка запроса'
+  return labels.join(' · ')
+}
+
 function traceStepLabel(step: RunTraceStep): string {
   switch (step.kind) {
     case 'thinking': return step.label
@@ -119,13 +128,14 @@ export const ExecutionTrace = memo(function ExecutionTrace({ trace }: { trace: R
   const toolCount = trace.steps.filter((step) => step.kind === 'tool').length
   const waiting = trace.status === 'waiting_approval'
   const thinkingOnly = toolCount === 0 && trace.steps.every((step) => step.kind === 'thinking')
+  const summary = traceToolCopy(trace)
   return (
     <details className={`run-trace run-trace--${trace.status}`} open={open}>
       <summary className="run-trace__summary" onClick={toggle}>
         <span className="run-trace__mark"><Icon name={waiting ? 'shield' : 'activity'} width={14} height={14} /></span>
         <span className="run-trace__heading">
           <strong>{thinkingOnly ? 'Thinking' : 'Выполнение'}</strong>
-          <small>{thinkingOnly ? 'Обработка запроса' : `${toolCount} ${toolCount === 1 ? 'tool-вызов' : 'tool-вызова'}`}</small>
+          <small>{summary}</small>
         </span>
         <span className="run-trace__status">{traceStatusCopy(trace)}</span>
         <Icon name="chevron-right" width={14} height={14} />

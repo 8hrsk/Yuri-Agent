@@ -30,6 +30,7 @@ import type {
   ProviderSnapshot,
   ProviderTestResult,
   UsageLimits,
+  WebSearchSettings,
 } from './providers'
 
 export interface YuriClient {
@@ -58,6 +59,9 @@ export interface YuriClient {
   openLocalPath(path: string): Promise<void>
   getProviderSnapshot(): Promise<ProviderSnapshot>
   saveProviderSettings(settings: ProviderSettings, apiKey?: string): Promise<void>
+  getWebSearchSettings(): Promise<WebSearchSettings>
+  saveWebSearchSettings(settings: WebSearchSettings): Promise<void>
+  testWebSearchSettings(settings: WebSearchSettings): Promise<ProviderTestResult>
   testProvider(settings: ProviderSettings): Promise<ProviderTestResult>
   getOnboardingState(): Promise<OnboardingState>
   completeOnboarding(settings: ProviderSettings, apiKey?: string): Promise<OnboardingResult>

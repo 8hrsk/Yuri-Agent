@@ -407,49 +407,13 @@
   50% { opacity: 1; transform: scale(1.05); }
 }
 
+/*
+ * The rail's own narrow-window collapse used to live here. It is now the
+ * `.sidebar--collapsed` class in shell.css, driven by useSidebarCollapse, so
+ * that the same layout serves both the width breakpoint and the owner's
+ * toggle instead of two rule sets drifting apart.
+ */
 @media (max-width: 820px) {
-  .sidebar {
-    width: 74px;
-    flex-basis: 74px;
-    padding: 20px 9px 14px;
-  }
-
-  .sidebar__brand {
-    justify-content: center;
-    padding: 0 0 22px;
-  }
-
-  .brand-copy,
-  .brand-version,
-  .sidebar__agent-picker,
-  .sidebar__profile,
-  .nav-group__label,
-  .nav-item__copy,
-  .nav-item__active-dot,
-  .sidebar__footer-copy,
-  .sidebar__footer .connection-badge span:last-child {
-    display: none;
-  }
-
-  .sidebar__nav {
-    gap: 24px;
-  }
-
-  .nav-item {
-    justify-content: center;
-    padding: 7px;
-  }
-
-  .nav-item__icon {
-    width: 35px;
-    height: 35px;
-  }
-
-  .sidebar__footer {
-    justify-items: center;
-    padding: 15px 0 0;
-  }
-
   .topbar {
     padding: 0 22px;
   }

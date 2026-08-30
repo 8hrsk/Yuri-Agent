@@ -16,6 +16,7 @@ import { TasksView } from './components/TasksView'
 import { Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
 import { useBackendConnection } from './hooks/useBackendConnection'
+import { useSidebarCollapse } from './hooks/useSidebarCollapse'
 import { defaultAgentDraft } from './lib/agents'
 import { createYuriClient } from './lib/client'
 import type { AgentProfile, AgentProfileInput } from './lib/contracts'
@@ -37,6 +38,7 @@ function App() {
   const [agentBusy, setAgentBusy] = useState(false)
   const [agentError, setAgentError] = useState<string>()
   const backend = useBackendConnection()
+  const sidebar = useSidebarCollapse()
   const activeItem = useMemo(() => navItems.find((item) => item.id === activeId) ?? navItems[0], [activeId])
 
   useEffect(() => {
@@ -125,10 +127,12 @@ function App() {
         agentError={agentError}
         agents={agents}
         agentBusy={agentBusy}
+        collapsed={sidebar.collapsed}
         connectionStatus={backend.status}
         onCreateAgent={openAgentForm}
         onNavigate={setActiveId}
         onSelectAgent={(agentId) => void handleSelectAgent(agentId)}
+        onToggleCollapsed={sidebar.toggle}
       />
       <main className="main-panel">
         <Topbar
@@ -170,7 +174,7 @@ function App() {
               ) : activeId === 'collaboration' ? (
                 <CollaborationView key={activeAgent?.id ?? 'no-active-agent'} activeAgentId={activeAgent?.id} />
               ) : activeId === 'relationship' || activeId === 'personality' ? (
-                <PersonaRelationshipView key={`${activeId}:${activeAgent?.id ?? 'no-active-agent'}`} section={activeId} />
+                <PersonaRelationshipView key={activeAgent?.id ?? 'no-active-agent'} onSelectSection={setActiveId} section={activeId} />
               ) : activeId === 'plugins' ? (
                 <PluginView />
               ) : activeId === 'settings' ? (

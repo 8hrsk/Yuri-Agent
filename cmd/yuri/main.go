@@ -7,8 +7,11 @@ import (
 	"log"
 
 	"github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/menu"
+	"github.com/wailsapp/wails/v2/pkg/menu/keys"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -21,6 +24,29 @@ var uiSmokeOnboardingScript string
 //go:embed ui_smoke_voice.js
 var uiSmokeVoiceScript string
 
+// applicationMenu keeps the standard macOS App and Edit menus (without one the
+// window has no Cut/Copy/Paste shortcuts at all) and adds the View entry that
+// carries the ⌃⌘F fullscreen accelerator.
+func applicationMenu() *menu.Menu {
+	view := menu.NewMenu()
+	view.AddText("Полноэкранный режим", keys.Combo("f", keys.CmdOrCtrlKey, keys.ControlKey), func(_ *menu.CallbackData) {
+		if fullscreenContext == nil {
+			return
+		}
+		if wailsruntime.WindowIsFullscreen(fullscreenContext) {
+			wailsruntime.WindowUnfullscreen(fullscreenContext)
+			return
+		}
+		wailsruntime.WindowFullscreen(fullscreenContext)
+	})
+	return menu.NewMenuFromItems(menu.AppMenu(), menu.EditMenu(), menu.SubMenu("Вид", view), menu.WindowMenu())
+}
+
+// fullscreenContext is the Wails runtime context the menu callback needs. The
+// menu is built before Wails starts, so the context can only be captured once
+// startup hands it over.
+var fullscreenContext context.Context
+
 func main() {
 	launchSmoke, err := launchSmokeOptionsFromEnvironment()
 	if err != nil {
@@ -30,20 +56,35 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	startup := func(ctx context.Context) {
+		fullscreenContext = ctx
+		bridge.Startup(ctx)
+	}
 	app := &options.App{
 		Title:     "Yuri",
 		Width:     1280,
 		Height:    800,
-		MinWidth:  960,
-		MinHeight: 640,
+		MinWidth:  820,
+		MinHeight: 600,
 		// Keep the local worker alive when the owner closes the window. A real
 		// application quit still runs Shutdown and releases all durable leases.
 		HideWindowOnClose: true,
 		BackgroundColour:  &options.RGBA{R: 15, G: 13, B: 24, A: 1},
 		AssetServer:       &assetserver.Options{Assets: assets},
-		OnStartup:         bridge.Startup,
+		OnStartup:         startup,
 		OnShutdown:        bridge.Shutdown,
 		Bind:              []interface{}{bridge},
+		Menu:              applicationMenu(),
+		Mac: &mac.Options{
+			// Wails only reads the zoom preference from Mac options: leaving
+			// this struct nil left `zoomable` false, which disables the green
+			// window button and with it the whole native fullscreen path.
+			DisableZoom: false,
+			// Escape denies a pending approval (ApprovalDialog). In fullscreen
+			// the system would otherwise swallow that key to leave fullscreen,
+			// so a refusal would silently turn into a window state change.
+			DisableEscapeExitsFullscreen: true,
+		},
 	}
 	var readyResult chan error
 	var uiSmokeReporter *UISmokeReporter
@@ -51,7 +92,7 @@ func main() {
 		startupComplete := make(chan struct{})
 		readyResult = make(chan error, 1)
 		app.OnStartup = func(ctx context.Context) {
-			bridge.Startup(ctx)
+			startup(ctx)
 			close(startupComplete)
 		}
 		if launchSmoke.uiFlow != "" {

@@ -2,7 +2,7 @@ export const navItems = [
   { id: 'chat', label: 'Chat', caption: 'Диалоги', icon: 'chat', group: 'workspace' },
   { id: 'tasks', label: 'Tasks', caption: 'Задачи', icon: 'tasks', group: 'workspace' },
   { id: 'memory', label: 'Memory', caption: 'Память', icon: 'memory', group: 'workspace' },
-  { id: 'collaboration', label: 'Collaboration', caption: 'Диалоги агентов', icon: 'relationship', group: 'workspace' },
+  { id: 'collaboration', label: 'Collaboration', caption: 'Диалоги агентов', icon: 'collaboration', group: 'workspace' },
   { id: 'relationship', label: 'Relationship', caption: 'Связь', icon: 'relationship', group: 'workspace' },
   { id: 'personality', label: 'Personality', caption: 'Характер', icon: 'personality', group: 'workspace' },
   { id: 'plugins', label: 'Plugins', caption: 'Расширения', icon: 'plugins', group: 'system' },

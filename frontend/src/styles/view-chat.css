@@ -12,21 +12,26 @@
   border: 0;
 }
 
+/*
+ * The chat is the workspace, not a page inside it: it fills the panel instead
+ * of sitting in a centred 1440px column with 54px gutters, which on a
+ * fullscreen window left the transcript no wider than on a laptop.
+ */
 .chat-view--workspace {
   display: grid;
-  width: min(100%, 1440px);
+  width: 100%;
   height: 100%;
   min-height: 0;
   grid-template-rows: minmax(0, 1fr) auto;
   overflow: hidden;
-  padding: clamp(24px, 3vw, 42px) clamp(18px, 3vw, 54px) 36px;
+  padding: clamp(12px, 1.4vw, 22px) clamp(12px, 1.6vw, 26px) 18px;
 }
 
 .chat-layout {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(205px, 258px) minmax(0, 1fr);
+  grid-template-columns: minmax(190px, 250px) minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -531,7 +536,7 @@
   flex-direction: column;
   gap: 17px;
   overflow-y: auto;
-  padding: 25px 24px 15px;
+  padding: 25px clamp(24px, 3vw, 48px) 15px;
   scrollbar-color: #35344a transparent;
   scrollbar-width: thin;
 }
@@ -564,14 +569,14 @@
 }
 
 .message {
-  width: min(100%, 690px);
+  width: min(100%, 820px);
   padding: 1px 0;
   animation: message-in 180ms ease both;
 }
 
 .message--user {
   align-self: flex-end;
-  width: min(85%, 550px);
+  width: min(85%, 640px);
   padding: 12px 14px;
   border: 1px solid rgba(var(--accent-rgb), 0.11);
   border-radius: 12px 12px 3px;
@@ -847,7 +852,7 @@
 }
 
 .tool-card {
-  width: min(100%, 690px);
+  width: min(100%, 820px);
   padding: 12px 13px;
   border: 1px solid rgba(var(--accent-rgb), 0.17);
   border-radius: 11px;
@@ -984,7 +989,7 @@
 }
 
 .run-trace {
-  width: min(100%, 690px);
+  width: min(100%, 820px);
   align-self: flex-start;
   border: 1px solid rgba(var(--accent-rgb), 0.15);
   border-radius: 11px;

@@ -22,6 +22,8 @@ Engineering foundation, conversational vertical slice, storage/memory, plugin ru
 - Antigravity явно остаётся недоступным с typed `unsupported_auth_mode`: Yuri не импортирует чужой OAuth/token cache и предлагает API-key fallback до появления официального integration contract;
 - agent loop с cancellation, budgets, structured tool calls и idempotency;
 - filesystem tools только внутри явно разрешённых директорий: low-risk чтение и bounded `create`/`replace` с точечным approval, атомарным commit, проверкой текущего SHA-256 и redacted audit;
+- credential-free `web.fetch` для bounded чтения публичных HTTP(S)-страниц с защитой от SSRF/DNS rebinding, блокировкой LAN/metadata targets и отдельным trace;
+- provider-independent `web.search` с первым SearXNG JSON adapter, проверкой endpoint из Settings, 3–10 нормализованными результатами и отдельным `web.fetch` для чтения выбранной страницы;
 - push-to-talk с OpenAI-compatible STT и прерываемое системное TTS;
 - offline fake-Wails smoke проверяет цепочку STT → streaming chat → системный TTS и barge-in без сети и реальных credentials;
 - Wails UI для диалогов, состояний запуска, approvals и provider settings;

@@ -12,7 +12,14 @@ type SidebarProps = {
   agents: AgentProfile[]
   agentBusy?: boolean
   agentError?: string
+  /** The rail is showing icons only: either the owner collapsed it or the window is too narrow. */
+  collapsed?: boolean
   connectionStatus: BackendStatus
+  /**
+   * Absent while the window is narrow enough that the rail has no room to
+   * expand: the toggle is hidden rather than offering a state it cannot reach.
+   */
+  onToggleCollapsed?: () => void
   onNavigate: Dispatch<SetStateAction<NavId>>
   onSelectAgent: (agentId: string) => void
   onCreateAgent: () => void
@@ -20,12 +27,12 @@ type SidebarProps = {
 
 const iconName = (name: string): IconName => name as IconName
 
-export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agentError, connectionStatus, onNavigate, onSelectAgent, onCreateAgent }: SidebarProps) {
+export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agentError, collapsed = false, connectionStatus, onToggleCollapsed, onNavigate, onSelectAgent, onCreateAgent }: SidebarProps) {
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const agentName = activeAgent?.name ?? 'Агент'
   const initial = Array.from(agentName.trim())[0]?.toLocaleUpperCase('ru-RU') ?? 'A'
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${collapsed ? ' sidebar--collapsed' : ''}`}>
       <div className="sidebar__brand">
         <div className="brand-mark" aria-hidden="true">
           <span>Y</span>
@@ -36,6 +43,18 @@ export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agen
           <span className="brand-copy__meta">Personal AI</span>
         </div>
         <span className="brand-version">0.7</span>
+        {onToggleCollapsed && (
+          <button
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? 'Развернуть боковое меню' : 'Свернуть боковое меню'}
+            className="sidebar__collapse"
+            onClick={onToggleCollapsed}
+            title={collapsed ? 'Развернуть боковое меню' : 'Свернуть боковое меню'}
+            type="button"
+          >
+            <Icon name="sidebar" width={15} height={15} />
+          </button>
+        )}
       </div>
 
       <div className="sidebar__agent-picker">
@@ -88,9 +107,11 @@ export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agen
                 return (
                   <button
                     aria-current={isActive ? 'page' : undefined}
+                    aria-label={`${item.label} · ${item.caption}`}
                     className={`nav-item${isActive ? ' nav-item--active' : ''}`}
                     key={item.id}
                     onClick={() => onNavigate(item.id)}
+                    title={collapsed ? `${item.label} · ${item.caption}` : undefined}
                     type="button"
                   >
                     <span className="nav-item__icon"><Icon name={iconName(item.icon)} /></span>

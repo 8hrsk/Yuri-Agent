@@ -95,6 +95,23 @@ func redactedToolArguments(toolID string, arguments json.RawMessage, maxBytes in
 	if toolID == peerDialogueToolID {
 		return redactedPeerDialogueArguments(arguments, maxBytes)
 	}
+	if toolID == builtintools.WebFetchToolID {
+		return builtintools.RedactedWebFetchArguments(arguments, maxBytes)
+	}
+	if toolID == builtintools.WebSearchToolID {
+		var value map[string]any
+		if json.Unmarshal(arguments, &value) != nil || value == nil {
+			return "{}"
+		}
+		if query, ok := value["query"].(string); ok {
+			value["query"] = fmt.Sprintf("[redacted %d chars]", len([]rune(query)))
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return "{}"
+		}
+		return boundedJSONObject(encoded, maxBytes)
+	}
 	if toolID != builtintools.FilesystemWriteToolID {
 		return boundedJSONObject(arguments, maxBytes)
 	}
@@ -187,6 +204,10 @@ func toolLabel(name string) string {
 		return "Работа с файлами"
 	case builtintools.FilesystemWriteToolID:
 		return "Изменение файла"
+	case builtintools.WebFetchToolID:
+		return "Чтение веб-страницы"
+	case builtintools.WebSearchToolID:
+		return "Поиск в интернете"
 	case scheduleCreateToolID:
 		return "Создание задачи"
 	case delegationToolID:

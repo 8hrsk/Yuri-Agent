@@ -39,6 +39,7 @@ type Config struct {
 	Providers          []ProviderConfig  `json:"providers,omitempty"`
 	Onboarding         OnboardingConfig  `json:"onboarding"`
 	Voice              VoiceConfig       `json:"voice,omitempty"`
+	WebSearch          WebSearchConfig   `json:"web_search,omitempty"`
 	PluginDevMode      bool              `json:"plugin_dev_mode,omitempty"`
 	Proactivity        ProactivityConfig `json:"proactivity"`
 	Persona            PersonaConfig     `json:"persona"`
@@ -85,6 +86,16 @@ type VoiceConfig struct {
 	TranscriptionModel      string `json:"transcription_model,omitempty"`
 	SpeechModel             string `json:"speech_model,omitempty"`
 	Voice                   string `json:"voice,omitempty"`
+}
+
+// WebSearchConfig selects a credential-free search adapter. Endpoint is the
+// owner-controlled base URL of a SearXNG instance; Yuri appends /search and
+// requests the documented JSON format.
+type WebSearchConfig struct {
+	Enabled            bool   `json:"enabled"`
+	Provider           string `json:"provider,omitempty"`
+	Endpoint           string `json:"endpoint,omitempty"`
+	DefaultResultLimit int    `json:"default_result_limit,omitempty"`
 }
 
 // ProactivityConfig is persisted as simple UI-facing values. Runtime policy
@@ -211,6 +222,9 @@ func Default(paths Paths) Config {
 		LogLevel:      "info",
 		DataDirectory: paths.DataDirectory,
 		Onboarding:    OnboardingConfig{},
+		WebSearch: WebSearchConfig{
+			Provider: "searxng", DefaultResultLimit: 5,
+		},
 		Proactivity: ProactivityConfig{
 			Enabled: false, QuietHoursEnabled: true, QuietHoursStart: "23:00", QuietHoursEnd: "07:00",
 			Timezone: "UTC", DailyLimit: 5, CooldownMinutes: 30, AllowLocalNotifications: true,
@@ -374,11 +388,38 @@ func (c Config) Validate() error {
 	if err := c.Proactivity.Validate(); err != nil {
 		return err
 	}
+	if err := c.WebSearch.Validate(); err != nil {
+		return err
+	}
 	if err := c.Persona.Validate(); err != nil {
 		return err
 	}
 	if err := c.Onboarding.Validate(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (c WebSearchConfig) Validate() error {
+	provider := strings.TrimSpace(c.Provider)
+	endpoint := strings.TrimSpace(c.Endpoint)
+	if !c.Enabled && endpoint == "" {
+		return nil
+	}
+	if provider == "" {
+		provider = "searxng"
+	}
+	if provider != "searxng" {
+		return fmt.Errorf("unsupported web search provider %q", c.Provider)
+	}
+	if endpoint == "" {
+		return errors.New("web search endpoint is required when enabled")
+	}
+	if err := validateRemoteURL(endpoint); err != nil {
+		return fmt.Errorf("web search endpoint: %w", err)
+	}
+	if c.DefaultResultLimit < 3 || c.DefaultResultLimit > 10 {
+		return errors.New("web search default_result_limit must be between 3 and 10")
 	}
 	return nil
 }

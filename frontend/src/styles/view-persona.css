@@ -147,6 +147,10 @@
 .persona-opinion__heading,
 .persona-version__heading,
 .persona-mood__bounds,
+/* Was missing from this list, so its own `justify-content: space-between`
+   below had nothing to act on and the three bound labels ran together into
+   "MIN 20%BOUNDED RANGEMAX 90%". */
+.persona-trait__bounds,
 .persona-relationship-panel__meta,
 .persona-affect__row > div:first-child,
 .relationship-signal > div:first-child {
@@ -336,6 +340,16 @@
   overflow: hidden;
   border-radius: 100px;
   background: rgba(255, 255, 255, 0.08);
+}
+
+/*
+ * The two tracks that carry a round position marker opt out of the shared
+ * clipping: the marker is taller than the track it sits on, so `overflow:
+ * hidden` sliced its top and bottom off and left a flat sliver on the bar.
+ */
+.persona-mood__scale,
+.persona-trait__scale {
+  overflow: visible;
 }
 
 .persona-mood__scale {

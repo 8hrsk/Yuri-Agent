@@ -397,6 +397,25 @@ describe('Yuri client contract', () => {
     }
   })
 
+  it('loads and saves the SearXNG search adapter settings through Wails', async () => {
+    const saved: unknown[] = []
+    await withWindow({
+      go: { main: { Bridge: {
+        ListConversations: () => [],
+        GetWebSearchSettings: () => ({ enabled: true, provider: 'searxng', endpoint: 'https://search.example.com', default_result_limit: 7 }),
+        SaveWebSearchSettings: (input: unknown) => { saved.push(input) },
+        TestWebSearchSettings: () => ({ ok: true, message: 'SearXNG отвечает.' }),
+      } } },
+    }, async () => {
+      const client = createYuriClient()
+      const settings = await client.getWebSearchSettings()
+      expect(settings).toEqual({ enabled: true, provider: 'searxng', endpoint: 'https://search.example.com', defaultResultLimit: 7 })
+      await client.saveWebSearchSettings({ ...settings, defaultResultLimit: 4 })
+      await expect(client.testWebSearchSettings(settings)).resolves.toEqual({ ok: true, message: 'SearXNG отвечает.' })
+      expect(saved).toEqual([{ enabled: true, provider: 'searxng', endpoint: 'https://search.example.com', defaultResultLimit: 4 }])
+    })
+  })
+
   it('preserves repeated live streaming deltas while suppressing returned replay events', async () => {
     const bus = createWailsEventBus()
     const streamed = [

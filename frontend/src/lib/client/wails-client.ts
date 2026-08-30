@@ -43,6 +43,7 @@ import type {
   Schedule,
   ScheduleInput,
   UsageLimits,
+  WebSearchSettings,
   YuriClient,
 } from '../contracts'
 import { normalizeAgentProfile } from '../agents'
@@ -70,6 +71,7 @@ import {
   normalizeOnboardingResult,
   normalizeOnboardingState,
   normalizeProactivitySettings,
+  normalizeWebSearchSettings,
   onboardingSettingsWire,
   proactivityWire,
 } from './settings'
@@ -381,6 +383,28 @@ class WailsYuriClient implements YuriClient {
       binary: 'codex',
       enabled: true,
     }])
+  }
+
+  async getWebSearchSettings(): Promise<WebSearchSettings> {
+    return normalizeWebSearchSettings(await callBridge<unknown>(['GetWebSearchSettings']))
+  }
+
+  async saveWebSearchSettings(settings: WebSearchSettings): Promise<void> {
+    await callBridge(['SaveWebSearchSettings'], [{
+      enabled: settings.enabled,
+      provider: settings.provider,
+      endpoint: settings.endpoint,
+      defaultResultLimit: settings.defaultResultLimit,
+    }])
+  }
+
+  async testWebSearchSettings(settings: WebSearchSettings): Promise<ProviderTestResult> {
+    return (await callBridge<ProviderTestResult>(['TestWebSearchSettings'], [{
+      enabled: settings.enabled,
+      provider: settings.provider,
+      endpoint: settings.endpoint,
+      defaultResultLimit: settings.defaultResultLimit,
+    }])) ?? { ok: false, message: 'Backend не вернул результат проверки SearXNG.' }
   }
 
   async testProvider(settings: ProviderSettings): Promise<ProviderTestResult> {

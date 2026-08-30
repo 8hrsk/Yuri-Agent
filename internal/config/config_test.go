@@ -68,6 +68,26 @@ func TestLoadMissingReturnsDefaults(t *testing.T) {
 	if value.Onboarding.Completed || value.Onboarding.ProviderTested {
 		t.Fatalf("clean profile onboarding = %#v, want incomplete", value.Onboarding)
 	}
+	if value.WebSearch.Provider != "searxng" || value.WebSearch.DefaultResultLimit != 5 || value.WebSearch.Enabled {
+		t.Fatalf("default web search = %#v", value.WebSearch)
+	}
+}
+
+func TestWebSearchConfigRequiresSafeEndpointWhenEnabled(t *testing.T) {
+	paths := testPaths(t)
+	value := Default(paths)
+	value.WebSearch.Enabled = true
+	if err := value.Validate(); err == nil {
+		t.Fatal("enabled web search without endpoint was accepted")
+	}
+	value.WebSearch.Endpoint = "http://search.example.com"
+	if err := value.Validate(); err == nil {
+		t.Fatal("insecure remote search endpoint was accepted")
+	}
+	value.WebSearch.Endpoint = "http://localhost:8080"
+	if err := value.Validate(); err != nil {
+		t.Fatalf("local SearXNG endpoint rejected: %v", err)
+	}
 }
 
 func TestLoadLegacyConfigDefaultsToIncompleteOnboarding(t *testing.T) {

@@ -150,6 +150,10 @@ Yuri инициирует разговор только при выполнен�
 
 Filesystem tools доступны модели даже при пустом списке разрешённых директорий, но остаются deny-by-default непосредственно перед I/O. Интерактивный run может запросить узкий доступ к канонической директории; `allow_once` действует только для ожидающего tool call, `allow_always` атомарно добавляет директорию в локальную конфигурацию, `deny` не меняет policy. Фоновый run не может самостоятельно запрашивать новый filesystem root. Повторная canonicalization и проверка symlink выполняются при фактическом I/O, а выполнение привязано к durable scope исходного approval.
 
+Встроенный `web.fetch` выполняет только credential-free `GET` одной публичной HTTP(S)-страницы. Он не использует browser cookies, proxy environment или Keychain, разрешает только стандартные порты, повторно проверяет каждый redirect и блокирует loopback, private/link-local/special-use адреса, cloud metadata и смешанные public/private DNS-ответы. DNS-адрес проверяется и закрепляется непосредственно в transport dial, чтобы не оставлять окно DNS rebinding. Ответ ограничен по времени и размеру; binary content отклоняется, HTML превращается в bounded text и остаётся недоверенным tool data. Query values URL маскируются в audit/Activity.
+
+Встроенный `web.search` реализован через provider-independent `SearchProvider`; первый адаптер использует JSON API настраиваемого владельцем SearXNG endpoint. Инструмент возвращает от 3 до 10 нормализованных результатов (`title`, `url`, `snippet`, `source`) и не читает найденные страницы автоматически: выбранный URL передаётся отдельному `web.fetch`, поэтому поиск и чтение видны как разные действия в execution trace. Поисковый запрос маскируется в audit/Activity, snippets считаются недоверенными данными. Remote endpoint обязан использовать HTTPS; HTTP разрешён только для localhost SearXNG.
+
 Политика подтверждений:
 
 - Low: чтение разрешённых локальных данных, локальный поиск — допускается без подтверждения.
@@ -464,7 +468,7 @@ MVP принимается, если:
 
 ### Этап 1. Conversational agent vertical slice
 
-Текстовый диалог, OpenAI-compatible adapter, официальный Codex App Server adapter, streaming, базовые STT/TTS, agent loop, встроенные filesystem tools для чтения и bounded `create`/`replace` с exact-path approval, approvals UI и audit.
+Текстовый диалог, OpenAI-compatible adapter, официальный Codex App Server adapter, streaming, базовые STT/TTS, agent loop, provider-independent `web.search` с первым SearXNG adapter, bounded public `web.fetch`, встроенные filesystem tools для чтения и bounded `create`/`replace` с exact-path approval, approvals UI и audit.
 
 ### Этап 2. Storage and memory
 

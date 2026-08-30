@@ -46,6 +46,7 @@ import type {
   ScheduleInput,
   ToolCall,
   UsageLimits,
+  WebSearchSettings,
   YuriClient,
 } from '../contracts'
 import { aggregateChatEvent } from '../chat-trace'
@@ -61,7 +62,7 @@ import {
 import { cloneConversation, clonePeerDialogue } from './normalize-conversation'
 import { emptyPluginInspection } from './normalize-plugins'
 import { makeId, nowIso, sleep } from './primitives'
-import { defaultLimits, defaultOnboardingState, defaultProactivitySettings, defaultSettings } from './settings'
+import { defaultLimits, defaultOnboardingState, defaultProactivitySettings, defaultSettings, defaultWebSearchSettings } from './settings'
 
 class MockYuriClient implements YuriClient {
   readonly mode = 'mock' as const
@@ -86,6 +87,7 @@ class MockYuriClient implements YuriClient {
   private activity: ActivityEvent[] = starterActivity()
   private peerDialogues: PeerDialogue[] = starterPeerDialogues()
   private proactivity: ProactivitySettings = { ...defaultProactivitySettings }
+  private webSearch: WebSearchSettings = { ...defaultWebSearchSettings }
   private personality: PersonalitySnapshot = createStarterPersonalitySnapshot()
   private readonly personalitySeed: PersonalitySnapshot = createStarterPersonalitySnapshot()
 
@@ -262,6 +264,19 @@ class MockYuriClient implements YuriClient {
       ...this.provider,
       settings: { ...settings, apiKeyConfigured: settings.apiKeyConfigured || Boolean(apiKey?.trim()) },
     }
+  }
+
+  async getWebSearchSettings(): Promise<WebSearchSettings> {
+    return { ...this.webSearch }
+  }
+
+  async saveWebSearchSettings(settings: WebSearchSettings): Promise<void> {
+    this.webSearch = { ...settings }
+  }
+
+  async testWebSearchSettings(settings: WebSearchSettings): Promise<ProviderTestResult> {
+    if (!settings.endpoint.trim()) return { ok: false, message: 'Укажите SearXNG endpoint.' }
+    return { ok: true, message: 'SearXNG отвечает; получено результатов: 3.' }
   }
 
   async testProvider(settings: ProviderSettings): Promise<ProviderTestResult> {
