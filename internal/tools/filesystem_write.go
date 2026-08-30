@@ -101,7 +101,7 @@ func (tool *WriteFilesystemTool) ResolvePath(path string) (string, error) {
 func (tool *WriteFilesystemTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		ID:          FilesystemWriteToolID,
-		Description: "Create or atomically replace one regular file inside an allowed local root. Every call requires explicit user approval.",
+		Description: "Create or atomically replace one regular file at an absolute local path. Every call requires explicit owner approval; missing directory access is requested in the same flow.",
 		Risk:        domain.RiskMedium,
 		Capabilities: []domain.Capability{
 			domain.CapabilityFilesystemWrite,
@@ -111,7 +111,7 @@ func (tool *WriteFilesystemTool) Definition() ToolDefinition {
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"operation":       map[string]any{"type": "string", "enum": []string{OperationCreate, OperationReplace}},
-				"path":            map[string]any{"type": "string", "description": "Absolute file path inside an allowed root."},
+				"path":            map[string]any{"type": "string", "description": "Absolute local file path. The application requests owner access when needed."},
 				"content":         map[string]any{"type": "string"},
 				"expected_sha256": map[string]any{"type": "string", "description": "Required for replace; SHA-256 of the current file."},
 			},

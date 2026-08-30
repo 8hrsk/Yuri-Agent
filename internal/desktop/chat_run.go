@@ -209,9 +209,9 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
 	if runKind == domain.RunKindBackground {
-		runtime.Authorizer = backgroundToolAuthorizer{}
+		runtime.Authorizer = backgroundToolAuthorizer{bridge: b}
 	} else {
-		runtime.Authorizer = desktopToolAuthorizer{}
+		runtime.Authorizer = desktopToolAuthorizer{bridge: b}
 	}
 	runtime.Approvals = desktopApprovalHandler{bridge: b}
 	emitter.tools = registry
@@ -318,8 +318,31 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if autoTitleEligible && strings.TrimSpace(titleSeed) != "" {
 		b.scheduleConversationTitle(backend, model, agentID, conversationID, titleSeed)
 	}
+	reviewContent := request.Text
+	if strings.TrimSpace(reviewContent) == "" {
+		attachmentNames := make([]string, 0, len(attachments))
+		for _, item := range attachments {
+			attachmentNames = append(attachmentNames, item.Name)
+		}
+		if len(attachmentNames) == 0 {
+			for _, message := range transcript {
+				if message.ID != payloadMessageID {
+					continue
+				}
+				for _, item := range storedAttachments(message.ProviderMeta) {
+					attachmentNames = append(attachmentNames, item.Name)
+				}
+				break
+			}
+		}
+		if len(attachmentNames) > 0 {
+			reviewContent = "Вложения: " + strings.Join(attachmentNames, ", ")
+		} else {
+			reviewContent = "Сообщение с вложением"
+		}
+	}
 	turnMessages := []memory.TranscriptMessage{
-		{ID: payloadMessageID, ConversationID: conversationID, Role: string(agent.RoleUser), Content: request.Text, CreatedAt: now},
+		{ID: payloadMessageID, ConversationID: conversationID, Role: string(agent.RoleUser), Content: reviewContent, CreatedAt: now},
 	}
 	turnMessages = append(turnMessages, assistantTurnMessages...)
 	b.reviewTurnInBackground(memoryEngine, backend, model, runKind == domain.RunKindInteractive, memory.Turn{
@@ -349,8 +372,18 @@ func (b *Bridge) CancelRun(runID string) error {
 // reach this method yet.
 func (b *Bridge) ResolveApproval(input approvalDecisionInput) error {
 	id := strings.TrimSpace(input.ApprovalID)
+	decision := strings.ToLower(strings.TrimSpace(input.Decision))
+	switch decision {
+	case "approve", "allow_once", "allow_always", "deny":
+	default:
+		return fmt.Errorf("%w: unsupported approval decision %q", domain.ErrInvalidArgument, input.Decision)
+	}
 	b.mu.Lock()
 	gate := b.approvals[id]
+	if decision == "allow_always" && gate != nil && gate.permissionRoot == "" {
+		b.mu.Unlock()
+		return fmt.Errorf("%w: this action cannot receive a persistent permission", domain.ErrInvalidArgument)
+	}
 	deliver := gate != nil && !gate.resolved
 	if deliver {
 		gate.resolved = true
@@ -363,7 +396,7 @@ func (b *Bridge) ResolveApproval(input approvalDecisionInput) error {
 	// buffered decision, so neither the send nor the close can block. The map
 	// entry deliberately stays: removing it here is what used to strand a
 	// runtime that had not yet reached its own lookup.
-	gate.decision <- strings.EqualFold(input.Decision, "approve")
+	gate.decision <- approvalResolution{decision: decision}
 	close(gate.decision)
 	return nil
 }

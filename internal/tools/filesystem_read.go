@@ -127,14 +127,14 @@ func (tool *ReadOnlyFilesystemTool) ID() string { return FilesystemReadToolID }
 func (tool *ReadOnlyFilesystemTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		ID:           FilesystemReadToolID,
-		Description:  "Read or inspect files and directories inside explicitly allowed local roots.",
+		Description:  "Read or inspect an absolute local file or directory path. Access outside existing allowed roots pauses for explicit owner approval.",
 		Risk:         domain.RiskLow,
 		Capabilities: []domain.Capability{domain.CapabilityFilesystemRead},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"operation": map[string]any{"type": "string", "enum": []string{OperationRead, OperationList, OperationSearch}},
-				"path":      map[string]any{"type": "string", "description": "Absolute path inside an allowed root."},
+				"path":      map[string]any{"type": "string", "description": "Absolute local path. The application requests owner access when needed."},
 				"query":     map[string]any{"type": "string"},
 				"max_bytes": map[string]any{"type": "integer", "minimum": 1},
 			},

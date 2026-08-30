@@ -7,7 +7,7 @@ import type {
   EncryptedBackupRestoreInput,
 } from './backup'
 import type { ChatEvent, RunResult } from './events'
-import type { ChatAttachmentContent, ChatHistoryPage, ChatTool, Conversation, ConversationPageOptions } from './chat'
+import type { ApprovalDecision, ChatAttachmentContent, ChatHistoryPage, ChatTool, Conversation, ConversationPageOptions } from './chat'
 import type { JobRun, JobRunListOptions, Schedule, ScheduleInput } from './scheduler'
 import type { MemoryLifecycleState, MemoryListOptions, MemoryRecord, MemoryUpdate } from './memory'
 import type {
@@ -51,7 +51,7 @@ export interface YuriClient {
   setActiveAgent(agentId: string): Promise<AgentProfile>
   sendMessage(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult>
   cancelRun(runId: string): Promise<void>
-  approve(approvalId: string, decision: 'approve' | 'deny'): Promise<void>
+  approve(approvalId: string, decision: ApprovalDecision): Promise<void>
   retryLast(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult>
   getChatAttachment(messageId: string, attachmentId: string): Promise<ChatAttachmentContent | undefined>
   getProviderSnapshot(): Promise<ProviderSnapshot>

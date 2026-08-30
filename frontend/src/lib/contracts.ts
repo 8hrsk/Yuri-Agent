@@ -8,6 +8,7 @@ export type {
   ChatToolDescriptor,
   ToolCall,
   ApprovalRequest,
+  ApprovalDecision,
   RunTraceStatus,
   RunTraceStepStatus,
   ThinkingTraceStep,

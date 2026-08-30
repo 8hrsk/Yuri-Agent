@@ -1,6 +1,7 @@
 import type {
   ActivityEvent,
   ActivityListOptions,
+  ApprovalDecision,
   AgentProfile,
   AgentProfileInput,
   ArchiveSearchRequest,
@@ -317,7 +318,7 @@ class WailsYuriClient implements YuriClient {
     await callBridge(['CancelRun', 'CancelAgentRun'], [runId])
   }
 
-  async approve(approvalId: string, decision: 'approve' | 'deny'): Promise<void> {
+  async approve(approvalId: string, decision: ApprovalDecision): Promise<void> {
     await callBridge(['ResolveApproval', 'ApproveAction'], [{ approvalId, decision }])
   }
 

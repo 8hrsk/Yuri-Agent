@@ -489,6 +489,9 @@ func (r *Runtime) executeTool(ctx context.Context, input RunRequest, call ToolCa
 		return ToolResult{}, err
 	}
 	toolCtx := ctx
+	if approvalGranted {
+		toolCtx = withApprovedRunID(toolCtx, input.RunID)
+	}
 	var result ToolResult
 	var err error
 	if approvalGranted {

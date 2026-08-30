@@ -12,6 +12,20 @@ import (
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 )
 
+type approvedRunContextKey struct{}
+
+func withApprovedRunID(ctx context.Context, runID domain.ID) context.Context {
+	return context.WithValue(ctx, approvedRunContextKey{}, runID)
+}
+
+// ApprovedRunID identifies the durable approval scope attached to the current
+// ExecuteApproved call. Tools can use it to bind a side effect to the exact
+// approval record instead of re-deriving a broader scope after the owner click.
+func ApprovedRunID(ctx context.Context) (domain.ID, bool) {
+	runID, ok := ctx.Value(approvedRunContextKey{}).(domain.ID)
+	return runID, ok && !runID.Empty()
+}
+
 // Role is the role of a message sent to a model backend.
 type Role string
 

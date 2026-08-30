@@ -48,6 +48,33 @@ func (b *Bridge) SaveAllowedDirectories(directories []string) error {
 	return nil
 }
 
+// addAllowedDirectory merges one approval scope while holding the config lock
+// for the whole read-modify-write cycle. Two concurrent "allow always"
+// decisions therefore cannot overwrite each other's grants.
+func (b *Bridge) addAllowedDirectory(directory string) error {
+	directory = strings.TrimSpace(directory)
+	if directory == "" {
+		return fmt.Errorf("filesystem permission directory is required")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	roots := appendUniqueRoot(b.config.AllowedDirectories, directory)
+	allowlist, err := security.NewPathAllowlist(roots)
+	if err != nil {
+		return err
+	}
+	candidate := b.config
+	candidate.AllowedDirectories = allowlist.Roots()
+	if err := candidate.Validate(); err != nil {
+		return err
+	}
+	if err := config.Save(b.paths, candidate); err != nil {
+		return err
+	}
+	b.config = candidate
+	return nil
+}
+
 func (b *Bridge) chatBackend(ctx context.Context) (agent.ModelBackend, string, error) {
 	b.mu.RLock()
 	providers := append([]config.ProviderConfig(nil), b.config.Providers...)

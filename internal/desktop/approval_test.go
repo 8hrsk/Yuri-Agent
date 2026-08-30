@@ -67,8 +67,8 @@ func TestDesktopApprovalHandlerExpiresStaleDecision(t *testing.T) {
 	if err := repositories.Approvals.Create(ctx, approval); err != nil {
 		t.Fatal(err)
 	}
-	decisions := make(chan bool, 1)
-	decisions <- true
+	decisions := make(chan approvalResolution, 1)
+	decisions <- approvalResolution{decision: "approve"}
 	bridge := &Bridge{repositories: repositories, database: database, approvals: map[string]*approvalGate{
 		string(id): {decision: decisions, resolved: true},
 	}}

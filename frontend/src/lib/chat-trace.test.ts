@@ -4,6 +4,7 @@ import {
   aggregateChatEvent,
   buildChatTimeline,
   mergeStreamingMessages,
+  normalizeApproval,
   normalizeRunTrace,
   splitRunTraceForTimeline,
   sortRunTraces,
@@ -11,6 +12,17 @@ import {
 import type { ChatEvent, ChatMessage, RunTrace } from './contracts'
 
 describe('chat execution trace', () => {
+  it('keeps filesystem access scope and persistence choices at the renderer boundary', () => {
+    expect(normalizeApproval({
+      id: 'approval-fs', toolCallId: 'call-fs', risk: 'low',
+      kind: 'filesystem_access', path: '/Users/owner/note.txt',
+      permissionRoot: '/Users/owner', canRemember: true,
+    })).toMatchObject({
+      kind: 'filesystem_access', path: '/Users/owner/note.txt',
+      permissionRoot: '/Users/owner', canRemember: true,
+    })
+  })
+
   it('aggregates thinking, tools, approval, and completion into one timeline', () => {
     const runId = 'run-trace-1'
     const toolCall = {

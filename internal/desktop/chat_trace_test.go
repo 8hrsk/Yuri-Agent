@@ -113,14 +113,14 @@ func TestRunTraceViewRestoresRedactedToolHistory(t *testing.T) {
 	}
 }
 
-func TestListChatToolsReflectsFilesystemPermission(t *testing.T) {
+func TestListChatToolsAlwaysOffersFilesystemPermissionFlow(t *testing.T) {
 	bridge := &Bridge{config: config.Config{}}
 	withoutRoots, err := bridge.ListChatTools()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hasTool(withoutRoots, builtintools.FilesystemReadToolID) {
-		t.Fatal("filesystem tool must stay unavailable without an allowed directory")
+	if !hasTool(withoutRoots, builtintools.FilesystemReadToolID) || !hasTool(withoutRoots, builtintools.FilesystemWriteToolID) {
+		t.Fatalf("filesystem tools must be discoverable so they can request access: %#v", withoutRoots)
 	}
 
 	bridge.config.AllowedDirectories = []string{t.TempDir()}

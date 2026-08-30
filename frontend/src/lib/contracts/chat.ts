@@ -47,7 +47,14 @@ export interface ApprovalRequest {
   risk: ToolRisk
   scope: string
   expiresAt?: string
+  /** Filesystem access requests can be granted for this call or persisted. */
+  kind?: 'action' | 'filesystem_access'
+  path?: string
+  permissionRoot?: string
+  canRemember?: boolean
 }
+
+export type ApprovalDecision = 'approve' | 'allow_once' | 'allow_always' | 'deny'
 
 export type RunTraceStatus = 'queued' | 'running' | 'waiting_approval' | 'complete' | 'cancelled' | 'error'
 

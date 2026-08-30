@@ -98,6 +98,32 @@ describe('ApprovalDialog', () => {
     expect(onDecision).toHaveBeenCalledWith('deny')
   })
 
+  it('offers one-time and persistent choices for a filesystem access request', async () => {
+    const user = userEvent.setup()
+    const onDecision = vi.fn()
+    render(
+      <ApprovalDialog
+        approval={{
+          ...approval,
+          kind: 'filesystem_access',
+          canRemember: true,
+          path: '/Users/owner/Documents/note.txt',
+          permissionRoot: '/Users/owner/Documents',
+        }}
+        busy={false}
+        onDecision={onDecision}
+        onDismiss={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('/Users/owner/Documents')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Разрешить один раз' }))
+    expect(onDecision).toHaveBeenLastCalledWith('allow_once')
+    await user.click(screen.getByRole('button', { name: 'Разрешить всегда' }))
+    expect(onDecision).toHaveBeenLastCalledWith('allow_always')
+    expect(screen.queryByRole('button', { name: 'Разрешить действие' })).not.toBeInTheDocument()
+  })
+
   it('ignores dismissal gestures while a decision is in flight', async () => {
     const user = userEvent.setup()
     const onDecision = vi.fn()

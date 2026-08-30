@@ -79,13 +79,17 @@ type ToolCallView struct {
 }
 
 type ApprovalView struct {
-	ID          string `json:"id"`
-	ToolCallID  string `json:"toolCallId"`
-	Title       string `json:"title"`
-	Explanation string `json:"explanation"`
-	Risk        string `json:"risk"`
-	Scope       string `json:"scope"`
-	ExpiresAt   string `json:"expiresAt,omitempty"`
+	ID             string `json:"id"`
+	ToolCallID     string `json:"toolCallId"`
+	Title          string `json:"title"`
+	Explanation    string `json:"explanation"`
+	Risk           string `json:"risk"`
+	Scope          string `json:"scope"`
+	ExpiresAt      string `json:"expiresAt,omitempty"`
+	Kind           string `json:"kind,omitempty"`
+	Path           string `json:"path,omitempty"`
+	PermissionRoot string `json:"permissionRoot,omitempty"`
+	CanRemember    bool   `json:"canRemember,omitempty"`
 }
 
 // ChatEvent is the stable Wails boundary. Payload fields are intentionally

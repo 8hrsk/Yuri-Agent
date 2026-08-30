@@ -100,6 +100,7 @@ type echoTool struct {
 type approvalAwareTestTool struct {
 	directCalls   int
 	approvedCalls int
+	approvedRunID domain.ID
 }
 
 func (t *approvalAwareTestTool) Descriptor() ToolDescriptor {
@@ -115,8 +116,9 @@ func (t *approvalAwareTestTool) Execute(context.Context, ToolCall) (ToolResult, 
 	return ToolResult{Content: "direct"}, nil
 }
 
-func (t *approvalAwareTestTool) ExecuteApproved(context.Context, ToolCall) (ToolResult, error) {
+func (t *approvalAwareTestTool) ExecuteApproved(ctx context.Context, _ ToolCall) (ToolResult, error) {
 	t.approvedCalls++
+	t.approvedRunID, _ = ApprovedRunID(ctx)
 	return ToolResult{Content: "approved"}, nil
 }
 
@@ -297,6 +299,9 @@ func TestRuntimeUsesApprovalAwareExecutionOnlyAfterApproval(t *testing.T) {
 	}
 	if tool.directCalls != 0 || tool.approvedCalls != 1 {
 		t.Fatalf("direct/approved calls = %d/%d, want 0/1", tool.directCalls, tool.approvedCalls)
+	}
+	if tool.approvedRunID != "run-approved" {
+		t.Fatalf("approved execution run id = %q", tool.approvedRunID)
 	}
 }
 

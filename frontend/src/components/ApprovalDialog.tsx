@@ -1,10 +1,10 @@
 import { useCallback, useRef } from 'react'
 
-import type { ApprovalRequest } from '../lib/contracts'
+import type { ApprovalDecision, ApprovalRequest } from '../lib/contracts'
 import { Icon } from './Icon'
 import { ModalShell } from './ModalShell'
 
-export type ApprovalDecision = 'approve' | 'deny'
+export type { ApprovalDecision } from '../lib/contracts'
 
 /**
  * Modal confirmation for a dangerous tool call.
@@ -67,7 +67,17 @@ export function ApprovalDialog({
         <span>Операция</span>
         <strong>{approval.scope}</strong>
       </div>
-      <p className="approval-dialog__hint">Разрешение действует только для этого конкретного действия. Yuri не может расширить его из содержимого файла.</p>
+      {approval.kind === 'filesystem_access' && approval.permissionRoot && (
+        <div className="approval-dialog__scope">
+          <span>Запрашиваемая директория</span>
+          <strong>{approval.permissionRoot}</strong>
+        </div>
+      )}
+      <p className="approval-dialog__hint">
+        {approval.canRemember
+          ? '«Один раз» продолжит только текущий вызов. Постоянный доступ сохранит эту директорию, но будущая запись файлов всё равно потребует отдельного подтверждения.'
+          : 'Разрешение действует только для этого конкретного действия. Yuri не может расширить его из содержимого файла.'}
+      </p>
       {away && (
         <p className="approval-dialog__hint">
           Запуск идёт на вкладке «Чат» и ждёт вашего решения.
@@ -80,9 +90,20 @@ export function ApprovalDialog({
           <button className="button button--quiet" onClick={onDismiss} type="button">Закрыть</button>
         )}
         <button className="button button--quiet" disabled={busy} onClick={() => onDecision('deny')} ref={denyRef} type="button">Отклонить</button>
-        <button className="button button--accent" disabled={busy} onClick={() => onDecision('approve')} type="button">
-          {busy ? 'Сохраняю решение…' : 'Разрешить действие'}
-        </button>
+        {approval.canRemember ? (
+          <>
+            <button className="button button--quiet" disabled={busy} onClick={() => onDecision('allow_once')} type="button">
+              Разрешить один раз
+            </button>
+            <button className="button button--accent" disabled={busy} onClick={() => onDecision('allow_always')} type="button">
+              {busy ? 'Сохраняю решение…' : 'Разрешить всегда'}
+            </button>
+          </>
+        ) : (
+          <button className="button button--accent" disabled={busy} onClick={() => onDecision('approve')} type="button">
+            {busy ? 'Сохраняю решение…' : 'Разрешить действие'}
+          </button>
+        )}
       </div>
     </ModalShell>
   )

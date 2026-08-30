@@ -3,6 +3,7 @@ import type {
   ActivityListOptions,
   AgentProfile,
   AgentProfileInput,
+  ApprovalDecision,
   ApprovalRequest,
   ArchiveSearchRequest,
   ArchiveSearchResponse,
@@ -66,7 +67,7 @@ class MockYuriClient implements YuriClient {
   readonly mode = 'mock' as const
   private readonly conversations = new Map<string, Conversation>([[starterConversation().id, starterConversation()]])
   private readonly cancelledRuns = new Set<string>()
-  private readonly pendingApprovals = new Map<string, (decision: 'approve' | 'deny') => void>()
+  private readonly pendingApprovals = new Map<string, (decision: ApprovalDecision) => void>()
   private provider: ProviderSnapshot = {
     settings: { ...defaultSettings },
     codex: { connected: false },
@@ -235,7 +236,7 @@ class MockYuriClient implements YuriClient {
     }
   }
 
-  async approve(approvalId: string, decision: 'approve' | 'deny'): Promise<void> {
+  async approve(approvalId: string, decision: ApprovalDecision): Promise<void> {
     const resolve = this.pendingApprovals.get(approvalId)
     if (!resolve) return
     this.pendingApprovals.delete(approvalId)
@@ -821,7 +822,7 @@ class MockYuriClient implements YuriClient {
         risk: 'medium',
         scope: '~/Documents/notes.txt · добавить 86 байт',
       }
-      const approvalDecision = new Promise<'approve' | 'deny'>((resolve) => this.pendingApprovals.set(approval.id, resolve))
+      const approvalDecision = new Promise<ApprovalDecision>((resolve) => this.pendingApprovals.set(approval.id, resolve))
       emit({ type: 'approval.required', runId, approval })
       emit({ type: 'run.status', runId, status: 'waiting_approval', label: 'Ожидается ваше разрешение' })
       const decision = await approvalDecision

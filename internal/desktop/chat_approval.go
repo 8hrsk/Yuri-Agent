@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,9 +17,21 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-type desktopToolAuthorizer struct{}
+type desktopToolAuthorizer struct{ bridge *Bridge }
 
-func (desktopToolAuthorizer) Authorize(_ context.Context, request agent.ToolAuthorizationRequest) (agent.ToolAuthorizationResult, error) {
+func (authorizer desktopToolAuthorizer) Authorize(_ context.Context, request agent.ToolAuthorizationRequest) (agent.ToolAuthorizationResult, error) {
+	if authorizer.bridge != nil && (request.Tool.Name == builtintools.FilesystemReadToolID || request.Tool.Name == builtintools.FilesystemWriteToolID) {
+		access, err := filesystemAccessForRoots(request.Call, authorizer.bridge.AllowedDirectories())
+		if err != nil {
+			return agent.ToolAuthorizationResult{Decision: domain.PermissionDeny, Reason: err.Error()}, nil
+		}
+		if !access.Allowed {
+			return agent.ToolAuthorizationResult{
+				Decision: domain.PermissionNeedsApproval,
+				Reason:   fmt.Sprintf("Yuri запрашивает доступ к %s для операции %s", access.Path, access.Operation),
+			}, nil
+		}
+	}
 	switch request.Tool.Risk {
 	case domain.RiskLow:
 		return agent.ToolAuthorizationResult{Decision: domain.PermissionAllow, Reason: "low-risk tool"}, nil
@@ -37,9 +48,18 @@ func (desktopToolAuthorizer) Authorize(_ context.Context, request agent.ToolAuth
 // repeating a side effect. Scheduled research can still use low-risk read
 // tools; mutations and external sends require an interactive owner-confirmed
 // run until tools expose a durable execution-key idempotency contract.
-type backgroundToolAuthorizer struct{}
+type backgroundToolAuthorizer struct{ bridge *Bridge }
 
-func (backgroundToolAuthorizer) Authorize(_ context.Context, request agent.ToolAuthorizationRequest) (agent.ToolAuthorizationResult, error) {
+func (authorizer backgroundToolAuthorizer) Authorize(_ context.Context, request agent.ToolAuthorizationRequest) (agent.ToolAuthorizationResult, error) {
+	if authorizer.bridge != nil && (request.Tool.Name == builtintools.FilesystemReadToolID || request.Tool.Name == builtintools.FilesystemWriteToolID) {
+		access, err := filesystemAccessForRoots(request.Call, authorizer.bridge.AllowedDirectories())
+		if err != nil {
+			return agent.ToolAuthorizationResult{Decision: domain.PermissionDeny, Reason: err.Error()}, nil
+		}
+		if !access.Allowed {
+			return agent.ToolAuthorizationResult{Decision: domain.PermissionDeny, Reason: "фоновая задача не может запрашивать новый доступ к файлам"}, nil
+		}
+	}
 	if request.Tool.Risk == domain.RiskLow {
 		return agent.ToolAuthorizationResult{Decision: domain.PermissionAllow, Reason: "low-risk background tool"}, nil
 	}
@@ -60,17 +80,26 @@ func (backgroundToolAuthorizer) Authorize(_ context.Context, request agent.ToolA
 // window between the approval.required event and the runtime's own lookup: the
 // runtime then reported the request as unregistered, the tool never ran, and
 // the stored approval stayed pending forever.
+type approvalResolution struct {
+	decision string
+}
+
 type approvalGate struct {
-	decision chan bool
+	decision       chan approvalResolution
+	permissionRoot string
 	// resolved is guarded by Bridge.mu and keeps a repeated resolution of the
 	// same approval from sending on an already closed channel.
 	resolved bool
 }
 
-func (b *Bridge) registerApproval(id domain.ID) {
+func (b *Bridge) registerApproval(id domain.ID, permissionRoot ...string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.approvals[string(id)] = &approvalGate{decision: make(chan bool, 1)}
+	root := ""
+	if len(permissionRoot) > 0 {
+		root = permissionRoot[0]
+	}
+	b.approvals[string(id)] = &approvalGate{decision: make(chan approvalResolution, 1), permissionRoot: root}
 }
 
 func (b *Bridge) releaseApproval(id domain.ID) {
@@ -168,10 +197,15 @@ func (handler desktopApprovalHandler) Approve(ctx context.Context, request agent
 	}
 	resume := handler.bridge.beginApprovalWait(ctx)
 	select {
-	case approved, ok := <-gate.decision:
+	case resolution, ok := <-gate.decision:
 		resume()
 		if !ok {
 			return false, errors.New("approval request was closed")
+		}
+		approved := resolution.decision == "approve" || resolution.decision == "allow_once" || resolution.decision == "allow_always"
+		remember := approved && resolution.decision == "allow_always"
+		if remember && gate.permissionRoot == "" {
+			return false, errors.New("persistent approval is unavailable for this action")
 		}
 		stored, err := handler.bridge.repositories.Approvals.Get(context.Background(), id)
 		if err == nil {
@@ -195,6 +229,12 @@ func (handler desktopApprovalHandler) Approve(ctx context.Context, request agent
 					decision = domain.PermissionAllow
 				}
 				err = handler.bridge.appendApprovalAudit(context.Background(), stored, "approval.resolved", decision, auditActor)
+			}
+		}
+		if err == nil && remember {
+			err = handler.bridge.addAllowedDirectory(gate.permissionRoot)
+			if err != nil {
+				err = fmt.Errorf("save filesystem permission: %w", err)
 			}
 		}
 		return approved, err
@@ -244,33 +284,47 @@ func (emitter *chatEmitter) createApproval(ctx context.Context, event agent.Even
 	now := time.Now().UTC()
 	scope := domain.CapabilityScope{Kind: domain.ScopeResource, Values: []string{event.ToolCall.Name}}
 	approvalScope := strings.Join(capabilities, ", ")
+	approvalKind := "action"
+	approvalTitle := "Разрешить действие Yuri?"
+	approvalPath := ""
+	permissionRoot := ""
+	canRemember := false
 	if describedScope != "" {
 		approvalScope = describedScope
 	}
 	action := "execute tool " + event.ToolCall.Name
+	if event.ToolCall.Name == builtintools.FilesystemReadToolID || event.ToolCall.Name == builtintools.FilesystemWriteToolID {
+		access, accessErr := filesystemAccessForRoots(*event.ToolCall, emitter.b.AllowedDirectories())
+		if accessErr != nil {
+			return nil, accessErr
+		}
+		approvalPath = access.Path
+		action = fmt.Sprintf("filesystem.%s %s", access.Operation, access.Path)
+		if !access.Allowed {
+			approvalKind = "filesystem_access"
+			approvalTitle = "Разрешить Yuri доступ к файлам?"
+			permissionRoot = access.PermissionRoot
+			canRemember = true
+			scope = domain.CapabilityScope{Kind: domain.ScopeFilesystem, Values: []string{permissionRoot}}
+			approvalScope = fmt.Sprintf("%s · доступ к %s", action, permissionRoot)
+		}
+	}
 	if event.ToolCall.Name == builtintools.FilesystemWriteToolID {
 		var request builtintools.WriteRequest
 		if err := json.Unmarshal(event.ToolCall.Arguments, &request); err != nil {
 			return nil, fmt.Errorf("decode filesystem write approval: %w", err)
 		}
-		path := filepath.Clean(strings.TrimSpace(request.Path))
-		if !filepath.IsAbs(path) {
-			return nil, errors.New("filesystem write approval requires an absolute path")
+		path := approvalPath
+		if approvalKind == "action" {
+			scope = domain.CapabilityScope{Kind: domain.ScopeFilesystem, Values: []string{path}}
 		}
-		if emitter.tools != nil {
-			if registered, ok := emitter.tools.Get(event.ToolCall.Name); ok {
-				if writer, ok := registered.(filesystemWriteAgentTool); ok {
-					resolvedPath, resolveErr := writer.tool.ResolvePath(path)
-					if resolveErr != nil {
-						return nil, resolveErr
-					}
-					path = resolvedPath
-				}
-			}
-		}
-		scope = domain.CapabilityScope{Kind: domain.ScopeFilesystem, Values: []string{path}}
 		contentHash := sha256.Sum256([]byte(request.Content))
-		approvalScope = fmt.Sprintf("%s · %s · %d bytes · SHA-256 %s…", request.Operation, path, len(request.Content), hex.EncodeToString(contentHash[:6]))
+		writeDescription := fmt.Sprintf("%s · %s · %d bytes · SHA-256 %s…", request.Operation, path, len(request.Content), hex.EncodeToString(contentHash[:6]))
+		if approvalKind == "filesystem_access" {
+			approvalScope = writeDescription + " · доступ к " + permissionRoot
+		} else {
+			approvalScope = writeDescription
+		}
 		action = fmt.Sprintf("filesystem.%s %s", request.Operation, path)
 	}
 	record, err := domain.NewApproval(
@@ -288,7 +342,7 @@ func (emitter *chatEmitter) createApproval(ctx context.Context, event agent.Even
 	if err := emitter.b.appendApprovalAudit(ctx, record, "approval.requested", domain.PermissionNeedsApproval, domain.ActorAgent); err != nil {
 		return nil, err
 	}
-	emitter.b.registerApproval(id)
+	emitter.b.registerApproval(id, permissionRoot)
 	emitter.approvalRecords[event.ToolCall.ID] = id
 	if toolRecord, exists := emitter.toolRecords[event.ToolCall.ID]; exists {
 		toolRecord.ApprovalID = id
@@ -300,9 +354,10 @@ func (emitter *chatEmitter) createApproval(ctx context.Context, event agent.Even
 		emitter.toolRecords[event.ToolCall.ID] = toolRecord
 	}
 	return &ApprovalView{
-		ID: string(id), ToolCallID: event.ToolCall.ID, Title: "Разрешить действие Yuri?",
+		ID: string(id), ToolCallID: event.ToolCall.ID, Title: approvalTitle,
 		Explanation: event.Error, Risk: string(risk), Scope: approvalScope,
-		ExpiresAt: record.ExpiresAt.Format(time.RFC3339Nano),
+		ExpiresAt: record.ExpiresAt.Format(time.RFC3339Nano), Kind: approvalKind,
+		Path: approvalPath, PermissionRoot: permissionRoot, CanRemember: canRemember,
 	}, nil
 }
 

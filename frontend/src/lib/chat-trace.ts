@@ -138,6 +138,10 @@ export function normalizeApproval(value: unknown): ApprovalRequest | undefined {
     risk: normalizeRisk(value.risk),
     scope: optionalString(value, 'scope', 'action', 'target') ?? '',
     expiresAt: optionalString(value, 'expiresAt', 'expires_at'),
+    kind: optionalString(value, 'kind') === 'filesystem_access' ? 'filesystem_access' : 'action',
+    path: optionalString(value, 'path'),
+    permissionRoot: optionalString(value, 'permissionRoot', 'permission_root'),
+    canRemember: value.canRemember === true || value.can_remember === true,
   }
 }
 
