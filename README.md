@@ -7,6 +7,7 @@ Yuri core и Plugin SDK распространяются по [Apache License 2.
 Engineering foundation, conversational vertical slice, storage/memory, plugin runtime, scheduler/proactivity и reflection/personality vertical slice реализованы. Основные решения и границы находятся в следующих документах:
 
 - [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — техническое задание и roadmap;
+- [`docs/PERSONALIZATION_ROADMAP.md`](docs/PERSONALIZATION_ROADMAP.md) — последовательный план развития personality, affect, relationships и creation flow;
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — компоненты, context assembly, storage и trust boundaries;
 - [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — модель угроз и security invariants;
 - [`docs/adr/`](docs/adr/) — принятые архитектурные решения;
@@ -43,7 +44,7 @@ Engineering foundation, conversational vertical slice, storage/memory, plugin ru
 - in-app/macOS notification flow, append-only Activity UI и medium-risk `scheduler.create` tool с обязательным подтверждением.
 - отдельные versioned mutable persona, relationship opinions и affect snapshots с evidence, optimistic concurrency, atomic multi-state commit, rollback/reset и закреплением traits;
 - bounded post-turn reflection без tools: строгий JSON contract, cooldown, max-delta/range guards, запрет внешнего неподтверждённого evidence и последовательный запуск для единственного локального профиля;
-- следующий диалог получает persona и явно субъективную relationship/affect модель отдельными слоями ниже immutable policy и identity seed;
+- provider-independent Personality Compiler превращает owner seed + mutable persona + relationship/affect в bounded качественные правила; обычный и peer dialogue получают их отдельным untrusted data layer ниже immutable policy и identity seed;
 - Personality/Relationship UI с историей версий и простым 2D-аватаром; push-to-talk поддерживает barge-in, автоозвучка является явным opt-in и не включает микрофон.
 - first-run onboarding с OpenAI-compatible и Codex OAuth вариантами; durable completion устанавливается backend только после успешного provider probe.
 

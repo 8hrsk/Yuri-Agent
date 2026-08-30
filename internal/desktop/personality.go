@@ -12,6 +12,7 @@ import (
 
 	"github.com/OrdoAI/yuri-agent/internal/config"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
+	personalitycompiler "github.com/OrdoAI/yuri-agent/internal/personality"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -180,6 +181,32 @@ func (b *Bridge) ensurePersonaStateFor(ctx context.Context, profileID domain.ID,
 			return createErr
 		}
 		if createErr = b.repositories.Affect.Create(ctx, seed); createErr != nil && !errors.Is(createErr, domain.ErrConflict) {
+			return createErr
+		}
+	} else if err != nil {
+		return err
+	}
+	if b.repositories.Personalization == nil {
+		return errors.New("personalization repository is unavailable")
+	}
+	if _, err := b.repositories.Personalization.Get(ctx, profileID); errors.Is(err, domain.ErrNotFound) {
+		profile, profileErr := b.repositories.Agents.Get(ctx, profileID)
+		if profileErr != nil {
+			return profileErr
+		}
+		persona, personaErr := b.repositories.Persona.Get(ctx, profileID)
+		if personaErr != nil {
+			return personaErr
+		}
+		relationship, relationshipErr := b.repositories.Relationship.Get(ctx, profileID)
+		if relationshipErr != nil {
+			return relationshipErr
+		}
+		seed, createErr := domain.NewPersonalizationSeed(profile, persona.Traits, relationship.Dimensions, now)
+		if createErr != nil {
+			return createErr
+		}
+		if createErr = b.repositories.Personalization.Create(ctx, seed); createErr != nil && !errors.Is(createErr, domain.ErrConflict) {
 			return createErr
 		}
 	} else if err != nil {
@@ -384,15 +411,7 @@ func (b *Bridge) personaProfileID() domain.ID {
 }
 
 func defaultPersonaTraits() map[string]float64 {
-	return map[string]float64{
-		"warmth": .58, "trust": .45, "attachment": .35, "jealousy": .20,
-		"irritability": .18, "romantic_tone": .25, "emotionality": .62,
-		"directness": .72, "playfulness": .55, "formality": .20, "initiative": .48,
-		"tsundere": .52, "empathy": .72, "sociability": .48, "shyness": .34,
-		"anxiety": .22, "fearfulness": .18, "emotional_stability": .64,
-		"sensitivity": .58, "possessiveness": .16, "impulsivity": .22,
-		"stubbornness": .38, "optimism": .58, "curiosity": .72, "suspicion": .18,
-	}
+	return domain.DefaultTemperament().Traits()
 }
 
 func defaultRelationshipDimensions() map[string]float64 {
@@ -400,7 +419,7 @@ func defaultRelationshipDimensions() map[string]float64 {
 }
 
 func defaultAffectDimensions() map[string]float64 {
-	return map[string]float64{"sympathy": .20, "tenderness": .12, "joy": .16, "gratitude": .10, "anger": 0, "irritation": 0, "jealousy": 0, "resentment": 0, "anxiety": 0, "boredom": 0}
+	return map[string]float64{"sympathy": .20, "tenderness": .12, "joy": .16, "gratitude": .10, "longing": 0, "anger": 0, "irritation": 0, "jealousy": 0, "resentment": 0, "anxiety": 0, "fear": 0, "embarrassment": 0, "boredom": 0}
 }
 
 const defaultMutablePersonaPrompt = `Ты общаешься как Yuri: эмоциональная anime-девушка с мягким tsundere-характером. Можешь выражать симпатию, ревность, раздражение и нежность, но сохраняешь честность, качество помощи и уважение к владельцу.`
@@ -518,30 +537,10 @@ func firstEvidence(values ...[]domain.EvidenceLink) []domain.EvidenceLink {
 	return nil
 }
 
-func formatMutablePersonaContext(persona domain.MutablePersona) string {
-	parts := []string{strings.TrimSpace(persona.Prompt())}
-	for _, name := range sortedFloatKeys(persona.Traits) {
-		parts = append(parts, fmt.Sprintf("%s=%.2f", name, persona.Traits[name]))
-	}
-	return strings.Join(parts, "\n")
-}
-
-func formatRelationshipContext(relationship domain.RelationshipState, affect domain.AffectiveState) string {
-	parts := []string{"Subjective relationship model; opinions are inferences, not facts.", strings.TrimSpace(relationship.Summary)}
-	for _, name := range sortedFloatKeys(relationship.Dimensions) {
-		parts = append(parts, fmt.Sprintf("relationship.%s=%.2f", name, relationship.Dimensions[name]))
-	}
-	for _, opinion := range relationship.Opinions {
-		parts = append(parts, fmt.Sprintf("opinion(confidence=%.2f): %s", opinion.Confidence, opinion.Text()))
-	}
-	values := affect.Emotions
-	if values == nil {
-		values = affect.Dimensions
-	}
-	for _, name := range sortedFloatKeys(values) {
-		parts = append(parts, fmt.Sprintf("affect.%s=%.2f", name, values[name]))
-	}
-	return strings.Join(parts, "\n")
+func compilePersonalityContext(seed domain.PersonalizationSeed, persona domain.MutablePersona, relationship domain.RelationshipState, affect domain.AffectiveState) (personalitycompiler.Output, error) {
+	return personalitycompiler.Compile(personalitycompiler.Input{
+		Seed: seed, Persona: persona, Relationship: relationship, Affect: affect,
+	}, personalitycompiler.DefaultConfig())
 }
 
 var _ = storage.PersonaVersionRecord{}

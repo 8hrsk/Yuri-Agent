@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -43,6 +44,106 @@ func TestReflectOnTurnPersistsPersonaRelationshipOpinionAndAffectAtomically(t *t
 	if persona.AuthorRunID != "run-reflection" || persona.Traits["warmth"] <= .58 {
 		t.Fatalf("persisted persona = %#v", persona)
 	}
+	events, err := bridge.repositories.Affect.ListEvents(context.Background(), "owner", 10)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("affect events = %#v, %v", events, err)
+	}
+	if events[0].Intensity <= 0 || events[0].Intensity >= .05 || events[0].HalfLifeSeconds <= 0 || events[0].Provenance != "reflection_appraisal" {
+		t.Fatalf("bounded affect event = %#v", events[0])
+	}
+	var metadata map[string]any
+	if json.Unmarshal([]byte(events[0].MetadataJSON), &metadata) != nil || metadata["appraisal"] != "bounded_v1" || metadata["raw_delta"] != .05 {
+		t.Fatalf("affect appraisal metadata = %q", events[0].MetadataJSON)
+	}
+}
+
+func TestReflectOnTurnAccumulatesAffectInsideDurableCooldown(t *testing.T) {
+	bridge := newPersonalityTestBridge(t)
+	bridge.reflectionRuns = reflection.NewCoordinator()
+	// The installation fallback is disabled; the stored agent policy still
+	// supplies its own 60-minute durable cooldown.
+	bridge.config.Persona.ReflectionCooldownMinutes = 0
+	before, err := bridge.repositories.Affect.Get(context.Background(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstProvider := &reflectionBackendStub{events: []agent.ModelEvent{
+		{Type: agent.ModelEventTextDelta, Delta: `{"outcome":"changed","reason":"warm response","evidence_ids":["message-1"],"persona":{"traits":{"warmth":0.04},"reason":"cooperative turn","confidence":0.8},"affect":{"dimensions":{"joy":0.05},"reason":"pleasant turn","confidence":0.8}}`},
+		{Type: agent.ModelEventCompleted},
+	}}
+	firstAt := before.UpdatedAt.Add(time.Minute)
+	bridge.reflectOnTurn(context.Background(), firstProvider, "test-model", memory.Turn{
+		RunID: "run-affect-1", ConversationID: "conversation-1", Now: firstAt,
+		Messages: []memory.TranscriptMessage{{ID: "message-1", ConversationID: "conversation-1", Role: string(agent.RoleUser), Content: "Спасибо, это помогло", CreatedAt: firstAt}},
+	})
+	firstPersona, _ := bridge.repositories.Persona.Get(context.Background(), "owner")
+	firstAffect, _ := bridge.repositories.Affect.Get(context.Background(), "owner")
+
+	secondProvider := &reflectionBackendStub{events: []agent.ModelEvent{
+		{Type: agent.ModelEventTextDelta, Delta: `{"outcome":"changed","reason":"another pleasant event","evidence_ids":["message-2"],"persona":{"traits":{"warmth":0.04},"reason":"repeated cooperation","confidence":0.8},"affect":{"dimensions":{"joy":0.05},"reason":"continued pleasant exchange","confidence":0.8}}`},
+		{Type: agent.ModelEventCompleted},
+	}}
+	secondAt := firstAt.Add(time.Minute)
+	bridge.reflectOnTurn(context.Background(), secondProvider, "test-model", memory.Turn{
+		RunID: "run-affect-2", ConversationID: "conversation-1", Now: secondAt,
+		Messages: []memory.TranscriptMessage{{ID: "message-2", ConversationID: "conversation-1", Role: string(agent.RoleUser), Content: "И это тоже отлично", CreatedAt: secondAt}},
+	})
+	secondPersona, _ := bridge.repositories.Persona.Get(context.Background(), "owner")
+	secondAffect, _ := bridge.repositories.Affect.Get(context.Background(), "owner")
+	if secondPersona.Version != firstPersona.Version {
+		t.Fatalf("durable persona bypassed cooldown: first=%d second=%d", firstPersona.Version, secondPersona.Version)
+	}
+	if secondAffect.Version != firstAffect.Version+1 || secondAffect.Emotions[domain.EmotionJoy] <= firstAffect.Emotions[domain.EmotionJoy] {
+		t.Fatalf("affect did not accumulate inside durable cooldown: first=%#v second=%#v", firstAffect, secondAffect)
+	}
+	events, err := bridge.repositories.Affect.ListEvents(context.Background(), "owner", 10)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("accumulated affect events = %#v, %v", events, err)
+	}
+}
+
+func TestReflectOnTurnUsesEachAgentsStoredEmotionalDynamics(t *testing.T) {
+	run := func(t *testing.T, dynamics domain.EmotionalDynamics, configureTemperament func(*domain.Temperament)) domain.AffectiveEvent {
+		t.Helper()
+		bridge := newPersonalityTestBridge(t)
+		bridge.reflectionRuns = reflection.NewCoordinator()
+		seed, err := bridge.repositories.Personalization.Get(context.Background(), "owner")
+		if err != nil {
+			t.Fatal(err)
+		}
+		configureTemperament(&seed.Temperament)
+		seed.EmotionalDynamics = dynamics
+		seed.Version++
+		seed.RevisionID = ""
+		seed.Operation = domain.PersonalizationOperationUpdate
+		seed.Reason = "test emotional dynamics"
+		seed.UpdatedAt = seed.UpdatedAt.Add(time.Second)
+		if _, err = bridge.repositories.Personalization.AppendVersion(context.Background(), seed, seed.Version-1); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := bridge.repositories.Affect.Get(context.Background(), "owner")
+		at := before.UpdatedAt.Add(time.Minute)
+		provider := &reflectionBackendStub{events: []agent.ModelEvent{
+			{Type: agent.ModelEventTextDelta, Delta: `{"outcome":"changed","reason":"positive appraisal","evidence_ids":["message-profile"],"affect":{"dimensions":{"joy":0.1},"reason":"good news","confidence":0.8}}`},
+			{Type: agent.ModelEventCompleted},
+		}}
+		bridge.reflectOnTurn(context.Background(), provider, "test-model", memory.Turn{
+			RunID: "run-profile-affect", ConversationID: "conversation-profile", Now: at,
+			Messages: []memory.TranscriptMessage{{ID: "message-profile", ConversationID: "conversation-profile", Role: string(agent.RoleUser), Content: "У нас отличные новости", CreatedAt: at}},
+		})
+		events, err := bridge.repositories.Affect.ListEvents(context.Background(), "owner", 1)
+		if err != nil || len(events) != 1 {
+			t.Fatalf("profile affect event = %#v, %v", events, err)
+		}
+		return events[0]
+	}
+	lowDynamics := domain.EmotionalDynamics{Reactivity: 0, ResponseIntensity: 0, RecoverySpeed: 1, PositivePersistence: 0, NegativePersistence: 0, Expression: .2, Masking: .8, ConflictStyle: "adaptive", Triggers: map[string][]string{}, SoothingStrategies: []string{}}
+	highDynamics := domain.EmotionalDynamics{Reactivity: 1, ResponseIntensity: 1, RecoverySpeed: 0, PositivePersistence: 1, NegativePersistence: 1, Expression: 1, Masking: 0, ConflictStyle: "direct", Triggers: map[string][]string{}, SoothingStrategies: []string{}}
+	low := run(t, lowDynamics, func(value *domain.Temperament) { value.Optimism, value.Emotionality = 0, 0 })
+	high := run(t, highDynamics, func(value *domain.Temperament) { value.Optimism, value.Emotionality = 1, 1 })
+	if high.Intensity <= low.Intensity || high.HalfLifeSeconds <= low.HalfLifeSeconds {
+		t.Fatalf("stored profiles did not diverge: low=%#v high=%#v", low, high)
+	}
 }
 
 func TestReflectOnTurnRespectsDisabledAutoEvolution(t *testing.T) {
@@ -52,6 +153,32 @@ func TestReflectOnTurnRespectsDisabledAutoEvolution(t *testing.T) {
 	bridge.reflectOnTurn(context.Background(), provider, "test", memory.Turn{RunID: "run-disabled", ConversationID: "conversation", Now: time.Now().UTC()})
 	if provider.request.Model != "" {
 		t.Fatal("disabled auto evolution still invoked the model")
+	}
+}
+
+func TestReflectOnTurnRespectsPerAgentReflectionMode(t *testing.T) {
+	bridge := newPersonalityTestBridge(t)
+	bridge.config.Persona.AutoEvolution = true
+	seed, err := bridge.repositories.Personalization.Get(context.Background(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed.Version++
+	seed.RevisionID = ""
+	seed.Operation = domain.PersonalizationOperationUpdate
+	seed.EvolutionPolicy.ReflectionMode = domain.PersonalizationReflectionDisabled
+	seed.Reason = "owner disabled this agent reflection"
+	seed.UpdatedAt = seed.UpdatedAt.Add(time.Second)
+	if _, err = bridge.repositories.Personalization.AppendVersion(context.Background(), seed, seed.Version-1); err != nil {
+		t.Fatal(err)
+	}
+	provider := &reflectionBackendStub{events: []agent.ModelEvent{{Type: agent.ModelEventTextDelta, Delta: `{"outcome":"no_change","reason":"none"}`}}}
+	bridge.reflectOnTurn(context.Background(), provider, "test", memory.Turn{
+		RunID: "run-disabled-agent", ConversationID: "conversation", Now: seed.UpdatedAt.Add(time.Minute),
+		Messages: []memory.TranscriptMessage{{ID: "message", Role: string(agent.RoleUser), Content: "Привет", CreatedAt: seed.UpdatedAt.Add(time.Minute)}},
+	})
+	if provider.request.Model != "" {
+		t.Fatal("per-agent disabled reflection still invoked the model")
 	}
 }
 

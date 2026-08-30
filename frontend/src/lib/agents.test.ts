@@ -1,6 +1,18 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 
-import { AGENT_BACKSTORY_MAX_LENGTH, defaultAgentDraft, defaultAgentTraits, normalizeAgentProfile, validateAgentDraft } from './agents'
+import {
+  AGENT_BACKSTORY_MAX_LENGTH,
+  applyAgentPreset,
+  clearAgentDraft,
+  defaultAgentDraft,
+  defaultAgentTraits,
+  loadAgentDraft,
+  normalizeAgentPersonalizationProfile,
+  normalizeAgentProfile,
+  saveAgentDraft,
+  validateAgentDraft,
+} from './agents'
 import { createYuriClient, resetYuriClientForTests } from './client'
 
 describe('agent profile contracts', () => {
@@ -34,6 +46,63 @@ describe('agent profile contracts', () => {
       'sensitivity', 'possessiveness', 'romantic_tone', 'initiative', 'impulsivity',
       'stubbornness', 'optimism', 'curiosity', 'suspicion', 'trust', 'attachment', 'formality', 'tsundere',
     ]))
+  })
+
+  it('applies visible presets without destroying owner-authored identity or backstory', () => {
+    const source = {
+      ...defaultAgentDraft,
+      name: 'Emilu',
+      backstory: 'Жила у моря.',
+      personalization: {
+        ...defaultAgentDraft.personalization,
+        identity: { ...defaultAgentDraft.personalization.identity, pronouns: 'она/её', role: 'архивистка' },
+        structuredBackstory: { ...defaultAgentDraft.personalization.structuredBackstory, narrative: 'Жила у моря.' },
+      },
+    }
+    const result = applyAgentPreset(source, 'reserved')
+
+    expect(result).toMatchObject({ name: 'Emilu', backstory: 'Жила у моря.', presetId: 'reserved' })
+    expect(result.personalization.identity).toMatchObject({ pronouns: 'она/её', role: 'архивистка' })
+    expect(result.personalization.structuredBackstory.narrative).toBe('Жила у моря.')
+    expect(result.traits.shyness).toBe(0.84)
+    expect(result.personalization.emotionalDynamics.conflictStyle).toBe('withdraw')
+  })
+
+  it('restores a versioned local draft and fills fields added by newer schemas', () => {
+    clearAgentDraft()
+    window.localStorage.setItem('yuri.agent-profile-draft.v2', JSON.stringify({
+      name: 'Sora', creationMode: 'advanced', traits: { fearfulness: 0.77 },
+      personalization: { identity: { preferredLanguage: 'ja-JP' } },
+    }))
+
+    const restored = loadAgentDraft()
+    expect(restored).toMatchObject({ name: 'Sora', creationMode: 'advanced' })
+    expect(restored.traits).toMatchObject({ warmth: defaultAgentTraits.warmth, fearfulness: 0.77 })
+    expect(restored.personalization.identity).toMatchObject({ preferredLanguage: 'ja-JP', pronouns: 'она/её' })
+
+    saveAgentDraft({ ...restored, name: 'Sora II' })
+    expect(JSON.parse(window.localStorage.getItem('yuri.agent-profile-draft.v2') ?? '{}')).toMatchObject({ name: 'Sora II' })
+  })
+
+  it('normalizes the bridge personalization view with camelCase and snake_case aliases', () => {
+    const profile = normalizeAgentPersonalizationProfile({
+      agent_id: 'agent-emilu', schema_version: 2, version: 3, revision_id: 'revision-3',
+      identity: { preferred_language: 'ru-RU', pronouns: 'она/её', role: 'исследовательница' },
+      communication_style: { verbosity: 0.7, emoji_frequency: 0.15 },
+      temperament: { warmth: 0.8, custom: { fearfulness: 0.65 } },
+      emotional_dynamics: { reactivity: 0.75, conflict_style: 'direct', triggers: { fear: ['темнота'] } },
+      relationship_seed: { preset: 'friends', dimensions: { trust: 0.8 }, summary: 'Давние друзья.' },
+      backstory: { narrative: 'Помнит старый маяк.', summary: 'Архивистка.', episodes: [{ id: 'lighthouse', content: 'Нашла карту.', emotional_valence: 0.4 }] },
+      evolution_policy: { locked_fields: ['identity'], trait_bounds: { warmth: { min: 0.4, max: 1 } }, reflection_mode: 'disabled', reflection_cooldown_minutes: 90 },
+      created_at: '2026-08-31T10:00:00Z', updated_at: '2026-08-31T11:00:00Z',
+    })
+
+    expect(profile).toMatchObject({ agentId: 'agent-emilu', schemaVersion: 2, version: 3, revisionId: 'revision-3' })
+    expect(profile?.identity).toMatchObject({ preferredLanguage: 'ru-RU', role: 'исследовательница' })
+    expect(profile?.temperament).toMatchObject({ warmth: 0.8, fearfulness: 0.65 })
+    expect(profile?.emotionalDynamics).toMatchObject({ conflictStyle: 'direct', triggers: { fear: ['темнота'] } })
+    expect(profile?.structuredBackstory.episodes[0]).toMatchObject({ id: 'lighthouse', content: 'Нашла карту.', emotionalValence: 0.4 })
+    expect(profile?.evolutionPolicy).toMatchObject({ reflectionMode: 'disabled', reflectionCooldownMinutes: 90 })
   })
 
   it('validates owner-controlled identity fields', () => {

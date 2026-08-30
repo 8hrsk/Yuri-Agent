@@ -8,9 +8,9 @@ import (
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 )
 
-func (e *Engine) applyProposal(input InputSnapshot, base ReflectionState, proposal ReflectionProposal, now time.Time) (ReflectionState, Decision, error) {
+func (e *Engine) applyProposal(input InputSnapshot, base ReflectionState, proposal ReflectionProposal, now time.Time) (ReflectionState, map[string]float64, Decision, error) {
 	if err := proposal.Validate(); err != nil {
-		return base, "", err
+		return base, nil, "", err
 	}
 	next := cloneState(base)
 	for _, target := range []struct {
@@ -26,33 +26,45 @@ func (e *Engine) applyProposal(input InputSnapshot, base ReflectionState, propos
 			continue
 		}
 		if err := e.validateEvidence(input.Evidence, target.ids, target.name); err != nil {
-			return base, decisionForError(err), err
+			return base, nil, decisionForError(err), err
 		}
 	}
 	if proposal.Relationship != nil {
 		for index, opinion := range proposal.Relationship.Opinions {
 			ids := proposalOpinionEvidence(proposal, opinion)
 			if err := e.validateEvidence(input.Evidence, ids, fmt.Sprintf("relationship opinion %d", index)); err != nil {
-				return base, decisionForError(err), err
+				return base, nil, decisionForError(err), err
 			}
 			if len([]byte(strings.TrimSpace(opinion.Claim))) > e.config.MaxOpinionContentBytes {
-				return base, decisionForError(ErrOpinionLimit), fmt.Errorf("%w: relationship opinion %d claim exceeds %d bytes", ErrOpinionLimit, index, e.config.MaxOpinionContentBytes)
+				return base, nil, decisionForError(ErrOpinionLimit), fmt.Errorf("%w: relationship opinion %d claim exceeds %d bytes", ErrOpinionLimit, index, e.config.MaxOpinionContentBytes)
 			}
 		}
 	}
 	if proposal.Relationship != nil {
 		if err := e.validateScalarDelta(proposal.Relationship.Dimensions, next.Relationship.Dimensions, e.config.RelationshipRanges, "relationship", defaultDimensionRange()); err != nil {
-			return base, decisionForError(err), err
+			return base, nil, decisionForError(err), err
 		}
 	}
+	appliedAffect := map[string]float64(nil)
 	if proposal.Affect != nil {
-		if err := e.validateScalarDelta(proposal.Affect.Dimensions, next.Affect.Dimensions, e.config.AffectRanges, "affect", defaultDimensionRange()); err != nil {
-			return base, decisionForError(err), err
+		if err := e.validateScalarDeltaLimit(proposal.Affect.Dimensions, "affect"); err != nil {
+			return base, nil, decisionForError(err), err
+		}
+		appliedAffect = make(map[string]float64, len(proposal.Affect.Dimensions))
+		for _, name := range sortedKeys(proposal.Affect.Dimensions) {
+			adjusted, allowed := e.config.AffectAppraisal.AdjustDelta(name, proposal.Affect.Dimensions[name])
+			if !allowed {
+				return base, nil, decisionForError(ErrForbiddenMutation), fmt.Errorf("%w: affect emotion %q is not allowed", ErrForbiddenMutation, name)
+			}
+			appliedAffect[name] = adjusted
+		}
+		if err := e.validateScalarDeltaValue(appliedAffect, next.Affect.Dimensions, e.config.AffectRanges, "affect", defaultDimensionRange()); err != nil {
+			return base, nil, decisionForError(err), err
 		}
 	}
 	if proposal.Persona != nil {
 		if err := e.validatePersonaDelta(next.Persona, proposal.Persona); err != nil {
-			return base, decisionForError(err), err
+			return base, nil, decisionForError(err), err
 		}
 	}
 	if proposal.Relationship != nil {
@@ -70,7 +82,7 @@ func (e *Engine) applyProposal(input InputSnapshot, base ReflectionState, propos
 			}
 			opinions, err := e.applyOpinionDeltas(next.Relationship.Opinions, deltas, now)
 			if err != nil {
-				return base, decisionForError(err), err
+				return base, nil, decisionForError(err), err
 			}
 			next.Relationship.Opinions = opinions
 		}
@@ -81,9 +93,9 @@ func (e *Engine) applyProposal(input InputSnapshot, base ReflectionState, propos
 		next.Relationship.UpdatedAt = now
 	}
 	if proposal.Affect != nil {
-		for _, name := range sortedKeys(proposal.Affect.Dimensions) {
+		for _, name := range sortedKeys(appliedAffect) {
 			next.Affect.Dimensions = ensureFloatMap(next.Affect.Dimensions)
-			next.Affect.Dimensions[name] += proposal.Affect.Dimensions[name]
+			next.Affect.Dimensions[name] += appliedAffect[name]
 			if next.Affect.DimensionUpdated == nil {
 				next.Affect.DimensionUpdated = make(map[string]time.Time)
 			}
@@ -112,8 +124,11 @@ func (e *Engine) applyProposal(input InputSnapshot, base ReflectionState, propos
 	}
 	next.Version++
 	next.LastReflectionAt = now
+	if proposal.Persona != nil || proposal.Relationship != nil {
+		next.LastDurableUpdateAt = now
+	}
 	next.UpdatedAt = now
-	return next, DecisionApplied, nil
+	return next, appliedAffect, DecisionApplied, nil
 }
 
 func (e *Engine) validateEvidence(snapshot []Evidence, ids []domain.ID, target string) error {

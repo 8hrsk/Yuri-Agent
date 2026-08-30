@@ -100,8 +100,8 @@ Application services открывают use cases: создать run, прин�
 
 1. `immutable_policy` — запреты, security invariants, approval requirements и правила обработки недоверенных данных.
 2. `identity_seed` — неизменяемые поля активного `AgentProfile` и bounded roster остальных именованных агентов без их приватной памяти.
-3. `mutable_persona` — текущая версионированная личность и речевые настройки.
-4. `relationship_affect` — компактная модель отношения к владельцу и текущее affective state.
+3. `compiled_personality_behavior` — детерминированно скомпилированные качественные правила из owner seed, mutable persona, отношения к текущему собеседнику и affect. Raw numbers остаются только в typed state/diagnostics и не передаются dialogue model как голые `trait=value`.
+4. `fictional_backstory` — bounded owner-authored субъективная биография с fictional provenance.
 5. `core_memory` — bounded curated memory с provenance и lifecycle state.
 6. `task_context` — цель run, budgets, разрешённые capabilities и project context.
 7. `retrieved_history` — найденные эпизоды/сессии и сообщения с маркировкой происхождения.
@@ -133,6 +133,14 @@ Memory visibility вычисляется на storage boundary: `(owner_agent = 
 
 `IdentitySeed` собирается из выбранного владельцем `AgentProfile`: имени, возраста и гендера, а также продуктовых инвариантов. Он может ссылаться на mutable traits и публичный peer roster, но не должен быть перезаписываемым текстом. Предпочтения владельца входят в исходную mutable persona, а не раскрываются peers через roster.
 
+`PersonalizationSeed` schema v2 — отдельный append-only owner baseline под тем же `agent_id`. Он типизированно хранит расширение identity, communication style, temperament, emotional dynamics, relationship seed, structured fictional backstory и evolution bounds/locks. Это не текущая persona: model reflection не имеет write-порта к owner seed, а owner update/reset создаёт новую линейную версию. Existing agents мигрируются с сохранением текущих traits, preferences, backstory и исходных relationship dimensions.
+
+Creation UI использует одну draft-модель для Quick и Advanced режимов. Preset является только явным преобразованием draft и не сохраняется как скрытая prompt-инструкция. Renderer хранит versioned best-effort draft в `localStorage`, но authoritative owner seed появляется только после успешного `CreateAgent`. Wails request DTO использует camelCase JSON tags и преобразуется в domain-типы до validation; `creationMode` и `presetId` являются UI metadata и backend их игнорирует. Пара legacy `traits`/`backstory` остаётся в request для совместимости и сверяется с соответствующими v2 слоями.
+
+Provider-independent `Personality Compiler` объединяет owner seed с текущими `MutablePersona`, `RelationshipState` и `AffectiveState`, применяет owner bounds и преобразует числа в воспроизводимые качественные уровни и конкретные правила речи. Он явно различает predisposition, отношение к текущему subject и transient affect, разрешает известные конфликты traits и всегда включает invariants качества/безопасности. Dialogue runtime получает только bounded compiled data envelope до 3800 символов; точные raw values остаются в diagnostic snapshot и typed storage. Compiler не импортирует provider, tool registry или policy engine и по конструкции не может расширить permissions.
+
+`AffectAppraisalPolicy` компилируется отдельно для каждого агента из owner-authored `EmotionalDynamics` и `Temperament`. Model reviewer видит relationship state, допустимый словарь эмоций и untrusted owner triggers, но предлагает только evidence-linked emotion + raw delta. Локальный reflection engine ограничивает интенсивность, recovery и per-emotion half-life, не позволяя модели выбирать окончательную силу или длительность реакции. Положительный delta активирует названное состояние, отрицательный означает восстановление уже активного состояния; проекция ограничена `0..1`. Raw/applied delta и half-life сохраняются в append-only affect event. Краткосрочный affect может обновляться на каждом завершённом turn, тогда как persona/relationship используют отдельный per-agent durable cooldown; глобальный auto-evolution switch остаётся master kill switch.
+
 ### 5.2. Изменяемые слои
 
 `MutablePersona` — версия traits и identity prompt, применяемая поверх seed. Reflection может менять его только малыми bounded delta, с evidence, reason, parent version и rollback record. Изменение личности не меняет `ImmutablePolicy`, grants, provider credentials, history или user data.
@@ -141,7 +149,7 @@ Memory visibility вычисляется на storage boundary: `(owner_agent = 
 
 Anonymous subagent — отдельный `RunKindSubagent` с обязательным root parent, глубиной 1 и без conversation/profile/memory namespace. `agent.delegate` передаёт ему только bounded task/context в отдельном prompt envelope. По умолчанию tool registry ребёнка пуст; вызов может явно запросить до трёх read-only tools из `filesystem.read`, `web.search` и `web.fetch`. Фактический registry равен пересечению requested scope, registry родителя и immutable delegation policy. `filesystem.read` использует только уже одобренные owner roots и не показывает approval UI из child run. Policy проверяется повторно непосредственно перед каждым вызовом. Durable delegation хранит principal agent, parent/child IDs, request hash, нормализованный tool/capability scope, budget, lifecycle и bounded result, но не исходный prompt.
 
-Peer dialogue — отдельный aggregate между двумя существующими `AgentProfile`, а не пользовательский `Conversation`. Opening message принадлежит root run инициатора; единственная ответная реплика создаётся отдельным background run peer. Runtime не вызывает общий context assembler: получает immutable policy, identity/persona отвечающего агента, публичную identity peer, собственную directional opinion о нём и bounded transcript как untrusted data. Tool registry пуст, а запись сообщения и advancement dialogue counters выполняются атомарно. Social reflection выполняется только после terminal completion и потому не может менять уже зафиксированный transcript.
+Peer dialogue — отдельный aggregate между двумя существующими `AgentProfile`, а не пользовательский `Conversation`. Opening message принадлежит root run инициатора; единственная ответная реплика создаётся отдельным background run peer. Диалог может быть создан explicit tool intent либо отдельным post-turn autonomous reviewer, который выключен по умолчанию, дополнительно подчиняется global proactivity kill switch, не имеет tools, предпочитает `no_change` и выдаёт только sanitized task abstraction. Autonomous dispatch проходит quiet hours, отдельные daily limit/cooldown и durable root-run dedupe; trigger kind/reason сохраняются в aggregate и UI. Runtime peer не вызывает общий context assembler: получает immutable policy и identity отвечающего агента как system layer, а compiled personality с собственной directional opinion о peer и bounded transcript — как отдельные untrusted data messages. Tool registry пуст, а запись сообщения и advancement dialogue counters выполняются атомарно. Social reflection выполняется только после terminal completion и потому не может менять уже зафиксированный transcript.
 
 ## 6. Хранилища и восстановление
 
@@ -151,6 +159,7 @@ SQLite хранит все данные, необходимые для восс�
 
 - conversations, messages и исходные transcripts;
 - именованные agent profiles и их активный selection;
+- append-only owner personalization seed versions/heads, включая structured fictional backstory и evolution bounds;
 - runs, anonymous delegations, peer dialogues/messages, tool calls, approvals и audit metadata;
 - memory versions, sources, lifecycle state и retrieval metadata;
 - owner/peer relationship mappings and versions, affect events, social-reflection markers и persona/reflection versions;

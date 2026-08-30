@@ -275,6 +275,37 @@ func TestPeerDialogueRejectsActivePairDuplicateAndScopedIdempotency(t *testing.T
 	}
 }
 
+func TestPeerDialogueAutonomousLedgerAndTriggerRunLookup(t *testing.T) {
+	fixture := newPeerDialogueFixture(t, "agent-a", "agent-b", "agent-c")
+	automatic, automaticInitial := fixture.newDialogue(t, "dialogue-auto", "agent-a", "agent-b", fixture.runs["agent-a"].ID, "auto:run", fixture.now)
+	if err := automatic.MarkAutonomous("Нужна независимая проверка."); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.repos.CreatePeerDialogueWithMessage(fixture.ctx, automatic, automaticInitial); err != nil {
+		t.Fatal(err)
+	}
+	explicit, explicitInitial := fixture.newDialogue(t, "dialogue-tool", "agent-a", "agent-c", fixture.runs["agent-a"].ID, "tool:run", fixture.now.Add(time.Second))
+	if err := fixture.repos.CreatePeerDialogueWithMessage(fixture.ctx, explicit, explicitInitial); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := fixture.repos.PeerDialogues.ListAutonomousByInitiator(fixture.ctx, "agent-a", fixture.now.Add(-time.Minute), 10)
+	if err != nil || len(items) != 1 || items[0].ID != automatic.ID || items[0].TriggerReason != automatic.TriggerReason {
+		t.Fatalf("autonomous ledger = %#v, err = %v", items, err)
+	}
+	if _, err := fixture.database.ExecContext(fixture.ctx, `UPDATE peer_dialogues SET trigger_reason = 'подменено' WHERE id = ?`, automatic.ID.String()); err == nil || !strings.Contains(strings.ToLower(err.Error()), "immutable") {
+		t.Fatalf("trigger provenance update error = %v", err)
+	}
+	exists, err := fixture.repos.PeerDialogues.HasByTriggerRun(fixture.ctx, "agent-a", fixture.runs["agent-a"].ID)
+	if err != nil || !exists {
+		t.Fatalf("trigger-run lookup = %v, err = %v", exists, err)
+	}
+	exists, err = fixture.repos.PeerDialogues.HasByTriggerRun(fixture.ctx, "agent-b", fixture.runs["agent-a"].ID)
+	if err != nil || exists {
+		t.Fatalf("cross-initiator trigger-run lookup = %v, err = %v", exists, err)
+	}
+}
+
 func TestPeerDialogueSQLiteTriggersValidateRootSourceAndAlternation(t *testing.T) {
 	fixture := newPeerDialogueFixture(t, "agent-a", "agent-b", "agent-c")
 	dialogue, initial := fixture.newDialogue(t, "dialogue-trigger", "agent-a", "agent-b", fixture.runs["agent-a"].ID, "trigger-key", fixture.now)

@@ -17,7 +17,7 @@ import { Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
 import { useBackendConnection } from './hooks/useBackendConnection'
 import { useSidebarCollapse } from './hooks/useSidebarCollapse'
-import { defaultAgentDraft } from './lib/agents'
+import { clearAgentDraft, loadAgentDraft, newAgentDraft } from './lib/agents'
 import { createYuriClient } from './lib/client'
 import type { AgentProfile, AgentProfileInput } from './lib/contracts'
 import { isOnboardingComplete } from './lib/onboarding'
@@ -34,7 +34,7 @@ function App() {
   const [agentsStatus, setAgentsStatus] = useState<'loading' | 'ready'>('loading')
   const [agents, setAgents] = useState<AgentProfile[]>([])
   const [agentFormOpen, setAgentFormOpen] = useState(false)
-  const [agentDraft, setAgentDraft] = useState<AgentProfileInput>(() => ({ ...defaultAgentDraft, name: '', preferences: '', traits: { ...defaultAgentDraft.traits } }))
+  const [agentDraft, setAgentDraft] = useState<AgentProfileInput>(() => loadAgentDraft(newAgentDraft({ name: '', preferences: '' })))
   const [agentBusy, setAgentBusy] = useState(false)
   const [agentError, setAgentError] = useState<string>()
   const backend = useBackendConnection()
@@ -90,7 +90,7 @@ function App() {
   const openChatTab = useCallback(() => setActiveId('chat'), [])
 
   const openAgentForm = () => {
-    setAgentDraft({ ...defaultAgentDraft, name: '', preferences: '', traits: { ...defaultAgentDraft.traits } })
+    setAgentDraft(loadAgentDraft(newAgentDraft({ name: '', preferences: '' })))
     setAgentError(undefined)
     setAgentFormOpen(true)
   }
@@ -102,6 +102,7 @@ function App() {
       const created = await client.createAgent(agentDraft)
       setActiveAgent(created)
       setAgents((current) => [...current.map((agent) => ({ ...agent, active: false })), { ...created, active: true }])
+      clearAgentDraft()
       setAgentFormOpen(false)
     } catch (cause) {
       setAgentError(cause instanceof Error ? cause.message : 'Не удалось создать агента.')

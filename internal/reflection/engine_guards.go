@@ -7,6 +7,13 @@ import (
 )
 
 func (e *Engine) validateScalarDelta(delta, current map[string]float64, ranges map[string]ValueRange, target string, fallback ValueRange) error {
+	if err := e.validateScalarDeltaLimit(delta, target); err != nil {
+		return err
+	}
+	return e.validateScalarDeltaValue(delta, current, ranges, target, fallback)
+}
+
+func (e *Engine) validateScalarDeltaLimit(delta map[string]float64, target string) error {
 	for _, name := range sortedKeys(delta) {
 		value := delta[name]
 		limit := e.config.MaxDelta
@@ -16,6 +23,13 @@ func (e *Engine) validateScalarDelta(delta, current map[string]float64, ranges m
 		if math.Abs(value) > limit {
 			return fmt.Errorf("%w: %s %q delta %.6f exceeds %.6f", ErrDeltaExceeded, target, name, value, limit)
 		}
+	}
+	return nil
+}
+
+func (e *Engine) validateScalarDeltaValue(delta, current map[string]float64, ranges map[string]ValueRange, target string, fallback ValueRange) error {
+	for _, name := range sortedKeys(delta) {
+		value := delta[name]
 		base := current[name]
 		bounds := lookupRange(ranges, name, fallback)
 		if target == "relationship" {

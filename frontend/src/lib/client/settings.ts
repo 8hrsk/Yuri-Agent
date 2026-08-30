@@ -42,6 +42,9 @@ const defaultProactivitySettings: ProactivitySettings = {
   dailyLimit: 5,
   cooldownMinutes: 30,
   allowLocalNotifications: true,
+  autonomousPeerDialogues: false,
+  autonomousPeerDailyLimit: 2,
+  autonomousPeerCooldownMinutes: 120,
 }
 
 const defaultWebSearchSettings: WebSearchSettings = {
@@ -151,6 +154,9 @@ function proactivityWire(input: ProactivitySettings): UnknownRecord {
     daily_limit: input.dailyLimit,
     cooldown_minutes: input.cooldownMinutes,
     allow_local_notifications: input.allowLocalNotifications,
+    autonomous_peer_dialogues: input.autonomousPeerDialogues,
+    autonomous_peer_daily_limit: input.autonomousPeerDailyLimit,
+    autonomous_peer_cooldown_minutes: input.autonomousPeerCooldownMinutes,
   }
 }
 
@@ -161,6 +167,8 @@ function normalizeProactivitySettings(value: unknown): ProactivitySettings {
   const timezone = optionalString(source, 'timezone', 'timeZone', 'time_zone') ?? defaultProactivitySettings.timezone
   const dailyLimit = optionalNumber(source, 'dailyLimit', 'daily_limit', 'maxPerDay', 'max_per_day')
   const cooldownMinutes = optionalNumber(source, 'cooldownMinutes', 'cooldown_minutes', 'cooldown')
+  const autonomousPeerDailyLimit = optionalNumber(source, 'autonomousPeerDailyLimit', 'autonomous_peer_daily_limit')
+  const autonomousPeerCooldownMinutes = optionalNumber(source, 'autonomousPeerCooldownMinutes', 'autonomous_peer_cooldown_minutes')
   return {
     enabled: source.enabled === undefined && source.globalEnabled === undefined && source.global_enabled === undefined
       ? defaultProactivitySettings.enabled
@@ -176,6 +184,11 @@ function normalizeProactivitySettings(value: unknown): ProactivitySettings {
     allowLocalNotifications: source.allowLocalNotifications === undefined && source.allow_local_notifications === undefined && source.notificationsEnabled === undefined
       ? defaultProactivitySettings.allowLocalNotifications
       : Boolean(source.allowLocalNotifications ?? source.allow_local_notifications ?? source.notificationsEnabled),
+    autonomousPeerDialogues: source.autonomousPeerDialogues === undefined && source.autonomous_peer_dialogues === undefined
+      ? defaultProactivitySettings.autonomousPeerDialogues
+      : Boolean(source.autonomousPeerDialogues ?? source.autonomous_peer_dialogues),
+    autonomousPeerDailyLimit: Math.max(1, Math.round(autonomousPeerDailyLimit ?? defaultProactivitySettings.autonomousPeerDailyLimit)),
+    autonomousPeerCooldownMinutes: Math.max(5, Math.round(autonomousPeerCooldownMinutes ?? defaultProactivitySettings.autonomousPeerCooldownMinutes)),
   }
 }
 

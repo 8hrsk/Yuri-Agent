@@ -45,6 +45,10 @@ func TestPeerSocialReflectionCreatesDirectionalOpinionsAndAffectAtomically(t *te
 		if _, err := bridge.repositories.PeerSocial.GetReflection(context.Background(), dialogue.ID, id); err != nil {
 			t.Fatalf("missing marker for %s: %v", id, err)
 		}
+		events, err := bridge.repositories.Affect.ListEvents(context.Background(), id, 10)
+		if err != nil || len(events) != 1 || events[0].Intensity <= 0 || events[0].HalfLifeSeconds <= 0 || events[0].Provenance != "peer_social_appraisal" {
+			t.Fatalf("bounded peer appraisal for %s = %#v, %v", id, events, err)
+		}
 	}
 	requests := backend.snapshot()
 	if len(requests) != 2 {
@@ -63,9 +67,11 @@ func TestPeerSocialReflectionCreatesDirectionalOpinionsAndAffectAtomically(t *te
 	if _, _, _, err := bridge.runPeerDialogueTurn(context.Background(), dialogue, messages, initiatorID, peerID, turnBackend, "test-model"); err != nil {
 		t.Fatal(err)
 	}
-	peerPrompt := turnBackend.request.Messages[0].Content
-	if !strings.Contains(peerPrompt, left.Opinions[0].Text()) || strings.Contains(peerPrompt, right.Opinions[0].Text()) {
-		t.Fatalf("directional opinion context leaked or missing: %q", peerPrompt)
+	peerSystem := turnBackend.request.Messages[0].Content
+	peerBehavior := turnBackend.request.Messages[1].Content
+	if strings.Contains(peerSystem, left.Opinions[0].Text()) || strings.Contains(peerSystem, right.Opinions[0].Text()) ||
+		!strings.Contains(peerBehavior, left.Opinions[0].Text()) || strings.Contains(peerBehavior, right.Opinions[0].Text()) {
+		t.Fatalf("directional opinion context leaked or missing: system=%q behavior=%q", peerSystem, peerBehavior)
 	}
 	if second, err := bridge.reflectOnPeerDialogueParticipants(context.Background(), backend, "test-model", dialogue); err != nil || second != 0 || len(backend.snapshot()) != 2 {
 		t.Fatalf("idempotent social reflection=%d err=%v requests=%d", second, err, len(backend.snapshot()))

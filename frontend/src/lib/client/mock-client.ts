@@ -3,6 +3,7 @@ import type {
   ActivityListOptions,
   AgentProfile,
   AgentProfileInput,
+  AgentPersonalizationProfile,
   ApprovalDecision,
   ApprovalRequest,
   ArchiveSearchRequest,
@@ -54,6 +55,7 @@ import type {
   WebSearchSettings,
   YuriClient,
 } from '../contracts'
+import { clonePersonalization } from '../agents'
 import { aggregateChatEvent } from '../chat-trace'
 import { pluginEnablePayload } from '../plugin-consent'
 import { clonePersonalitySnapshot, createStarterPersonalitySnapshot } from '../personality'
@@ -128,6 +130,7 @@ class MockYuriClient implements YuriClient {
   }
   private onboarding: OnboardingState = { ...defaultOnboardingState }
   private readonly agents = new Map<string, AgentProfile>()
+  private readonly agentPersonalization = new Map<string, AgentPersonalizationProfile>()
   private activeAgentId?: string
   private allowedDirectories: string[] = []
   // The offline preview has no config file to persist to, so dev mode lives
@@ -241,6 +244,11 @@ class MockYuriClient implements YuriClient {
     return agent ? { ...agent, backstory: agent.backstory, traits: { ...agent.traits }, active: true } : undefined
   }
 
+  async getActiveAgentPersonalization(): Promise<AgentPersonalizationProfile | undefined> {
+    const value = this.activeAgentId ? this.agentPersonalization.get(this.activeAgentId) : undefined
+    return value ? { ...value, ...clonePersonalization(value), temperament: { ...value.temperament } } : undefined
+  }
+
   async createAgent(input: AgentProfileInput): Promise<AgentProfile> {
     const now = nowIso()
     const agent: AgentProfile = {
@@ -249,6 +257,11 @@ class MockYuriClient implements YuriClient {
       createdAt: now, updatedAt: now,
     }
     this.agents.set(agent.id, agent)
+    this.agentPersonalization.set(agent.id, {
+      ...clonePersonalization(input.personalization), agentId: agent.id, schemaVersion: 2, version: 1,
+      revisionId: `${agent.id}:personalization:v1`, operation: 'create', reason: 'owner configured personalization profile v2',
+      createdAt: now, updatedAt: now, temperament: { ...input.traits },
+    })
     this.activeAgentId = agent.id
     this.onboarding = {
       ...this.onboarding,
@@ -816,6 +829,8 @@ class MockYuriClient implements YuriClient {
       ...input,
       dailyLimit: Math.max(0, Math.round(input.dailyLimit)),
       cooldownMinutes: Math.max(0, Math.round(input.cooldownMinutes)),
+      autonomousPeerDailyLimit: Math.max(1, Math.min(10, Math.round(input.autonomousPeerDailyLimit))),
+      autonomousPeerCooldownMinutes: Math.max(5, Math.min(1440, Math.round(input.autonomousPeerCooldownMinutes))),
     }
     this.appendActivity({
       id: makeId('activity'),

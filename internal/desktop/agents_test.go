@@ -108,12 +108,106 @@ func TestCreateAgentPersistsOwnerIdentityAndInitialPersona(t *testing.T) {
 	if _, err := bridge.repositories.Affect.Get(context.Background(), domain.ID(created.ID)); err != nil {
 		t.Fatalf("affect defaults missing: %v", err)
 	}
+	personalization, err := bridge.repositories.Personalization.Get(context.Background(), domain.ID(created.ID))
+	if err != nil {
+		t.Fatalf("personalization v2 seed missing: %v", err)
+	}
+	if personalization.SchemaVersion != domain.PersonalizationSchemaVersion || personalization.Temperament.Warmth != .31 || personalization.Temperament.Directness != .91 || personalization.Backstory.Narrative != profile.Backstory {
+		t.Fatalf("personalization v2 seed = %#v", personalization)
+	}
+	view, err := bridge.GetActiveAgentPersonalization()
+	if err != nil || view.AgentID != created.ID || view.SchemaVersion != domain.PersonalizationSchemaVersion || view.Temperament.Warmth != .31 {
+		t.Fatalf("personalization bridge view = %#v, %v", view, err)
+	}
 	loaded, err := config.Load(bridge.paths)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if loaded.Persona.ProfileID != created.ID || !loaded.Onboarding.AgentConfigured {
 		t.Fatalf("persisted config = %#v", loaded)
+	}
+}
+
+func TestCreateAgentRoundTripsPersonalizationProfileV2(t *testing.T) {
+	bridge := newAgentTestBridge(t)
+	now := time.Date(2026, 8, 31, 20, 0, 0, 0, time.UTC)
+	templateProfile, err := domain.NewAgentProfileWithBackstory("template", "Эми", 22, "female", "Спокойная исследовательница.", "Выросла рядом с обсерваторией.", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template, err := domain.NewPersonalizationSeed(templateProfile, map[string]float64{"warmth": .81, "fearfulness": .67}, nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template.Identity.Pronouns = "она/её"
+	template.Identity.UserAddress = "капитан"
+	template.Identity.Role = "звёздный картограф"
+	template.CommunicationStyle.Verbosity = .83
+	template.CommunicationStyle.Figurativeness = .77
+	template.EmotionalDynamics.ConflictStyle = "cold"
+	template.EmotionalDynamics.Triggers = map[string][]string{"fear": {"потеря связи"}}
+	template.EmotionalDynamics.SoothingStrategies = []string{"свериться с картой"}
+	template.RelationshipSeed = domain.RelationshipSeed{Preset: domain.RelationshipSeedFriends, Dimensions: map[string]float64{"trust": .72, "respect": .78, "closeness": .66}, Summary: "Давно исследуют вместе."}
+	template.Backstory = domain.StructuredBackstory{
+		Narrative: templateProfile.Backstory, Summary: "Картограф, выросшая у обсерватории.",
+		Episodes: []domain.BackstoryEpisode{{ID: "first-comet", Title: "Первая комета", Content: "Впервые увидела комету вместе с наставницей.", Kind: "formative", People: []string{"наставница"}, Place: "обсерватория", EmotionalValence: .8, Sequence: 1}},
+	}
+	created, err := bridge.CreateAgent(CreateAgentInput{
+		Name: templateProfile.Name, Age: templateProfile.Age, Gender: templateProfile.Gender,
+		Preferences: templateProfile.Preferences, Backstory: templateProfile.Backstory,
+		Traits: map[string]float64{"warmth": .81, "fearfulness": .67},
+		Personalization: &CreateAgentPersonalizationInput{
+			Identity: CreateAgentIdentityInput{
+				PreferredLanguage: template.Identity.PreferredLanguage, Pronouns: template.Identity.Pronouns,
+				UserAddress: template.Identity.UserAddress, SelfDescription: template.Identity.SelfDescription, Role: template.Identity.Role,
+			},
+			CommunicationStyle: CreateAgentCommunicationStyleInput{
+				Verbosity: template.CommunicationStyle.Verbosity, Softness: template.CommunicationStyle.Softness,
+				Humor: template.CommunicationStyle.Humor, Figurativeness: template.CommunicationStyle.Figurativeness,
+				Expressiveness: template.CommunicationStyle.Expressiveness, Supportiveness: template.CommunicationStyle.Supportiveness,
+				Formality: template.CommunicationStyle.Formality, Teasing: template.CommunicationStyle.Teasing,
+				EmojiFrequency: template.CommunicationStyle.EmojiFrequency, Flirtation: template.CommunicationStyle.Flirtation,
+				ConversationalInitiative: template.CommunicationStyle.ConversationalInitiative,
+			},
+			EmotionalDynamics: CreateAgentEmotionalDynamicsInput{
+				Reactivity: template.EmotionalDynamics.Reactivity, ResponseIntensity: template.EmotionalDynamics.ResponseIntensity,
+				RecoverySpeed: template.EmotionalDynamics.RecoverySpeed, PositivePersistence: template.EmotionalDynamics.PositivePersistence,
+				NegativePersistence: template.EmotionalDynamics.NegativePersistence, Expression: template.EmotionalDynamics.Expression,
+				Masking: template.EmotionalDynamics.Masking, ConflictStyle: template.EmotionalDynamics.ConflictStyle,
+				Triggers: template.EmotionalDynamics.Triggers, SoothingStrategies: template.EmotionalDynamics.SoothingStrategies,
+			},
+			RelationshipSeed: CreateAgentRelationshipSeedInput{
+				Preset: string(template.RelationshipSeed.Preset), Dimensions: template.RelationshipSeed.Dimensions, Summary: template.RelationshipSeed.Summary,
+			},
+			StructuredBackstory: CreateAgentStructuredBackstoryInput{
+				Narrative: template.Backstory.Narrative, Summary: template.Backstory.Summary,
+				Episodes: []CreateAgentBackstoryEpisodeInput{{ID: "first-comet", Title: "Первая комета", Content: "Впервые увидела комету вместе с наставницей.", Kind: "formative", People: []string{"наставница"}, Place: "обсерватория", EmotionalValence: .8, Sequence: 1}},
+			},
+			EvolutionPolicy: CreateAgentEvolutionPolicyInput{
+				LockedFields: template.EvolutionPolicy.LockedFields, TraitBounds: map[string]CreateAgentNumericRangeInput{"warmth": {Min: 0, Max: 1}, "fearfulness": {Min: 0, Max: 1}},
+				ReflectionMode: "disabled", ReflectionCooldownMinutes: 90,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := bridge.repositories.Personalization.Get(context.Background(), domain.ID(created.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Identity.Pronouns != "она/её" || stored.Identity.UserAddress != "капитан" || stored.Identity.Role != "звёздный картограф" ||
+		stored.CommunicationStyle.Verbosity != .83 || stored.CommunicationStyle.Figurativeness != .77 ||
+		stored.Temperament.Warmth != .81 || stored.Temperament.Fearfulness != .67 ||
+		stored.EmotionalDynamics.ConflictStyle != "cold" || stored.EmotionalDynamics.Triggers["fear"][0] != "потеря связи" ||
+		stored.RelationshipSeed.Preset != domain.RelationshipSeedFriends || stored.RelationshipSeed.Dimensions["closeness"] != .66 ||
+		stored.Backstory.Summary != "Картограф, выросшая у обсерватории." || len(stored.Backstory.Episodes) != 1 || stored.Backstory.Episodes[0].ID != "first-comet" ||
+		stored.EvolutionPolicy.TraitBounds["warmth"] != (domain.NumericRange{Min: 0, Max: 1}) || stored.EvolutionPolicy.ReflectionMode != domain.PersonalizationReflectionDisabled || stored.EvolutionPolicy.ReflectionCooldownMinutes != 90 {
+		t.Fatalf("personalization v2 did not round-trip: %#v", stored)
+	}
+	view, err := bridge.GetActiveAgentPersonalization()
+	if err != nil || view.AgentID != created.ID || view.Identity.UserAddress != "капитан" || view.Backstory.Episodes[0].Place != "обсерватория" {
+		t.Fatalf("personalization view = %#v, %v", view, err)
 	}
 }
 

@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,7 +26,7 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 	}
 	b.mu.Lock()
 	enabled := b.config.Persona.AutoEvolution
-	cooldown := time.Duration(b.config.Persona.ReflectionCooldownMinutes) * time.Minute
+	defaultCooldown := time.Duration(b.config.Persona.ReflectionCooldownMinutes) * time.Minute
 	coordinator := b.reflectionRuns
 	gate := b.reflectionGate
 	if gate == nil {
@@ -50,6 +52,10 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 		b.logReflectionFailure(ctx, turn.RunID, err)
 		return
 	}
+	if !domainState.personalization.EvolutionPolicy.ReflectionEnabled(enabled) {
+		return
+	}
+	cooldown := domainState.personalization.EvolutionPolicy.ReflectionCooldown(defaultCooldown)
 	modelAnalyzer, err := reflection.NewModelAnalyzer(modelReflectionBackend{backend: backend, model: model})
 	if err != nil {
 		b.logReflectionFailure(ctx, turn.RunID, err)
@@ -58,14 +64,25 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 	config := reflection.DefaultConfig()
 	config.Analyzer = modelAnalyzer
 	config.Coordinator = coordinator
-	config.Cooldown = cooldown
+	config.DurableStateCooldown = cooldown
 	config.MaxDelta = .10
 	config.MinimumEvidence = 1
 	config.MinimumEvidenceWeight = .5
 	config.Budget = reflection.ReflectionBudget{MaxDuration: 60 * time.Second, MaxTokens: 2_500, MaxInputBytes: 64 * 1024, MaxOutputBytes: 16 * 1024, MaxEvidence: 8}
 	config.TraitRanges = rangesFor(state.Persona.Traits, 0, 1)
 	config.RelationshipRanges = rangesFor(state.Relationship.Dimensions, 0, 1)
-	config.AffectRanges = rangesFor(state.Affect.Dimensions, -1, 1)
+	config.AffectRanges = rangesFor(state.Affect.Dimensions, 0, 1)
+	for name := range defaultAffectDimensions() {
+		if _, exists := config.AffectRanges[name]; !exists {
+			config.AffectRanges[name] = reflection.ValueRange{Min: 0, Max: 1}
+		}
+	}
+	appraisalPolicy := reflection.NewAffectAppraisalPolicy(
+		domainState.personalization.EmotionalDynamics,
+		domainState.personalization.Temperament,
+		sortedRangeKeys(config.AffectRanges),
+	)
+	config.AffectAppraisal = appraisalPolicy
 	config.PinnedTraits = make(map[string]bool, len(state.Persona.PinnedTraits))
 	for _, name := range state.Persona.PinnedTraits {
 		config.PinnedTraits[name] = true
@@ -89,7 +106,7 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 	result, err := engine.Run(ctx, reflection.InputSnapshot{
 		ProfileID: profileID, RunID: turn.RunID, Trigger: reflection.TriggerPostTurn,
 		CapturedAt: turn.Now, ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, roster),
-		State: state, Evidence: evidence,
+		AffectPolicy: appraisalPolicy, State: state, Evidence: evidence,
 	})
 	if err != nil {
 		// Guard rejections are expected safe no-ops. They are logged without
@@ -117,10 +134,20 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 	}
 }
 
+func sortedRangeKeys(values map[string]reflection.ValueRange) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 type reflectionDomainState struct {
-	persona      domain.MutablePersona
-	relationship domain.RelationshipState
-	affect       domain.AffectiveState
+	persona         domain.MutablePersona
+	relationship    domain.RelationshipState
+	affect          domain.AffectiveState
+	personalization domain.PersonalizationSeed
 }
 
 func (b *Bridge) reflectionSnapshot(ctx context.Context, turn memory.Turn, agentIDs ...domain.ID) (reflection.ReflectionState, reflectionDomainState, []reflection.Evidence, error) {
@@ -137,6 +164,10 @@ func (b *Bridge) reflectionSnapshot(ctx context.Context, turn memory.Turn, agent
 		return reflection.ReflectionState{}, reflectionDomainState{}, nil, err
 	}
 	affect, err := b.repositories.Affect.Get(ctx, profileID)
+	if err != nil {
+		return reflection.ReflectionState{}, reflectionDomainState{}, nil, err
+	}
+	personalization, err := b.repositories.Personalization.Get(ctx, profileID)
 	if err != nil {
 		return reflection.ReflectionState{}, reflectionDomainState{}, nil, err
 	}
@@ -180,7 +211,16 @@ func (b *Bridge) reflectionSnapshot(ctx context.Context, turn memory.Turn, agent
 			state.LastReflectionAt = candidate.at
 		}
 	}
-	return state, reflectionDomainState{persona: persona, relationship: relationship, affect: affect}, evidence, nil
+	for _, candidate := range []struct {
+		version uint64
+		runID   domain.ID
+		at      time.Time
+	}{{persona.Version, persona.AuthorRunID, persona.UpdatedAt}, {relationship.Version, relationship.AuthorRunID, relationship.UpdatedAt}} {
+		if candidate.version > 1 && !candidate.runID.Empty() && candidate.at.After(state.LastDurableUpdateAt) {
+			state.LastDurableUpdateAt = candidate.at
+		}
+	}
+	return state, reflectionDomainState{persona: persona, relationship: relationship, affect: affect, personalization: personalization}, evidence, nil
 }
 
 func reflectionMutation(result reflection.ReflectionResult, current reflectionDomainState, evidence []reflection.Evidence) (storage.ReflectionStateMutation, error) {
@@ -250,8 +290,12 @@ func reflectionMutation(result reflection.ReflectionResult, current reflectionDo
 		mutation.Affect, mutation.ExpectedAffect = &next, current.affect.Version
 		if result.Proposal.Affect != nil {
 			affectEvidence := selectedEvidenceLinks(links, proposalAffectEvidenceIDs(result.Proposal))
-			for _, name := range sortedFloatKeys(result.Proposal.Affect.Dimensions) {
-				delta := result.Proposal.Affect.Dimensions[name]
+			applied := result.AppliedAffectDeltas
+			if len(applied) == 0 {
+				applied = result.Proposal.Affect.Dimensions
+			}
+			for _, name := range sortedFloatKeys(applied) {
+				delta := applied[name]
 				if delta == 0 {
 					continue
 				}
@@ -260,12 +304,20 @@ func reflectionMutation(result reflection.ReflectionResult, current reflectionDo
 				if delta < 0 {
 					valence = -1
 				}
+				halfLifeSeconds := result.AffectHalfLifeSeconds[name]
+				if halfLifeSeconds <= 0 {
+					halfLifeSeconds = int64((7 * 24 * time.Hour).Seconds())
+				}
+				metadata, _ := json.Marshal(map[string]any{
+					"appraisal": "bounded_v1", "raw_delta": result.Proposal.Affect.Dimensions[name],
+					"applied_delta": delta, "half_life_seconds": halfLifeSeconds,
+				})
 				mutation.AffectEvents = append(mutation.AffectEvents, domain.AffectiveEvent{
 					ID: domain.ID("affect-event-" + hex.EncodeToString(sum[:8])), AffectID: current.affect.ID,
 					SourceID: result.RunID, SourceType: "post_turn_reflection", RunID: result.RunID,
 					Emotion: name, Intensity: math.Abs(delta), Valence: valence,
-					DecayPolicy: domain.AffectiveDecayExponential, HalfLifeSeconds: int64((7 * 24 * time.Hour).Seconds()),
-					Provenance: "reflection", Evidence: affectEvidence, CreatedAt: result.FinishedAt,
+					DecayPolicy: domain.AffectiveDecayExponential, HalfLifeSeconds: halfLifeSeconds,
+					Provenance: "reflection_appraisal", Evidence: affectEvidence, MetadataJSON: string(metadata), CreatedAt: result.FinishedAt,
 				})
 			}
 		}

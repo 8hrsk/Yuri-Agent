@@ -1,4 +1,4 @@
-import type { AgentProfile, AgentProfileInput } from './agents'
+import type { AgentPersonalizationProfile, AgentProfile, AgentProfileInput } from './agents'
 import type { ArchiveSearchRequest, ArchiveSearchResponse, PluginInstallRequest } from './archive'
 import type {
   EncryptedBackupInfo,
@@ -51,6 +51,7 @@ export interface YuriClient {
   listChatTools(): Promise<ChatTool[]>
   listAgents(): Promise<AgentProfile[]>
   getActiveAgent(): Promise<AgentProfile | undefined>
+  getActiveAgentPersonalization(): Promise<AgentPersonalizationProfile | undefined>
   createAgent(input: AgentProfileInput): Promise<AgentProfile>
   setActiveAgent(agentId: string): Promise<AgentProfile>
   sendMessage(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult>

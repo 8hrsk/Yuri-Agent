@@ -3,6 +3,7 @@ package desktop
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/OrdoAI/yuri-agent/internal/config"
@@ -128,10 +129,15 @@ func TestMutableContextKeepsOpinionsExplicitlySubjective(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := formatMutablePersonaContext(persona); got == "" {
-		t.Fatal("mutable persona context is empty")
+	seed, err := bridge.repositories.Personalization.Get(context.Background(), bridge.personaProfileID())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := formatRelationshipContext(relationship, affect); len(got) == 0 || got[:10] != "Subjective" {
-		t.Fatalf("relationship context = %q", got)
+	compiled, err := compilePersonalityContext(seed, persona, relationship, affect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(compiled.BehavioralContext, "Текущее субъективное отношение") || strings.Contains(compiled.BehavioralContext, "relationship.trust=") {
+		t.Fatalf("compiled personality context = %q", compiled.BehavioralContext)
 	}
 }

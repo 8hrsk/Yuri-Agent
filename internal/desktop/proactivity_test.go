@@ -37,6 +37,7 @@ func TestProactivitySettingsRoundTrip(t *testing.T) {
 	input := ProactivitySettingsView{
 		Enabled: true, QuietHoursEnabled: true, QuietHoursStart: "22:00", QuietHoursEnd: "06:30",
 		Timezone: "Europe/Moscow", DailyLimit: 7, CooldownMinutes: 45, AllowLocalNotifications: true,
+		AutonomousPeerDialogues: true, AutonomousPeerDailyLimit: 3, AutonomousPeerCooldownMinutes: 90,
 	}
 	if err := bridge.SaveProactivitySettings(input); err != nil {
 		t.Fatal(err)

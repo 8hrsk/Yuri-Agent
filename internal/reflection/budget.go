@@ -85,7 +85,9 @@ type Config struct {
 	MinimumEvidence        int
 	MinimumEvidenceWeight  float64
 	Cooldown               time.Duration
+	DurableStateCooldown   time.Duration
 	AffectDecay            DecayPolicy
+	AffectAppraisal        AffectAppraisalPolicy
 	TraitRanges            map[string]ValueRange
 	RelationshipRanges     map[string]ValueRange
 	AffectRanges           map[string]ValueRange

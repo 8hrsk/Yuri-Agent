@@ -83,16 +83,18 @@ type Proposal = ReflectionProposal
 // audit adapters should write State/Proposal atomically with their own
 // version/parent checks; Engine itself performs no durable writes.
 type ReflectionResult struct {
-	ProfileID          domain.ID          `json:"profile_id"`
-	RunID              domain.ID          `json:"run_id"`
-	Outcome            Outcome            `json:"outcome"`
-	Decision           Decision           `json:"decision"`
-	Proposal           ReflectionProposal `json:"proposal"`
-	State              ReflectionState    `json:"state"`
-	AffectDecayChanged bool               `json:"affect_decay_changed"`
-	Usage              Usage              `json:"usage,omitempty"`
-	StartedAt          time.Time          `json:"started_at"`
-	FinishedAt         time.Time          `json:"finished_at"`
+	ProfileID             domain.ID          `json:"profile_id"`
+	RunID                 domain.ID          `json:"run_id"`
+	Outcome               Outcome            `json:"outcome"`
+	Decision              Decision           `json:"decision"`
+	Proposal              ReflectionProposal `json:"proposal"`
+	State                 ReflectionState    `json:"state"`
+	AffectDecayChanged    bool               `json:"affect_decay_changed"`
+	AppliedAffectDeltas   map[string]float64 `json:"applied_affect_deltas,omitempty"`
+	AffectHalfLifeSeconds map[string]int64   `json:"affect_half_life_seconds,omitempty"`
+	Usage                 Usage              `json:"usage,omitempty"`
+	StartedAt             time.Time          `json:"started_at"`
+	FinishedAt            time.Time          `json:"finished_at"`
 }
 
 func (r ReflectionResult) Changed() bool  { return r.Outcome == OutcomeChanged }

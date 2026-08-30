@@ -78,14 +78,15 @@ type AuditEvent struct {
 // Repositories groups all SQLite adapters. Each field is safe to pass
 // to application services that depend on the corresponding domain port.
 type Repositories struct {
-	Agents        *AgentRepository
-	Conversations *ConversationRepository
-	Messages      *MessageRepository
-	Memories      *MemoryRepository
-	Archive       *ArchiveRepository
-	Runs          *RunRepository
-	Delegations   *DelegationRepository
-	PeerDialogues *PeerDialogueRepository
+	Agents          *AgentRepository
+	Personalization *PersonalizationRepository
+	Conversations   *ConversationRepository
+	Messages        *MessageRepository
+	Memories        *MemoryRepository
+	Archive         *ArchiveRepository
+	Runs            *RunRepository
+	Delegations     *DelegationRepository
+	PeerDialogues   *PeerDialogueRepository
 	// PeerDialogueMessages is kept separate from the dialogue aggregate so
 	// callers can read bounded turns without gaining an unscoped write path.
 	PeerDialogueMessages *PeerDialogueMessageRepository
@@ -111,6 +112,7 @@ func NewRepositories(database *sql.DB) (*Repositories, error) {
 	}
 	return &Repositories{
 		Agents:               NewAgentRepository(database),
+		Personalization:      NewPersonalizationRepository(database),
 		Conversations:        NewConversationRepository(database),
 		Messages:             NewMessageRepository(database),
 		Memories:             NewMemoryRepository(database),

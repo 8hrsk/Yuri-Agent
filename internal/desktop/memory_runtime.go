@@ -208,6 +208,9 @@ func (b *Bridge) reviewTurnInBackground(engine *memory.Engine, backend agent.Mod
 			if _, reconcileErr := b.reconcileCompletedPeerSocialReflections(ctx, backend, model, 10); reconcileErr != nil && b.logger != nil && ctx.Err() == nil {
 				b.logger.WarnContext(ctx, "reconcile peer social reflection", "run_id", turn.RunID, "error", safeError(reconcileErr.Error()))
 			}
+			if _, triggerErr := b.maybeStartAutonomousPeerDialogue(ctx, backend, model, turn, agentID); triggerErr != nil && b.logger != nil && ctx.Err() == nil {
+				b.logger.WarnContext(ctx, "autonomous peer trigger failed", "run_id", turn.RunID, "error", safeError(triggerErr.Error()))
+			}
 		}
 	}()
 }

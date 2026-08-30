@@ -4,6 +4,7 @@ import type {
   ApprovalDecision,
   AgentProfile,
   AgentProfileInput,
+  AgentPersonalizationProfile,
   ArchiveSearchRequest,
   ArchiveSearchResponse,
   ChatEvent,
@@ -50,7 +51,7 @@ import type {
   WebSearchSettings,
   YuriClient,
 } from '../contracts'
-import { normalizeAgentProfile } from '../agents'
+import { normalizeAgentPersonalizationProfile, normalizeAgentProfile } from '../agents'
 import { pluginEnablePayload } from '../plugin-consent'
 import { normalizePersonalitySnapshot } from '../personality'
 import { callBridge, callBridgeSafe, findBridgeMethod, subscribeRuntimeEvent } from './bridge'
@@ -284,6 +285,10 @@ class WailsYuriClient implements YuriClient {
 
   async getActiveAgent(): Promise<AgentProfile | undefined> {
     return normalizeAgentProfile(await callBridgeSafe<unknown>(['GetActiveAgent', 'GetActiveAgentProfile']))
+  }
+
+  async getActiveAgentPersonalization(): Promise<AgentPersonalizationProfile | undefined> {
+    return normalizeAgentPersonalizationProfile(await callBridgeSafe<unknown>(['GetActiveAgentPersonalization']))
   }
 
   async createAgent(input: AgentProfileInput): Promise<AgentProfile> {

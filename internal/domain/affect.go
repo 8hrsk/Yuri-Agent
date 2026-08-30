@@ -50,16 +50,19 @@ func (p AffectiveDecayPolicy) Valid() bool {
 // constants. Values in AffectiveState are signed [-1,1] contributions; event
 // intensity is unsigned and valence supplies the sign.
 const (
-	EmotionSympathy   = "sympathy"
-	EmotionTenderness = "tenderness"
-	EmotionJoy        = "joy"
-	EmotionGratitude  = "gratitude"
-	EmotionLonging    = "longing"
-	EmotionAnger      = "anger"
-	EmotionIrritation = "irritation"
-	EmotionJealousy   = "jealousy"
-	EmotionResentment = "resentment"
-	EmotionAnxiety    = "anxiety"
+	EmotionSympathy      = "sympathy"
+	EmotionTenderness    = "tenderness"
+	EmotionJoy           = "joy"
+	EmotionGratitude     = "gratitude"
+	EmotionLonging       = "longing"
+	EmotionAnger         = "anger"
+	EmotionIrritation    = "irritation"
+	EmotionJealousy      = "jealousy"
+	EmotionResentment    = "resentment"
+	EmotionAnxiety       = "anxiety"
+	EmotionFear          = "fear"
+	EmotionEmbarrassment = "embarrassment"
+	EmotionBoredom       = "boredom"
 )
 
 type AffectiveEvent struct {

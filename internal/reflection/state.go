@@ -178,12 +178,13 @@ func (s AffectiveState) Validate() error {
 // never persists it itself; State in ReflectionResult is a copy suitable for
 // an atomic versioned write by a storage/application adapter.
 type ReflectionState struct {
-	Version          uint64            `json:"version,omitempty"`
-	Persona          MutablePersona    `json:"persona"`
-	Relationship     RelationshipState `json:"relationship"`
-	Affect           AffectiveState    `json:"affect"`
-	LastReflectionAt time.Time         `json:"last_reflection_at,omitempty"`
-	UpdatedAt        time.Time         `json:"updated_at,omitempty"`
+	Version             uint64            `json:"version,omitempty"`
+	Persona             MutablePersona    `json:"persona"`
+	Relationship        RelationshipState `json:"relationship"`
+	Affect              AffectiveState    `json:"affect"`
+	LastReflectionAt    time.Time         `json:"last_reflection_at,omitempty"`
+	LastDurableUpdateAt time.Time         `json:"last_durable_update_at,omitempty"`
+	UpdatedAt           time.Time         `json:"updated_at,omitempty"`
 }
 
 func (s ReflectionState) Valid() bool { return s.Validate() == nil }
@@ -205,14 +206,16 @@ func (s ReflectionState) Validate() error {
 // immutable boundaries for reference, current mutable state, and read-only
 // evidence. Engine.Run clones this value before handing it to any analyzer.
 type InputSnapshot struct {
-	ProfileID       domain.ID       `json:"profile_id"`
-	RunID           domain.ID       `json:"run_id"`
-	Trigger         Trigger         `json:"trigger"`
-	CapturedAt      time.Time       `json:"captured_at"`
-	ImmutablePolicy string          `json:"immutable_policy"`
-	IdentitySeed    string          `json:"identity_seed"`
-	State           ReflectionState `json:"state"`
-	Evidence        []Evidence      `json:"evidence"`
+	ProfileID            domain.ID             `json:"profile_id"`
+	RunID                domain.ID             `json:"run_id"`
+	Trigger              Trigger               `json:"trigger"`
+	CapturedAt           time.Time             `json:"captured_at"`
+	ImmutablePolicy      string                `json:"immutable_policy"`
+	IdentitySeed         string                `json:"identity_seed"`
+	AffectPolicy         AffectAppraisalPolicy `json:"affect_policy,omitempty"`
+	DurableUpdatesPaused bool                  `json:"durable_updates_paused,omitempty"`
+	State                ReflectionState       `json:"state"`
+	Evidence             []Evidence            `json:"evidence"`
 }
 
 func (s InputSnapshot) Valid() bool { return s.Validate() == nil }
@@ -226,6 +229,9 @@ func (s InputSnapshot) Validate() error {
 	}
 	if strings.ContainsRune(s.ImmutablePolicy, '\x00') || strings.ContainsRune(s.IdentitySeed, '\x00') {
 		return fmt.Errorf("%w: immutable boundary contains NUL", ErrInvalidSnapshot)
+	}
+	if !s.AffectPolicy.Valid() {
+		return fmt.Errorf("%w: invalid affect appraisal policy", ErrInvalidSnapshot)
 	}
 	if err := s.State.Validate(); err != nil {
 		return err

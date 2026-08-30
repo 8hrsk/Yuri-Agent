@@ -17,14 +17,17 @@ import (
 const notificationEventName = "yuri:notification"
 
 type ProactivitySettingsView struct {
-	Enabled                 bool   `json:"enabled"`
-	QuietHoursEnabled       bool   `json:"quietHoursEnabled"`
-	QuietHoursStart         string `json:"quietHoursStart"`
-	QuietHoursEnd           string `json:"quietHoursEnd"`
-	Timezone                string `json:"timezone"`
-	DailyLimit              int    `json:"dailyLimit"`
-	CooldownMinutes         int    `json:"cooldownMinutes"`
-	AllowLocalNotifications bool   `json:"allowLocalNotifications"`
+	Enabled                       bool   `json:"enabled"`
+	QuietHoursEnabled             bool   `json:"quietHoursEnabled"`
+	QuietHoursStart               string `json:"quietHoursStart"`
+	QuietHoursEnd                 string `json:"quietHoursEnd"`
+	Timezone                      string `json:"timezone"`
+	DailyLimit                    int    `json:"dailyLimit"`
+	CooldownMinutes               int    `json:"cooldownMinutes"`
+	AllowLocalNotifications       bool   `json:"allowLocalNotifications"`
+	AutonomousPeerDialogues       bool   `json:"autonomousPeerDialogues"`
+	AutonomousPeerDailyLimit      int    `json:"autonomousPeerDailyLimit"`
+	AutonomousPeerCooldownMinutes int    `json:"autonomousPeerCooldownMinutes"`
 }
 
 type NotificationEventView struct {
@@ -73,6 +76,15 @@ func (b *Bridge) SaveProactivitySettings(input ProactivitySettingsView) error {
 		QuietHoursStart: strings.TrimSpace(input.QuietHoursStart), QuietHoursEnd: strings.TrimSpace(input.QuietHoursEnd),
 		Timezone: strings.TrimSpace(input.Timezone), DailyLimit: input.DailyLimit,
 		CooldownMinutes: input.CooldownMinutes, AllowLocalNotifications: input.AllowLocalNotifications,
+		AutonomousPeerDialogues: input.AutonomousPeerDialogues, AutonomousPeerDailyLimit: input.AutonomousPeerDailyLimit,
+		AutonomousPeerCooldownMinutes: input.AutonomousPeerCooldownMinutes,
+	}
+	defaults := config.Default(b.paths).Proactivity
+	if value.AutonomousPeerDailyLimit == 0 {
+		value.AutonomousPeerDailyLimit = defaults.AutonomousPeerDailyLimit
+	}
+	if value.AutonomousPeerCooldownMinutes == 0 {
+		value.AutonomousPeerCooldownMinutes = defaults.AutonomousPeerCooldownMinutes
 	}
 	if err := value.Validate(); err != nil {
 		return err
@@ -107,6 +119,8 @@ func proactivitySettingsView(value config.ProactivityConfig) ProactivitySettings
 		QuietHoursStart: value.QuietHoursStart, QuietHoursEnd: value.QuietHoursEnd,
 		Timezone: value.Timezone, DailyLimit: value.DailyLimit, CooldownMinutes: value.CooldownMinutes,
 		AllowLocalNotifications: value.AllowLocalNotifications,
+		AutonomousPeerDialogues: value.AutonomousPeerDialogues, AutonomousPeerDailyLimit: value.AutonomousPeerDailyLimit,
+		AutonomousPeerCooldownMinutes: value.AutonomousPeerCooldownMinutes,
 	}
 }
 

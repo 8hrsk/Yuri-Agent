@@ -42,6 +42,9 @@ const defaultSettings: ProactivitySettings = {
   dailyLimit: 5,
   cooldownMinutes: 30,
   allowLocalNotifications: true,
+  autonomousPeerDialogues: false,
+  autonomousPeerDailyLimit: 2,
+  autonomousPeerCooldownMinutes: 120,
 }
 
 const timezones = ['Europe/Moscow', 'UTC', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'Asia/Tokyo', 'Asia/Singapore']
@@ -81,6 +84,7 @@ function ProactivitySettingsCard({ settings, saving, onChange, onSave, onEnableL
       <label className="proactivity-toggle"><button aria-checked={settings.enabled} className={'toggle' + (settings.enabled ? ' toggle--on' : '')} onClick={() => update('enabled', !settings.enabled)} role="switch" type="button"><i /></button><span><strong>Разрешить проактивность</strong><small>Глобальный выключатель для фоновых и событийных сообщений.</small></span></label>
       <label className="proactivity-toggle"><button aria-checked={settings.allowLocalNotifications} className={'toggle' + (settings.allowLocalNotifications ? ' toggle--on' : '')} onClick={() => { if (!settings.allowLocalNotifications) onEnableLocalNotifications(); update('allowLocalNotifications', !settings.allowLocalNotifications) }} role="switch" type="button"><i /></button><span><strong>Локальные уведомления</strong><small>Показывать системное уведомление после завершения фоновой задачи.</small></span></label>
       <label className="proactivity-toggle"><button aria-checked={settings.quietHoursEnabled} className={'toggle' + (settings.quietHoursEnabled ? ' toggle--on' : '')} onClick={() => update('quietHoursEnabled', !settings.quietHoursEnabled)} role="switch" type="button"><i /></button><span><strong>Тихие часы</strong><small>Не начинать новые проактивные сообщения в заданном окне.</small></span></label>
+      <label className="proactivity-toggle"><button aria-checked={settings.autonomousPeerDialogues} className={'toggle' + (settings.autonomousPeerDialogues ? ' toggle--on' : '')} onClick={() => update('autonomousPeerDialogues', !settings.autonomousPeerDialogues)} role="switch" type="button"><i /></button><span><strong>Автономные консультации агентов</strong><small>После задачи активный агент может сам начать ограниченный диалог с одним peer. По умолчанию выключено.</small></span></label>
     </div>
     <div className="proactivity-form">
       <label><span>Начало quiet hours</span><input disabled={!settings.quietHoursEnabled} onChange={(event) => update('quietHoursStart', event.target.value)} type="time" value={settings.quietHoursStart} /></label>
@@ -88,6 +92,8 @@ function ProactivitySettingsCard({ settings, saving, onChange, onSave, onEnableL
       <label><span>Часовой пояс</span><select onChange={(event) => update('timezone', event.target.value)} value={timezones.includes(settings.timezone) ? settings.timezone : ''}><option disabled value="">{settings.timezone}</option>{timezones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}</select></label>
       <label><span>Лимит сообщений в день</span><input min={0} onChange={(event) => update('dailyLimit', Math.max(0, Number(event.target.value) || 0))} type="number" value={settings.dailyLimit} /></label>
       <label><span>Cooldown, минут</span><input min={0} onChange={(event) => update('cooldownMinutes', Math.max(0, Number(event.target.value) || 0))} type="number" value={settings.cooldownMinutes} /></label>
+      <label><span>Peer-диалогов в день</span><input min={1} max={10} onChange={(event) => update('autonomousPeerDailyLimit', Math.max(1, Number(event.target.value) || 1))} type="number" value={settings.autonomousPeerDailyLimit} /></label>
+      <label><span>Peer cooldown, минут</span><input min={5} max={1440} onChange={(event) => update('autonomousPeerCooldownMinutes', Math.max(5, Number(event.target.value) || 5))} type="number" value={settings.autonomousPeerCooldownMinutes} /></label>
     </div>
     <div className="proactivity-card__footer"><span><Icon name="shield" width={13} height={13} /> Негативный affect не может обходить policy.</span><button className="button button--accent" disabled={saving} onClick={onSave} type="button">{saving ? 'Сохраняю…' : 'Сохранить правила'}</button></div>
   </section>

@@ -96,3 +96,50 @@ func TestCreateAgentWithDefaultsRollsBackPartialProfile(t *testing.T) {
 		t.Fatalf("partial affect survived rollback: %v", err)
 	}
 }
+
+func TestCreateAgentWithPersonalizationDefaultsIsAtomic(t *testing.T) {
+	database, ctx := testDatabase(t)
+	repositories, err := NewRepositories(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	profile, _ := domain.NewAgentProfileWithBackstory("agent-personalized", "Эми", 22, "female", "Мягкая.", "История Эми.", now)
+	persona, _ := domain.NewMutablePersona(profile.ID, map[string]float64{"warmth": .7}, "initial", now)
+	relationship, _ := domain.NewRelationshipState(profile.ID, map[string]float64{"trust": .2}, "initial", now)
+	affect, _ := domain.NewAffectiveState(profile.ID, map[string]float64{"joy": .1}, "initial", now)
+	seed, _ := domain.NewPersonalizationSeed(profile, persona.Traits, relationship.Dimensions, now)
+	if err := repositories.CreateAgentWithPersonalizationDefaults(ctx, profile, persona, relationship, affect, seed); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repositories.Personalization.Get(ctx, profile.ID)
+	if err != nil || stored.Backstory.Narrative != profile.Backstory {
+		t.Fatalf("personalization = %#v, %v", stored, err)
+	}
+
+	if _, err := database.ExecContext(ctx, `
+		CREATE TRIGGER reject_personalization_for_atomic_test
+		BEFORE INSERT ON personalization_seed_versions
+		WHEN NEW.agent_id = 'agent-rollback-personalization'
+		BEGIN SELECT RAISE(ABORT, 'forced personalization failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	profile.ID = "agent-rollback-personalization"
+	persona.ID, relationship.ID, affect.ID = profile.ID, profile.ID, profile.ID
+	failedSeed, _ := domain.NewPersonalizationSeed(profile, persona.Traits, relationship.Dimensions, now)
+	if err := repositories.CreateAgentWithPersonalizationDefaults(ctx, profile, persona, relationship, affect, failedSeed); err == nil {
+		t.Fatal("forced personalization insert unexpectedly succeeded")
+	}
+	if _, err := repositories.Agents.Get(ctx, profile.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("partial profile survived personalization failure: %v", err)
+	}
+	if _, err := repositories.Persona.Get(ctx, profile.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("partial persona survived personalization failure: %v", err)
+	}
+	if _, err := repositories.Relationship.Get(ctx, profile.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("partial relationship survived personalization failure: %v", err)
+	}
+	if _, err := repositories.Affect.Get(ctx, profile.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("partial affect survived personalization failure: %v", err)
+	}
+}

@@ -20,12 +20,15 @@ const affectLabels: Record<string, string> = {
   tenderness: 'Нежность',
   joy: 'Радость',
   gratitude: 'Благодарность',
+  longing: 'Тоска',
   boredom: 'Скука',
   anger: 'Злость',
   irritation: 'Раздражение',
   jealousy: 'Ревность',
   resentment: 'Обида',
   anxiety: 'Тревога',
+  fear: 'Страх',
+  embarrassment: 'Смущение',
 }
 
 const traitLabels: Record<string, string> = {

@@ -48,6 +48,16 @@ func New(config Config) (*Engine, error) {
 	if config.Cooldown < 0 {
 		return nil, fmt.Errorf("%w: cooldown cannot be negative", ErrInvalidSnapshot)
 	}
+	if config.DurableStateCooldown < 0 {
+		return nil, fmt.Errorf("%w: durable state cooldown cannot be negative", ErrInvalidSnapshot)
+	}
+	if !config.AffectAppraisal.Valid() {
+		return nil, fmt.Errorf("%w: invalid affect appraisal policy", ErrInvalidSnapshot)
+	}
+	config.AffectAppraisal = config.AffectAppraisal.normalize()
+	if config.AffectAppraisal.Enabled {
+		config.AffectDecay = config.AffectAppraisal.DecayPolicy()
+	}
 	if config.AffectDecay.HalfLife == 0 && len(config.AffectDecay.DimensionHalfLives) == 0 {
 		config.AffectDecay = DefaultDecayPolicy()
 	}
@@ -94,6 +104,7 @@ func New(config Config) (*Engine, error) {
 	config.AffectRanges = cloneRanges(config.AffectRanges)
 	config.MaxDeltaByTrait = cloneLowerFloatMap(config.MaxDeltaByTrait)
 	config.PinnedTraits = cloneBoolMap(config.PinnedTraits)
+	config.AffectAppraisal = config.AffectAppraisal.clone()
 	if config.Coordinator == nil {
 		config.Coordinator = NewCoordinator()
 	}
@@ -116,6 +127,7 @@ func (e *Engine) Config() Config {
 	config.AffectRanges = cloneRanges(config.AffectRanges)
 	config.MaxDeltaByTrait = cloneLowerFloatMap(config.MaxDeltaByTrait)
 	config.PinnedTraits = cloneBoolMap(config.PinnedTraits)
+	config.AffectAppraisal = config.AffectAppraisal.clone()
 	return config
 }
 
@@ -191,11 +203,13 @@ func (e *Engine) runOwned(ctx context.Context, input InputSnapshot, started time
 		Budget:       e.config.Budget,
 		OutputSchema: ProposalSchema(),
 	}
+	durableUpdatesPaused := e.config.DurableStateCooldown > 0 && !base.LastDurableUpdateAt.IsZero() && now.Before(base.LastDurableUpdateAt.Add(e.config.DurableStateCooldown))
 	// The decayed state is the state the analyzer should reason about, but it
 	// remains a copy and is never written back through the input snapshot. The
 	// result carries an explicit change bit so an adapter can persist it even
 	// when the analyzer returns no_change or changes another target only.
 	request.Snapshot.State = cloneState(base)
+	request.Snapshot.DurableUpdatesPaused = durableUpdatesPaused
 	response, err := e.analyzer.Analyze(ctx, request)
 	if err != nil {
 		if contextErr := ContextError(ctx); contextErr != nil {
@@ -229,6 +243,13 @@ func (e *Engine) runOwned(ctx context.Context, input InputSnapshot, started time
 	if usage.TotalTokens > e.config.Budget.MaxTokens {
 		return ReflectionResult{}, fmt.Errorf("%w: token usage %d exceeds %d", ErrBudgetExceeded, usage.TotalTokens, e.config.Budget.MaxTokens)
 	}
+	if durableUpdatesPaused && proposal.Outcome == OutcomeChanged && (proposal.Persona != nil || proposal.Relationship != nil) {
+		proposal.Persona = nil
+		proposal.Relationship = nil
+		if proposal.Affect == nil {
+			proposal = ReflectionProposal{Outcome: OutcomeNoChange, Reason: "durable persona and relationship cooldown is active"}
+		}
+	}
 	if proposal.Outcome == OutcomeNoChange {
 		return ReflectionResult{
 			ProfileID: input.ProfileID, RunID: input.RunID, Outcome: OutcomeNoChange,
@@ -237,7 +258,7 @@ func (e *Engine) runOwned(ctx context.Context, input InputSnapshot, started time
 			StartedAt: started, FinishedAt: e.finished(started),
 		}, nil
 	}
-	next, decision, guardErr := e.applyProposal(input, base, proposal, now)
+	next, appliedAffect, decision, guardErr := e.applyProposal(input, base, proposal, now)
 	if guardErr != nil {
 		return ReflectionResult{
 			ProfileID: input.ProfileID, RunID: input.RunID, Outcome: OutcomeNoChange,
@@ -246,10 +267,15 @@ func (e *Engine) runOwned(ctx context.Context, input InputSnapshot, started time
 			StartedAt: started, FinishedAt: e.finished(started),
 		}, guardErr
 	}
+	halfLives := make(map[string]int64, len(appliedAffect))
+	for emotion := range appliedAffect {
+		halfLives[emotion] = int64(e.config.AffectAppraisal.HalfLife(emotion).Seconds())
+	}
 	return ReflectionResult{
 		ProfileID: input.ProfileID, RunID: input.RunID, Outcome: OutcomeChanged,
 		Decision: DecisionApplied, Proposal: proposal, State: next,
-		AffectDecayChanged: affectDecayChanged, Usage: usage,
+		AffectDecayChanged: affectDecayChanged, AppliedAffectDeltas: appliedAffect,
+		AffectHalfLifeSeconds: halfLives, Usage: usage,
 		StartedAt: started, FinishedAt: e.finished(started),
 	}, nil
 }

@@ -102,12 +102,15 @@ export type AffectEmotion =
   | 'tenderness'
   | 'joy'
   | 'gratitude'
+  | 'longing'
   | 'boredom'
   | 'anger'
   | 'irritation'
   | 'jealousy'
   | 'resentment'
   | 'anxiety'
+  | 'fear'
+  | 'embarrassment'
   | (string & {})
 
 export interface AffectiveDimension {

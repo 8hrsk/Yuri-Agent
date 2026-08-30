@@ -508,6 +508,38 @@
   line-height: 1.55;
 }
 
+.collaboration-card__trigger {
+  margin: -5px 0 12px;
+  padding: 8px 9px;
+  border: 1px solid rgba(var(--accent-rgb), 0.09);
+  border-radius: 7px;
+  background: rgba(var(--accent-rgb), 0.02);
+}
+
+.collaboration-card__trigger span {
+  color: #837b94;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.collaboration-card__trigger p {
+  margin: 4px 0 0;
+  color: #777080;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.collaboration-card__trigger--autonomous {
+  border-color: rgba(217, 191, 135, 0.14);
+  background: rgba(217, 191, 135, 0.025);
+}
+
+.collaboration-card__trigger--autonomous span {
+  color: #b69b64;
+}
+
 .collaboration-card__budget {
   gap: 1px;
   margin-bottom: 12px;

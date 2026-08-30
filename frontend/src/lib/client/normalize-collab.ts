@@ -5,6 +5,7 @@ import type {
   PeerDialogue,
   PeerDialogueMessage,
   PeerDialogueStatus,
+  PeerDialogueTriggerKind,
   PeerRelationship,
   PeerRelationshipDetail,
   PeerRelationshipOperation,
@@ -23,6 +24,13 @@ function normalizePeerDialogueStatus(value: unknown): PeerDialogueStatus {
   if (status === 'failed' || status === 'error' || status === 'failure') return 'failed'
   if (status === 'cancelled' || status === 'canceled' || status === 'aborted') return 'cancelled'
   if (status === 'expired' || status === 'timeout' || status === 'timed_out') return 'expired'
+  return 'unknown'
+}
+
+function normalizePeerDialogueTriggerKind(value: unknown): PeerDialogueTriggerKind {
+  const kind = String(value ?? '').trim().toLowerCase()
+  if (kind === 'agent_tool' || kind === 'tool' || kind === 'manual') return 'agent_tool'
+  if (kind === 'autonomous' || kind === 'automatic' || kind === 'background') return 'autonomous'
   return 'unknown'
 }
 
@@ -63,6 +71,8 @@ function normalizePeerDialogue(value: unknown): PeerDialogue | undefined {
     initiatorName: optionalString(source, 'initiatorName', 'initiator_name') ?? 'Агент',
     peerAgentId,
     peerName: optionalString(source, 'peerName', 'peer_name') ?? 'Агент',
+    triggerKind: normalizePeerDialogueTriggerKind(source.triggerKind ?? source.trigger_kind),
+    triggerReason: optionalString(source, 'triggerReason', 'trigger_reason') ?? 'Причина запуска не указана.',
     purpose: optionalString(source, 'purpose', 'goal', 'summary') ?? 'Внутренний диалог',
     status: normalizePeerDialogueStatus(source.status ?? source.state),
     turnCount: Math.max(0, Math.round(optionalNumber(source, 'turnCount', 'turn_count', 'turns') ?? messages.length)),

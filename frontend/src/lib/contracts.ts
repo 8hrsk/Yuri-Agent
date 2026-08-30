@@ -30,6 +30,19 @@ export type {
   ChatHistoryPage,
 } from './contracts/chat'
 export type {
+  AgentCreationMode,
+  RelationshipSeedPreset,
+  ConflictStyle,
+  AgentIdentityPersonalization,
+  AgentCommunicationStyle,
+  AgentEmotionalDynamics,
+  AgentRelationshipSeed,
+  AgentBackstoryEpisode,
+  AgentStructuredBackstory,
+  NumericRange,
+  AgentEvolutionPolicy,
+  AgentPersonalizationInput,
+  AgentPersonalizationProfile,
   AgentProfile,
   AgentProfileInput,
 } from './contracts/agents'
@@ -67,6 +80,7 @@ export type {
 } from './contracts/scheduler'
 export type {
   PeerDialogueStatus,
+  PeerDialogueTriggerKind,
   PeerDialogueMessage,
   PeerDialogue,
   PeerDialogueListOptions,

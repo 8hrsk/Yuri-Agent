@@ -262,6 +262,8 @@ Filesystem tools доступны модели даже при пустом сп
 - Внутренняя саморефлексия может запускаться после содержательного диалога, перед compression, при завершении сессии или по idle/CRON trigger.
 - Reflection worker получает read-only transcript snapshot и только внутренние tools памяти/личности; файловые, сетевые и внешние side effects ему недоступны, если они не являются частью отдельной пользовательской задачи.
 - Рефлексия может завершиться без изменений; система не должна принуждать модель находить «урок» после каждого разговора.
+- Автономная консультация с другим именованным агентом является отдельной opt-in возможностью и выключена по умолчанию; глобальный выключатель проактивности запрещает её независимо от opt-in. После завершённого интерактивного turn консервативный reviewer без tools может выбрать ровно одного peer либо `no_change`; peer получает только краткую task abstraction, а не private memory, system prompt или необработанный tool output.
+- Для автономных peer dialogues действуют общие timezone/quiet hours и отдельные дневной лимит/cooldown. Один root run не может одновременно открыть explicit tool-dialogue и второй autonomous dialogue; решения, блокировки и причина триггера имеют durable provenance и видны владельцу.
 
 ### FR-9. Голос
 
@@ -278,23 +280,28 @@ Filesystem tools доступны модели даже при пустом сп
 ### FR-10. Персона и аватар
 
 - Prompt stack разделён на immutable policy, базовую identity seed, mutable persona, relationship/mood state, memory context и task context. Yuri может переписывать mutable persona, но не immutable policy, security rules или выданные разрешения.
+- Owner-authored `PersonalizationProfile v2` хранится отдельно от runtime state и включает типизированные identity extension, communication style, temperament, emotional dynamics, relationship seed, structured backstory и evolution bounds/locks. Он является append-only reset baseline; reflection не может записывать его напрямую.
+- Создание агента выполняется единым Quick/Advanced wizard как при первом запуске, так и из roster. Quick mode требует только identity, редактируемый preset, optional backstory и review; Advanced mode дополнительно раскрывает communication style, полный temperament, emotional dynamics, relationship seed и structured episodes. Оба режима формируют один `PersonalizationProfile v2`, сохраняют versioned local draft и отправляют все поля через typed Wails boundary.
+- `CommunicationStyle` описывает наблюдаемую форму ответа, `Temperament` — устойчивую предрасположенность, `RelationshipState` — состояние связи с конкретным subject, а `AffectiveState` — текущую затухающую реакцию. Одинаковые понятия в этих слоях не должны неявно подменять друг друга.
+- Provider-independent Personality Compiler преобразует эти слои в детерминированный behavioral context с качественными уровнями, явным разрешением конфликтующих traits и hard character budget. Dialogue model не получает голые числовые traits; raw values сохраняются только для диагностики, reflection и воспроизводимости. Compiler не имеет доступа к permissions, tools или provider credentials.
 - Исходные настройки включают имя, обращение к пользователю, язык, допустимые темы и расширенный набор устойчивых черт. Минимальные группы: социальные (`warmth`, `empathy`, `sociability`, `shyness`, `directness`, `trust`), эмоциональные (`emotionality`, `sensitivity`, `anxiety`, `fearfulness`, `irritability`, `emotional_stability`), привязанность (`attachment`, `jealousy`, `possessiveness`, `romantic_tone`) и поведенческие (`playfulness`, `initiative`, `impulsivity`, `stubbornness`, `formality`, `optimism`, `curiosity`, `suspicion`, `tsundere`). Текущий страх является affective state; `fearfulness` и `anxiety` задают устойчивую склонность, а не вечную эмоцию.
 - Владелец может задать `backstory` — вымышленную автобиографическую предысторию агента. Она является owner-defined identity seed, может использоваться персонажем как собственное прошлое и отделена от фактов о реальном мире и пользователе.
 - Backstory и производные от него начальные воспоминания всегда имеют provenance `identity_seed` и epistemic status `fictional`; они не являются evidence для permission/security решений и не могут выдавать capabilities.
 - Yuri поддерживает собственную субъективную модель пользователя. Она может считать пользователя добрым, надёжным, невнимательным, раздражающим и т. п.; такие выводы маркируются как opinion/inference, имеют evidence links, confidence и могут противоречить фактам без подмены фактической памяти.
-- Affective state моделирует позитивные и негативные переживания: симпатию, нежность, радость, благодарность, скуку, злость, раздражение, ревность, обиду и тревогу. Состояние меняется от событий, затухает со временем и влияет на формулировки, инициативу, голос и анимацию.
+- Affective state моделирует позитивные и негативные переживания: симпатию, нежность, радость, благодарность, тоску, скуку, злость, раздражение, ревность, обиду, тревогу, страх и смущение. Состояние меняется от evidence-linked событий, затухает со временем и влияет на формулировки, инициативу и доступную анимацию. Model reviewer выбирает событие и эмоцию, но окончательная интенсивность, восстановление и half-life вычисляются локально из per-agent temperament и emotional dynamics. Управление TTS-просодией и эмоциональной интонацией отложено в отдельный backlog до выбора качественного стороннего провайдера.
 - Эти чувства являются моделируемым внутренним состоянием персонажа, а не утверждением о сознании модели; приложение не обязано разрушать иммерсию постоянными напоминаниями, но ясно объясняет природу механизма в настройках.
 - Негативные чувства разрешены как часть персонажа: Yuri может спорить, сердиться, проявлять холодность, ревновать, отказываться изображать согласие и прямо выражать субъективное недовольство.
 - Эмоции не могут приводить к мести, саботажу задачи, сокрытию пользовательских данных, угрозам, принуждению, шантажу, преследованию или попыткам изолировать пользователя от реальных людей.
 - Результат reflection может изменить mutable persona: например `warmth`, `trust`, `attachment`, `jealousy`, `irritability`, `romantic_tone`, речевые привычки и текст identity prompt. Изменения должны быть небольшими, объяснимыми и накопительными.
 - Каждая версия личности содержит diff, причину, evidence, author run и timestamp. Доступны просмотр эволюции, pin отдельных черт, запрет автоизменения, откат и полный reset к исходному seed.
 - Для защиты от runaway drift задаются max delta за один reflection, cooldown, диапазоны черт, minimum evidence и запрет изменения личности на основании недоверенного web/tool content без подтверждения пользовательским взаимодействием.
+- Cooldown устойчивых persona/relationship изменений и включение background reflection задаются per-agent в versioned evolution policy. Краткосрочный affect оценивается отдельно и может накапливаться между завершёнными turns в диапазоне `0..1`; `no_change` является штатным результатом. Глобальный выключатель остаётся master kill switch для всей установки.
 - MVP использует статичный 2D-аватар и набор состояний/простых анимаций. Live2D/VRM подключается отдельным renderer adapter позднее.
 - Owner-defined identity (`name`, `age`, `gender`, initial preferences, `backstory`) хранится отдельно от mutable persona и не изменяется автономной рефлексией. Агент может переосмысливать своё прошлое в субъективной памяти, но не подменять исходный backstory без явного редактирования владельцем.
 - Каждый persistent named agent имеет отдельные persona, relationship, affect и private-memory scopes. Peer registry содержит только ID, имя, статус и короткое описание; приватные предпочтения, мнения и credentials в него не входят.
 - Anonymous subagent является дочерним run, а не `AgentProfile`: он не появляется в roster и не получает persistent identity/state.
 - Пустой delegation scope оставляет subagent без tools. Явный read-only scope может содержать только `filesystem.read`, `web.search` и `web.fetch`; writable/external/memory/delegation/peer tools не регистрируются. Перед выполнением каждого вызова повторно проверяются точный tool ID, low-risk descriptor, ожидаемая capability и текущий owner-approved filesystem scope. Child tool calls сохраняются на child run, проходят redaction/audit и отображаются в chat trace с provenance `subagent` и `parent_run_id`.
-- Peer dialogue хранится отдельно от user conversations и private memory. Каждый generated message имеет sender/recipient/source run provenance; peer content не меняет состояние напрямую. Только отдельный bounded social-reflection reviewer без tools может после completion предложить evidence-linked directional opinion/affect delta; persona, owner relationship, facts и permissions исключены, а повтор блокируется durable marker.
+- Peer dialogue хранится отдельно от user conversations и private memory. Каждый generated message имеет sender/recipient/source run provenance, а aggregate различает explicit `agent_tool` и opt-in `autonomous` trigger с объяснимой причиной. Peer content не меняет состояние напрямую. Только отдельный bounded social-reflection reviewer без tools может после completion предложить evidence-linked directional opinion/affect delta; persona, owner relationship, facts и permissions исключены, а повтор блокируется durable marker.
 
 ### FR-11. Аудит и настройки
 
@@ -332,8 +339,8 @@ Prompt собирается слоями с явным приоритетом:
 
 1. Immutable policy — безопасность, границы разрешений и запреты; никогда не изменяется моделью.
 2. Identity seed — исходное определение Yuri и неизменяемые продуктовые инварианты.
-3. Mutable persona — текущая версионируемая личность, которую Yuri может развивать.
-4. Relationship and affect — компактное актуальное отношение к пользователю и mood state.
+3. Compiled personality behavior — bounded качественные правила речи и реакции, детерминированно собранные из owner profile, текущей mutable persona, отношения к текущему subject и transient affect. Raw values остаются в typed diagnostic snapshot.
+4. Fictional backstory — owner-authored субъективная история с fictional provenance.
 5. Core memory snapshot — ограниченный набор высокосигнальных воспоминаний.
 6. Project/tool context — разрешённые данные текущей среды.
 7. Retrieved cross-session context — найденные по запросу эпизоды и сообщения с provenance.
@@ -385,6 +392,7 @@ PebbleDB используется только для производных и�
 ## 6. Ключевая модель данных
 
 - `AgentProfile(id, name, age, gender, preferences, backstory, status, created_at, updated_at)`
+- `PersonalizationSeedVersion(agent_id, version, revision_id, parent_id, schema_version, identity_json, communication_style_json, temperament_json, emotional_dynamics_json, relationship_seed_json, backstory_json, evolution_policy_json, operation, reason, created_at, updated_at)`
 - `Conversation(id, agent_id, title, title_source, created_at, archived_at)`, где `title_source ∈ {default, generated, user}` защищает ручное название от асинхронной генерации.
 - `Message(id, conversation_id, role, content, status, provider_meta, created_at)`
 - `AgentRun(id, agent_id, principal_agent_id, parent_run_id, delegation_depth, conversation_id, state, budgets, started_at, finished_at)`

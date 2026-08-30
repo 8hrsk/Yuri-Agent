@@ -303,10 +303,22 @@ describe('Yuri client contract', () => {
       id: 'agent-yuri', name: 'Юри', age: 21, gender: 'female', preferences: 'Коротко', backstory: 'Выросла среди старых карт.',
       traits: { warmth: 0.6 }, active: true, created_at: '2026-08-29T00:00:00Z', updated_at: '2026-08-29T00:00:00Z',
     }
+    const wirePersonalization = {
+      agentId: 'agent-yuri', schemaVersion: 2, version: 1, revisionId: 'revision-1', operation: 'create',
+      identity: defaultAgentDraft.personalization.identity,
+      communicationStyle: defaultAgentDraft.personalization.communicationStyle,
+      temperament: { warmth: 0.6 },
+      emotionalDynamics: defaultAgentDraft.personalization.emotionalDynamics,
+      relationshipSeed: defaultAgentDraft.personalization.relationshipSeed,
+      backstory: defaultAgentDraft.personalization.structuredBackstory,
+      evolutionPolicy: defaultAgentDraft.personalization.evolutionPolicy,
+      createdAt: '2026-08-29T00:00:00Z', updatedAt: '2026-08-29T00:00:00Z',
+    }
     const bridge = {
       ListConversations: () => [],
       ListAgents: () => { calls.push({ name: 'ListAgents', args: [] }); return [wireAgent] },
       GetActiveAgent: () => { calls.push({ name: 'GetActiveAgent', args: [] }); return wireAgent },
+      GetActiveAgentPersonalization: () => { calls.push({ name: 'GetActiveAgentPersonalization', args: [] }); return wirePersonalization },
       CreateAgent: (input: unknown) => { calls.push({ name: 'CreateAgent', args: [input] }); return wireAgent },
       SetActiveAgent: (input: unknown) => { calls.push({ name: 'SetActiveAgent', args: [input] }); return wireAgent },
     }
@@ -317,11 +329,13 @@ describe('Yuri client contract', () => {
       const client = createYuriClient()
       await expect(client.listAgents()).resolves.toMatchObject([{ id: 'agent-yuri', name: 'Юри', backstory: 'Выросла среди старых карт.', traits: { warmth: 0.6 }, active: true }])
       await expect(client.getActiveAgent()).resolves.toMatchObject({ id: 'agent-yuri', backstory: 'Выросла среди старых карт.' })
+      await expect(client.getActiveAgentPersonalization()).resolves.toMatchObject({ agentId: 'agent-yuri', schemaVersion: 2, revisionId: 'revision-1' })
       await expect(client.createAgent(defaultAgentDraft)).resolves.toMatchObject({ id: 'agent-yuri', backstory: 'Выросла среди старых карт.' })
       await expect(client.setActiveAgent('agent-yuri')).resolves.toMatchObject({ id: 'agent-yuri', active: true })
       expect(calls).toEqual([
         { name: 'ListAgents', args: [] },
         { name: 'GetActiveAgent', args: [] },
+        { name: 'GetActiveAgentPersonalization', args: [] },
         { name: 'CreateAgent', args: [defaultAgentDraft] },
         { name: 'SetActiveAgent', args: [{ id: 'agent-yuri' }] },
       ])
@@ -1064,8 +1078,21 @@ describe('Yuri client contract', () => {
     expect((await client.listSchedules()).find((item) => item.id === created!.id)).toBeUndefined()
 
     const settings = await client.getProactivitySettings()
-    await client.saveProactivitySettings({ ...settings, enabled: false, dailyLimit: 0 })
-    expect(await client.getProactivitySettings()).toMatchObject({ enabled: false, dailyLimit: 0 })
+    await client.saveProactivitySettings({
+      ...settings,
+      enabled: false,
+      dailyLimit: 0,
+      autonomousPeerDialogues: true,
+      autonomousPeerDailyLimit: 3,
+      autonomousPeerCooldownMinutes: 90,
+    })
+    expect(await client.getProactivitySettings()).toMatchObject({
+      enabled: false,
+      dailyLimit: 0,
+      autonomousPeerDialogues: true,
+      autonomousPeerDailyLimit: 3,
+      autonomousPeerCooldownMinutes: 90,
+    })
   })
 
   it('normalizes scheduler payloads and forwards the Stage 4 Wails API', async () => {
@@ -1118,6 +1145,9 @@ describe('Yuri client contract', () => {
         daily_limit: 4,
         cooldown_minutes: 15,
         allow_local_notifications: false,
+        autonomous_peer_dialogues: true,
+        autonomous_peer_daily_limit: 3,
+        autonomous_peer_cooldown_minutes: 90,
       }),
       SaveProactivitySettings: (input: unknown) => {
         calls.push({ name: 'SaveProactivitySettings', args: [input] })
@@ -1147,7 +1177,14 @@ describe('Yuri client contract', () => {
       await expect(client.runScheduleNow('schedule-1')).resolves.toMatchObject({ scheduleId: 'schedule-1', status: 'completed', triggeredBy: 'manual' })
       await expect(client.cancelJobRun('run-1')).resolves.toMatchObject({ id: 'run-1', status: 'cancelled' })
       await expect(client.listJobRuns({ scheduleId: 'schedule-1', limit: 5 })).resolves.toMatchObject([{ scheduleId: 'schedule-1', status: 'completed' }])
-      await expect(client.getProactivitySettings()).resolves.toMatchObject({ enabled: false, quietHoursStart: '22:30', dailyLimit: 4 })
+      await expect(client.getProactivitySettings()).resolves.toMatchObject({
+        enabled: false,
+        quietHoursStart: '22:30',
+        dailyLimit: 4,
+        autonomousPeerDialogues: true,
+        autonomousPeerDailyLimit: 3,
+        autonomousPeerCooldownMinutes: 90,
+      })
       await client.saveProactivitySettings({ ...(await client.getProactivitySettings()), enabled: true })
       await expect(client.listActivity({ limit: 10 })).resolves.toMatchObject([{ id: 'activity-1', type: 'proactive', status: 'skipped' }])
       await client.deleteSchedule('schedule-1')
@@ -1164,6 +1201,14 @@ describe('Yuri client contract', () => {
       expect(calls[0]?.args[0]).toMatchObject({ title: 'Новая', type: 'once', scheduleType: 'once', cron_expression: undefined })
       expect(calls[1]?.args[0]).toEqual({ id: 'schedule-1', scheduleId: 'schedule-1', enabled: true })
       expect(calls[3]?.args[0]).toEqual({ id: 'run-1', runId: 'run-1' })
+      expect(calls[5]?.args[0]).toMatchObject({
+        autonomousPeerDialogues: true,
+        autonomous_peer_dialogues: true,
+        autonomousPeerDailyLimit: 3,
+        autonomous_peer_daily_limit: 3,
+        autonomousPeerCooldownMinutes: 90,
+        autonomous_peer_cooldown_minutes: 90,
+      })
     } finally {
       if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
       else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
@@ -1329,6 +1374,7 @@ describe('Yuri client contract', () => {
             dialogue_id: 'peer-1',
             initiator_agent_id: 'agent-yuri', initiator_name: 'Юри',
             peer_agent_id: 'agent-mira', peer_name: 'Мира',
+            trigger_kind: 'autonomous', trigger_reason: 'Нужна независимая проверка плана.',
             purpose: 'Сверить план.', state: 'running',
             turn_count: 0, max_turns: 1, tokens_used: 0, max_tokens: 1200,
             created_at: '2026-08-29T09:00:00.000Z',
@@ -1351,6 +1397,7 @@ describe('Yuri client contract', () => {
         id: 'peer-1',
         initiatorAgentId: 'agent-yuri', initiatorName: 'Юри',
         peerAgentId: 'agent-mira', peerName: 'Мира', purpose: 'Сверить план.', status: 'running',
+        triggerKind: 'autonomous', triggerReason: 'Нужна независимая проверка плана.',
         turnCount: 0, maxTurns: 1, tokensUsed: 0, maxTokens: 1200,
         createdAt: '2026-08-29T09:00:00.000Z', finishedAt: undefined, failure: undefined,
         messages: [{

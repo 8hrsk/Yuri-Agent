@@ -25,7 +25,7 @@
 }
 
 .agent-dialog {
-  width: min(100%, 620px);
+  width: min(100%, 900px);
   max-height: calc(100vh - 40px);
   overflow-y: auto;
 }
@@ -115,4 +115,3 @@
   gap: 8px;
   margin-top: 22px;
 }
-

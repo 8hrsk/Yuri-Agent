@@ -47,6 +47,7 @@ type Bridge struct {
 	modelTurns        chan struct{}
 	reflectionRuns    *reflection.Coordinator
 	reflectionGate    chan struct{}
+	peerTriggerGate   chan struct{}
 	shuttingDown      bool
 	pluginSupervisors map[string]*plugins.Supervisor
 	proactivity       *proactivity.Service
@@ -105,7 +106,7 @@ func NewBridge(ctx context.Context) (*Bridge, error) {
 		config: value, keyring: securitykeyring.New(), activeRuns: make(map[string]context.CancelFunc), peerDialogueRuns: make(map[string]context.CancelFunc),
 		approvals: make(map[string]*approvalGate), backgroundCtx: backgroundCtx, backgroundCancel: backgroundCancel,
 		titleRuns:  make(map[string]struct{}),
-		modelTurns: make(chan struct{}, 1), reflectionRuns: reflection.NewCoordinator(), reflectionGate: make(chan struct{}, 1), pluginSupervisors: make(map[string]*plugins.Supervisor),
+		modelTurns: make(chan struct{}, 1), reflectionRuns: reflection.NewCoordinator(), reflectionGate: make(chan struct{}, 1), peerTriggerGate: make(chan struct{}, 1), pluginSupervisors: make(map[string]*plugins.Supervisor),
 	}
 	if err := bridge.reconcileAgentRoster(ctx); err != nil {
 		database.Close()

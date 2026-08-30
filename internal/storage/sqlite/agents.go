@@ -49,7 +49,19 @@ func (r *AgentRepository) Create(ctx context.Context, profile domain.AgentProfil
 // all belong to the same profile; this prevents a roster entry from becoming
 // active with only a partially initialized personality.
 func (repositories *Repositories) CreateAgentWithDefaults(ctx context.Context, profile domain.AgentProfile, persona domain.MutablePersona, relationship domain.RelationshipState, affect domain.AffectiveState) error {
-	if repositories == nil || repositories.Agents == nil || repositories.Persona == nil || repositories.Relationship == nil || repositories.Affect == nil {
+	return repositories.createAgentWithDefaults(ctx, profile, persona, relationship, affect, nil)
+}
+
+// CreateAgentWithPersonalizationDefaults additionally persists the immutable
+// owner-authored v2 seed in the same transaction as all mutable projections.
+// The legacy method remains available to storage callers that intentionally
+// exercise the older aggregate boundary.
+func (repositories *Repositories) CreateAgentWithPersonalizationDefaults(ctx context.Context, profile domain.AgentProfile, persona domain.MutablePersona, relationship domain.RelationshipState, affect domain.AffectiveState, personalization domain.PersonalizationSeed) error {
+	return repositories.createAgentWithDefaults(ctx, profile, persona, relationship, affect, &personalization)
+}
+
+func (repositories *Repositories) createAgentWithDefaults(ctx context.Context, profile domain.AgentProfile, persona domain.MutablePersona, relationship domain.RelationshipState, affect domain.AffectiveState, personalization *domain.PersonalizationSeed) error {
+	if repositories == nil || repositories.Agents == nil || repositories.Persona == nil || repositories.Relationship == nil || repositories.Affect == nil || (personalization != nil && repositories.Personalization == nil) {
 		return fmt.Errorf("%w: agent repositories are unavailable", domain.ErrInvalidArgument)
 	}
 	if err := contextErr(ctx); err != nil {
@@ -72,6 +84,14 @@ func (repositories *Repositories) CreateAgentWithDefaults(ctx context.Context, p
 	}
 	if err := affect.Validate(); err != nil {
 		return err
+	}
+	if personalization != nil {
+		if personalization.AgentID != profile.ID || personalization.Version != 1 {
+			return fmt.Errorf("%w: agent personalization seed must be its initial profile revision", domain.ErrInvalidArgument)
+		}
+		if err := personalization.Validate(); err != nil {
+			return err
+		}
 	}
 	tx, err := repositories.Agents.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -106,6 +126,11 @@ func (repositories *Repositories) CreateAgentWithDefaults(ctx context.Context, p
 	}
 	if err := repositories.Affect.appendAffectStateTx(ctx, tx, affect, 0, nil); err != nil {
 		return err
+	}
+	if personalization != nil {
+		if err := repositories.Personalization.appendTx(ctx, tx, *personalization); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return wrappedSQLError("commit create agent", err)

@@ -265,11 +265,18 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
+	personalization, err := b.repositories.Personalization.Get(runContext, profileID)
+	if err != nil {
+		return b.failChatRun(runContext, &run, emitter, err), nil
+	}
+	compiledPersonality, err := compilePersonalityContext(personalization, persona, relationship, affect)
+	if err != nil {
+		return b.failChatRun(runContext, &run, emitter, err), nil
+	}
 	snapshot, err := assembler.Assemble(runContext, contextbuilder.Input{
 		AgentID: profileID, ConversationID: conversationID, Query: titleSeed,
 		ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, roster),
-		Backstory:      profile.Backstory,
-		MutablePersona: formatMutablePersonaContext(persona), Relationship: formatRelationshipContext(relationship, affect),
+		Backstory: profile.Backstory, BehavioralContext: compiledPersonality.BehavioralContext,
 		Transcript: currentTranscript,
 	})
 	if err != nil {

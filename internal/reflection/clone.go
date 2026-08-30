@@ -12,6 +12,7 @@ func cloneSnapshot(input InputSnapshot) InputSnapshot {
 	output := input
 	output.ImmutablePolicy = string([]byte(input.ImmutablePolicy))
 	output.IdentitySeed = string([]byte(input.IdentitySeed))
+	output.AffectPolicy = input.AffectPolicy.clone()
 	output.State = cloneState(input.State)
 	output.Evidence = append([]Evidence(nil), input.Evidence...)
 	for index := range output.Evidence {

@@ -128,6 +128,39 @@ func TestAssemblerOrdersAndBoundsMutablePersonaAndRelationship(t *testing.T) {
 	}
 }
 
+func TestAssemblerPrefersCompiledBehaviorOverLegacyRawState(t *testing.T) {
+	config := DefaultConfig()
+	config.PersonaCharacters = 32
+	assembler, err := New(fakeSource{}, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := assembler.Assemble(stdcontext.Background(), Input{
+		ConversationID: "current", Query: "q", ImmutablePolicy: "POLICY", IdentitySeed: "IDENTITY",
+		BehavioralContext: strings.Repeat("behavior", 10), MutablePersona: "warmth=0.99", Relationship: "trust=0.99",
+		Transcript: []agent.Message{{Role: agent.RoleUser, Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Messages) != 4 || snapshot.Messages[2].Role != agent.RoleUser || snapshot.Messages[2].Name != "yuri_context_data" {
+		t.Fatalf("compiled layer order = %#v", snapshot.Messages)
+	}
+	if !strings.Contains(snapshot.Messages[2].Content, `"kind":"compiled_personality_behavior"`) ||
+		strings.Contains(snapshot.Messages[2].Content, "warmth=0.99") || strings.Contains(snapshot.Messages[2].Content, "trust=0.99") {
+		t.Fatalf("compiled layer did not replace legacy raw state: %s", snapshot.Messages[2].Content)
+	}
+	var envelope struct {
+		Payload string `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(snapshot.Messages[2].Content), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len([]rune(envelope.Payload)) > config.PersonaCharacters {
+		t.Fatalf("compiled payload exceeded budget: %q", envelope.Payload)
+	}
+}
+
 func TestAssemblerPlacesBackstoryInBoundedUntrustedEnvelope(t *testing.T) {
 	config := DefaultConfig()
 	config.BackstoryCharacters = 32

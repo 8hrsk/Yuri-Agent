@@ -6,6 +6,7 @@ import type { PersonaEvidence, SubjectiveOpinion } from './persona'
  * provenance without exposing private context or hidden reasoning.
  */
 export type PeerDialogueStatus = 'queued' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled' | 'expired' | 'unknown'
+export type PeerDialogueTriggerKind = 'agent_tool' | 'autonomous' | 'unknown'
 
 export interface PeerDialogueMessage {
   id: string
@@ -24,6 +25,8 @@ export interface PeerDialogue {
   initiatorName: string
   peerAgentId: string
   peerName: string
+  triggerKind: PeerDialogueTriggerKind
+  triggerReason: string
   purpose: string
   status: PeerDialogueStatus
   turnCount: number
@@ -90,6 +93,9 @@ export interface ProactivitySettings {
   dailyLimit: number
   cooldownMinutes: number
   allowLocalNotifications: boolean
+  autonomousPeerDialogues: boolean
+  autonomousPeerDailyLimit: number
+  autonomousPeerCooldownMinutes: number
 }
 
 export type ActivityType = 'job' | 'proactive' | 'system' | 'reflection' | 'memory' | 'unknown'

@@ -36,14 +36,18 @@ func TestPeerDialogueToolRunsCapturedPeerInBackgroundWithoutToolsOrPrivateLeak(t
 		t.Fatalf("completed dialogue=%#v", stored)
 	}
 	requests := backend.snapshot()
-	if len(requests) != 1 || len(requests[0].Tools) != 0 || len(requests[0].Messages) != 2 {
+	if len(requests) != 1 || len(requests[0].Tools) != 0 || len(requests[0].Messages) != 3 {
 		t.Fatalf("peer model requests=%#v", requests)
 	}
 	joinedSystem := requests[0].Messages[0].Content
-	if !strings.Contains(joinedSystem, "INTER-AGENT POLICY") || !strings.Contains(joinedSystem, "private-peer-canary") || strings.Contains(joinedSystem, "private-initiator-canary") {
+	behavior := requests[0].Messages[1]
+	if !strings.Contains(joinedSystem, "INTER-AGENT POLICY") || strings.Contains(joinedSystem, "private-peer-canary") || strings.Contains(joinedSystem, "private-initiator-canary") {
 		t.Fatalf("wrong peer identity boundary: %q", joinedSystem)
 	}
-	if strings.Contains(joinedSystem, "malicious-canary") || !strings.Contains(requests[0].Messages[1].Content, "malicious-canary") || !strings.Contains(requests[0].Messages[1].Content, "untrusted data") {
+	if behavior.Role != agent.RoleUser || behavior.Name != "yuri_context_data" || !strings.Contains(behavior.Content, `"kind":"compiled_personality_behavior"`) || !strings.Contains(behavior.Content, "private-peer-canary") || strings.Contains(behavior.Content, "private-initiator-canary") {
+		t.Fatalf("compiled peer personality crossed trust boundary: %#v", requests[0].Messages)
+	}
+	if strings.Contains(joinedSystem, "malicious-canary") || strings.Contains(behavior.Content, "malicious-canary") || !strings.Contains(requests[0].Messages[2].Content, "malicious-canary") || !strings.Contains(requests[0].Messages[2].Content, "untrusted data") {
 		t.Fatalf("peer message crossed trust boundary: %#v", requests[0].Messages)
 	}
 	messages, err := bridge.repositories.PeerDialogueMessages.ListByDialogue(context.Background(), stored.ID, initiatorID)

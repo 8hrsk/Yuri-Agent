@@ -119,6 +119,7 @@ function PeerDialogueCard({ dialogue, busy, onCancel }: {
     </header>
 
     <p className="collaboration-card__purpose">{dialogue.purpose}</p>
+    <div className={`collaboration-card__trigger collaboration-card__trigger--${dialogue.triggerKind}`}><span>{dialogue.triggerKind === 'autonomous' ? 'автономный триггер' : dialogue.triggerKind === 'agent_tool' ? 'tool intent' : 'неизвестный триггер'}</span><p>{dialogue.triggerReason}</p></div>
 
     <div className="collaboration-card__budget" aria-label="Бюджет диалога">
       <span><small>Ходы</small><strong>{budgetLabel(dialogue.turnCount, dialogue.maxTurns, '')}</strong></span>

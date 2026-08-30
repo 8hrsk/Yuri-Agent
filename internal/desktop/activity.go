@@ -134,6 +134,12 @@ func activityTitle(action string) string {
 		return "Субагент остановлен"
 	case "peer_dialogue.queued":
 		return "Межагентный диалог поставлен в очередь"
+	case "peer_dialogue.auto_queued":
+		return "Агент самостоятельно запросил мнение peer"
+	case "peer_dialogue.auto_blocked":
+		return "Автономный диалог заблокирован политикой"
+	case "peer_dialogue.auto_no_change":
+		return "Агент решил не начинать внутренний диалог"
 	case "peer_dialogue.started":
 		return "Агенты начали внутренний диалог"
 	case "peer_dialogue.completed":
@@ -188,8 +194,10 @@ func activityStatus(action, decision string) string {
 		return "running"
 	case "delegation.created":
 		return "queued"
-	case "peer_dialogue.queued":
+	case "peer_dialogue.queued", "peer_dialogue.auto_queued":
 		return "queued"
+	case "peer_dialogue.auto_blocked", "peer_dialogue.auto_no_change":
+		return "skipped"
 	case "delegation.started":
 		return "running"
 	case "peer_dialogue.started":

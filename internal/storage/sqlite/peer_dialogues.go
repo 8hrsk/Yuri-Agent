@@ -114,12 +114,12 @@ func insertPeerDialogueTx(ctx context.Context, tx *sql.Tx, dialogue domain.PeerD
 	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO peer_dialogues(
-			id, initiator_agent_id, peer_agent_id, trigger_run_id, pair_key, purpose, status,
+			id, initiator_agent_id, peer_agent_id, trigger_run_id, trigger_kind, trigger_reason, pair_key, purpose, status,
 			max_turns, max_tokens, max_duration_seconds, cooldown_seconds, turn_count, tokens_used,
 			idempotency_key, request_hash, failure, version, created_at, updated_at, started_at, finished_at, expires_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(dialogue.ID), string(dialogue.InitiatorAgentID), string(dialogue.PeerAgentID), string(dialogue.TriggerRunID),
-		dialogue.PairKey, strings.TrimSpace(dialogue.Purpose), string(dialogue.Status),
+		string(dialogue.TriggerKind), strings.TrimSpace(dialogue.TriggerReason), dialogue.PairKey, strings.TrimSpace(dialogue.Purpose), string(dialogue.Status),
 		dialogue.Budget.MaxTurns, dialogue.Budget.MaxTokens, dialogue.Budget.MaxDurationSeconds, dialogue.Budget.CooldownSeconds,
 		dialogue.TurnCount, dialogue.TokensUsed, strings.TrimSpace(dialogue.IdempotencyKey), strings.TrimSpace(dialogue.RequestHash),
 		dialogue.Failure, dialogue.Version, createdAt, updatedAt, nullableTimeValue(dialogue.StartedAt), nullableTimeValue(dialogue.FinishedAt), expiresAt)
@@ -256,6 +256,39 @@ func (r *PeerDialogueRepository) ListCompleted(ctx context.Context, window ...in
 	return result, nil
 }
 
+// ListAutonomousByInitiator returns a bounded newest-first ledger used to
+// rebuild the autonomous-trigger rate policy after restart.
+func (r *PeerDialogueRepository) ListAutonomousByInitiator(ctx context.Context, initiatorAgentID domain.ID, since time.Time, limit int) ([]domain.PeerDialogue, error) {
+	if r == nil || r.db == nil || initiatorAgentID.Empty() || since.IsZero() {
+		return nil, fmt.Errorf("%w: autonomous peer dialogue scope is required", domain.ErrInvalidArgument)
+	}
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	rows, err := r.db.QueryContext(ctx, peerDialogueSelect+`
+		WHERE initiator_agent_id = ? AND trigger_kind = ? AND created_at >= ?
+		ORDER BY created_at DESC, id DESC LIMIT ?`, initiatorAgentID.String(), string(domain.PeerDialogueTriggerAutonomous), formatTime(since), limit)
+	if err != nil {
+		return nil, wrappedSQLError("list autonomous peer dialogues", err)
+	}
+	defer rows.Close()
+	result := make([]domain.PeerDialogue, 0)
+	for rows.Next() {
+		dialogue, scanErr := scanPeerDialogue(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, dialogue)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrappedSQLError("iterate autonomous peer dialogues", err)
+	}
+	return result, nil
+}
+
 // FindByIdempotencyKey is scoped to the initiating agent and the root run,
 // preventing a retry from another agent or another trigger run from reusing a
 // previous exchange.
@@ -272,6 +305,23 @@ func (r *PeerDialogueRepository) FindByIdempotencyKey(ctx context.Context, initi
 	return scanPeerDialogue(r.db.QueryRowContext(ctx,
 		peerDialogueSelect+` WHERE initiator_agent_id = ? AND trigger_run_id = ? AND idempotency_key = ?`,
 		string(initiatorAgentID), string(triggerRunID), strings.TrimSpace(key)))
+}
+
+// HasByTriggerRun prevents one foreground root run from opening both an
+// explicit tool dialogue and an additional autonomous dialogue afterwards.
+func (r *PeerDialogueRepository) HasByTriggerRun(ctx context.Context, initiatorAgentID, triggerRunID domain.ID) (bool, error) {
+	if r == nil || r.db == nil || initiatorAgentID.Empty() || triggerRunID.Empty() {
+		return false, fmt.Errorf("%w: peer dialogue trigger scope is required", domain.ErrInvalidArgument)
+	}
+	if err := contextErr(ctx); err != nil {
+		return false, err
+	}
+	var exists int
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM peer_dialogues WHERE initiator_agent_id = ? AND trigger_run_id = ?)`, initiatorAgentID.String(), triggerRunID.String()).Scan(&exists)
+	if err != nil {
+		return false, wrappedSQLError("check peer dialogue trigger run", err)
+	}
+	return exists == 1, nil
 }
 
 // HasRecentPair reports whether either agent has opened an exchange for this
@@ -588,7 +638,7 @@ func updatePeerDialogueTx(ctx context.Context, tx *sql.Tx, dialogue domain.PeerD
 // peerDialogueSelect lists the full record so the single-row reads and
 // ListByParticipant share one scanner and one round-trip per query.
 const peerDialogueSelect = `
-	SELECT id, initiator_agent_id, peer_agent_id, trigger_run_id, pair_key, purpose, status,
+	SELECT id, initiator_agent_id, peer_agent_id, trigger_run_id, trigger_kind, trigger_reason, pair_key, purpose, status,
 	       max_turns, max_tokens, max_duration_seconds, cooldown_seconds, turn_count, tokens_used,
 	       idempotency_key, request_hash, failure, version, created_at, updated_at, started_at, finished_at, expires_at
 	FROM peer_dialogues`
@@ -608,12 +658,12 @@ type peerDialogueScanner interface {
 func scanPeerDialogue(scanner peerDialogueScanner) (domain.PeerDialogue, error) {
 	var dialogue domain.PeerDialogue
 	var (
-		id, initiatorID, peerID, triggerRunID, status string
-		createdAt, updatedAt, expiresAt               string
-		startedAt, finishedAt                         sql.NullString
+		id, initiatorID, peerID, triggerRunID, triggerKind, status string
+		createdAt, updatedAt, expiresAt                            string
+		startedAt, finishedAt                                      sql.NullString
 	)
 	if err := scanner.Scan(
-		&id, &initiatorID, &peerID, &triggerRunID, &dialogue.PairKey, &dialogue.Purpose, &status,
+		&id, &initiatorID, &peerID, &triggerRunID, &triggerKind, &dialogue.TriggerReason, &dialogue.PairKey, &dialogue.Purpose, &status,
 		&dialogue.Budget.MaxTurns, &dialogue.Budget.MaxTokens, &dialogue.Budget.MaxDurationSeconds, &dialogue.Budget.CooldownSeconds,
 		&dialogue.TurnCount, &dialogue.TokensUsed, &dialogue.IdempotencyKey, &dialogue.RequestHash, &dialogue.Failure,
 		&dialogue.Version, &createdAt, &updatedAt, &startedAt, &finishedAt, &expiresAt); err != nil {
@@ -623,6 +673,7 @@ func scanPeerDialogue(scanner peerDialogueScanner) (domain.PeerDialogue, error) 
 	dialogue.InitiatorAgentID = domain.ID(initiatorID)
 	dialogue.PeerAgentID = domain.ID(peerID)
 	dialogue.TriggerRunID = domain.ID(triggerRunID)
+	dialogue.TriggerKind = domain.PeerDialogueTriggerKind(triggerKind)
 	dialogue.Status = domain.PeerDialogueStatus(status)
 	var err error
 	if dialogue.CreatedAt, err = scanTime(createdAt); err != nil {
@@ -822,6 +873,7 @@ var _ interface {
 	Get(context.Context, domain.ID) (domain.PeerDialogue, error)
 	GetForParticipant(context.Context, domain.ID, domain.ID) (domain.PeerDialogue, error)
 	FindByIdempotencyKey(context.Context, domain.ID, domain.ID, string) (domain.PeerDialogue, error)
+	HasByTriggerRun(context.Context, domain.ID, domain.ID) (bool, error)
 	HasRecentPair(context.Context, string, time.Time) (bool, error)
 	RecoverInterrupted(context.Context, time.Time, string) error
 	Save(context.Context, domain.PeerDialogue) error

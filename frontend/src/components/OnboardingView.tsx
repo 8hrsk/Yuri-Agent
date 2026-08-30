@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
-import { defaultAgentDraft } from '../lib/agents'
+import { clearAgentDraft, loadAgentDraft, newAgentDraft } from '../lib/agents'
 import { isOnboardingComplete, onboardingStepIndex, onboardingSteps, validateOnboardingProvider, type OnboardingStep } from '../lib/onboarding'
 import type { AgentProfileInput, CodexAccount, CodexModel, ProviderSettings, YuriClient } from '../lib/contracts'
 import { AgentProfileForm } from './AgentProfileForm'
@@ -51,7 +51,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
   const [step, setStep] = useState<OnboardingStep>('welcome')
   const [settings, setSettings] = useState<ProviderSettings>(defaultSettings)
   const [apiKey, setApiKey] = useState('')
-  const [agentDraft, setAgentDraft] = useState<AgentProfileInput>({ ...defaultAgentDraft, traits: { ...defaultAgentDraft.traits } })
+  const [agentDraft, setAgentDraft] = useState<AgentProfileInput>(() => loadAgentDraft(newAgentDraft()))
   const [codex, setCodex] = useState<CodexAccount>({ connected: false })
   const [codexModels, setCodexModels] = useState<CodexModel[]>([])
   const [busy, setBusy] = useState<BusyState>('loading')
@@ -121,6 +121,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
     setFeedback(undefined)
     try {
       const agent = await client.createAgent(agentDraft)
+      clearAgentDraft()
       setFeedback({ kind: 'success', text: `Агент ${agent.name} создан и выбран как активный.` })
       setStep('provider')
     } catch (cause) {
@@ -167,7 +168,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
           <span className="stage-pill">FIRST RUN · SECURE SETUP</span>
         </header>
 
-        <div className="onboarding-layout">
+        <div className={step === 'agent' ? 'onboarding-layout onboarding-layout--agent' : 'onboarding-layout'}>
           <section className="onboarding-main" aria-labelledby="onboarding-title">
             <div className="onboarding-eyebrow"><span className="eyebrow-dot" /> FIRST-RUN SETUP</div>
             <h1 id="onboarding-title">Создадим вашего агента<span className="title-dot">.</span></h1>

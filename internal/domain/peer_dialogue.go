@@ -15,6 +15,17 @@ const (
 	PeerDialogueMaxTurns        = 4
 )
 
+type PeerDialogueTriggerKind string
+
+const (
+	PeerDialogueTriggerAgentTool  PeerDialogueTriggerKind = "agent_tool"
+	PeerDialogueTriggerAutonomous PeerDialogueTriggerKind = "autonomous"
+)
+
+func (kind PeerDialogueTriggerKind) Valid() bool {
+	return kind == PeerDialogueTriggerAgentTool || kind == PeerDialogueTriggerAutonomous
+}
+
 type PeerDialogueStatus string
 
 const (
@@ -56,31 +67,34 @@ func (b PeerDialogueBudget) Valid() bool {
 }
 
 type PeerDialogue struct {
-	ID               ID                 `json:"id"`
-	InitiatorAgentID ID                 `json:"initiator_agent_id"`
-	PeerAgentID      ID                 `json:"peer_agent_id"`
-	TriggerRunID     ID                 `json:"trigger_run_id"`
-	PairKey          string             `json:"pair_key"`
-	Purpose          string             `json:"purpose"`
-	Status           PeerDialogueStatus `json:"status"`
-	Budget           PeerDialogueBudget `json:"budget"`
-	TurnCount        int                `json:"turn_count"`
-	TokensUsed       int64              `json:"tokens_used"`
-	IdempotencyKey   string             `json:"idempotency_key"`
-	RequestHash      string             `json:"request_hash"`
-	Failure          string             `json:"failure,omitempty"`
-	Version          uint64             `json:"version"`
-	CreatedAt        time.Time          `json:"created_at"`
-	UpdatedAt        time.Time          `json:"updated_at"`
-	StartedAt        time.Time          `json:"started_at,omitempty"`
-	FinishedAt       time.Time          `json:"finished_at,omitempty"`
-	ExpiresAt        time.Time          `json:"expires_at"`
+	ID               ID                      `json:"id"`
+	InitiatorAgentID ID                      `json:"initiator_agent_id"`
+	PeerAgentID      ID                      `json:"peer_agent_id"`
+	TriggerRunID     ID                      `json:"trigger_run_id"`
+	TriggerKind      PeerDialogueTriggerKind `json:"trigger_kind"`
+	TriggerReason    string                  `json:"trigger_reason"`
+	PairKey          string                  `json:"pair_key"`
+	Purpose          string                  `json:"purpose"`
+	Status           PeerDialogueStatus      `json:"status"`
+	Budget           PeerDialogueBudget      `json:"budget"`
+	TurnCount        int                     `json:"turn_count"`
+	TokensUsed       int64                   `json:"tokens_used"`
+	IdempotencyKey   string                  `json:"idempotency_key"`
+	RequestHash      string                  `json:"request_hash"`
+	Failure          string                  `json:"failure,omitempty"`
+	Version          uint64                  `json:"version"`
+	CreatedAt        time.Time               `json:"created_at"`
+	UpdatedAt        time.Time               `json:"updated_at"`
+	StartedAt        time.Time               `json:"started_at,omitempty"`
+	FinishedAt       time.Time               `json:"finished_at,omitempty"`
+	ExpiresAt        time.Time               `json:"expires_at"`
 }
 
 func NewPeerDialogue(id, initiatorAgentID, peerAgentID, triggerRunID ID, purpose, idempotencyKey, requestHash string, budget PeerDialogueBudget, now time.Time) (PeerDialogue, error) {
 	now = now.UTC()
 	dialogue := PeerDialogue{
 		ID: id, InitiatorAgentID: initiatorAgentID, PeerAgentID: peerAgentID, TriggerRunID: triggerRunID,
+		TriggerKind: PeerDialogueTriggerAgentTool, TriggerReason: "Агент явно запросил консультацию peer через tool.",
 		PairKey: AgentPairKey(initiatorAgentID, peerAgentID), Purpose: strings.TrimSpace(purpose),
 		Status: PeerDialogueQueued, Budget: budget, IdempotencyKey: strings.TrimSpace(idempotencyKey), RequestHash: strings.TrimSpace(requestHash),
 		Version: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Duration(budget.MaxDurationSeconds) * time.Second),
@@ -94,6 +108,9 @@ func NewPeerDialogue(id, initiatorAgentID, peerAgentID, triggerRunID ID, purpose
 func (d PeerDialogue) Validate() error {
 	if d.ID.Empty() || d.InitiatorAgentID.Empty() || d.PeerAgentID.Empty() || d.TriggerRunID.Empty() || d.InitiatorAgentID == d.PeerAgentID {
 		return fmt.Errorf("%w: dialogue identity, participants, and trigger run are required", ErrInvalidArgument)
+	}
+	if !d.TriggerKind.Valid() || strings.TrimSpace(d.TriggerReason) == "" || utf8.RuneCountInString(d.TriggerReason) > 512 || strings.ContainsRune(d.TriggerReason, '\x00') {
+		return fmt.Errorf("%w: peer dialogue trigger provenance is invalid", ErrInvalidArgument)
 	}
 	if d.PairKey != AgentPairKey(d.InitiatorAgentID, d.PeerAgentID) {
 		return fmt.Errorf("%w: invalid dialogue pair key", ErrInvalidArgument)
@@ -123,6 +140,15 @@ func (d PeerDialogue) Validate() error {
 		return fmt.Errorf("%w: invalid dialogue timestamps", ErrInvalidArgument)
 	}
 	return nil
+}
+
+func (d *PeerDialogue) MarkAutonomous(reason string) error {
+	if d == nil {
+		return fmt.Errorf("%w: peer dialogue is required", ErrInvalidArgument)
+	}
+	d.TriggerKind = PeerDialogueTriggerAutonomous
+	d.TriggerReason = strings.TrimSpace(reason)
+	return d.Validate()
 }
 
 func (d PeerDialogue) CanTransition(next PeerDialogueStatus) bool {

@@ -102,14 +102,17 @@ type WebSearchConfig struct {
 // adapters convert cooldown minutes to durations and never store transient
 // delivery counters in this file.
 type ProactivityConfig struct {
-	Enabled                 bool   `json:"enabled"`
-	QuietHoursEnabled       bool   `json:"quiet_hours_enabled"`
-	QuietHoursStart         string `json:"quiet_hours_start"`
-	QuietHoursEnd           string `json:"quiet_hours_end"`
-	Timezone                string `json:"timezone"`
-	DailyLimit              int    `json:"daily_limit"`
-	CooldownMinutes         int    `json:"cooldown_minutes"`
-	AllowLocalNotifications bool   `json:"allow_local_notifications"`
+	Enabled                       bool   `json:"enabled"`
+	QuietHoursEnabled             bool   `json:"quiet_hours_enabled"`
+	QuietHoursStart               string `json:"quiet_hours_start"`
+	QuietHoursEnd                 string `json:"quiet_hours_end"`
+	Timezone                      string `json:"timezone"`
+	DailyLimit                    int    `json:"daily_limit"`
+	CooldownMinutes               int    `json:"cooldown_minutes"`
+	AllowLocalNotifications       bool   `json:"allow_local_notifications"`
+	AutonomousPeerDialogues       bool   `json:"autonomous_peer_dialogues"`
+	AutonomousPeerDailyLimit      int    `json:"autonomous_peer_daily_limit"`
+	AutonomousPeerCooldownMinutes int    `json:"autonomous_peer_cooldown_minutes"`
 }
 
 // PersonaConfig contains owner-controlled switches for the mutable persona.
@@ -228,6 +231,7 @@ func Default(paths Paths) Config {
 		Proactivity: ProactivityConfig{
 			Enabled: false, QuietHoursEnabled: true, QuietHoursStart: "23:00", QuietHoursEnd: "07:00",
 			Timezone: "UTC", DailyLimit: 5, CooldownMinutes: 30, AllowLocalNotifications: true,
+			AutonomousPeerDialogues: false, AutonomousPeerDailyLimit: 2, AutonomousPeerCooldownMinutes: 120,
 		},
 		Persona: PersonaConfig{
 			ProfileID: "owner", AutoEvolution: true, ReflectionCooldownMinutes: 60,
@@ -252,6 +256,12 @@ func Load(paths Paths) (Config, error) {
 	// backward compatibility while keeping new installations deny-by-default.
 	if strings.TrimSpace(value.Proactivity.Timezone) == "" {
 		value.Proactivity = Default(paths).Proactivity
+	}
+	if value.Proactivity.AutonomousPeerDailyLimit == 0 {
+		value.Proactivity.AutonomousPeerDailyLimit = Default(paths).Proactivity.AutonomousPeerDailyLimit
+	}
+	if value.Proactivity.AutonomousPeerCooldownMinutes == 0 {
+		value.Proactivity.AutonomousPeerCooldownMinutes = Default(paths).Proactivity.AutonomousPeerCooldownMinutes
 	}
 	// Stage 4 and older config files have no persona object. An empty local
 	// profile ID is reserved as the migration signal so an explicit false
@@ -451,6 +461,12 @@ func (c ProactivityConfig) Validate() error {
 	}
 	if c.CooldownMinutes < 0 || c.CooldownMinutes > 365*24*60 {
 		return errors.New("proactivity cooldown_minutes is outside the supported range")
+	}
+	if c.AutonomousPeerDailyLimit < 1 || c.AutonomousPeerDailyLimit > 10 {
+		return errors.New("proactivity autonomous_peer_daily_limit must be between 1 and 10")
+	}
+	if c.AutonomousPeerCooldownMinutes < 5 || c.AutonomousPeerCooldownMinutes > 24*60 {
+		return errors.New("proactivity autonomous_peer_cooldown_minutes must be between 5 and 1440")
 	}
 	if c.QuietHoursEnabled {
 		if !validClockTime(c.QuietHoursStart) || !validClockTime(c.QuietHoursEnd) {

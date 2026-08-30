@@ -256,6 +256,16 @@ func validateAffectDelta(delta *AffectDelta) error {
 	if len(delta.Dimensions) == 0 {
 		return fmt.Errorf("%w: affect dimensions are required", ErrInvalidProposal)
 	}
+	nonZero := false
+	for _, value := range delta.Dimensions {
+		if value != 0 {
+			nonZero = true
+			break
+		}
+	}
+	if !nonZero {
+		return fmt.Errorf("%w: zero-only affect appraisal must use no_change", ErrInvalidProposal)
+	}
 	if err := validateProposalIDs(delta.EvidenceIDs, "affect evidence_ids"); err != nil {
 		return err
 	}

@@ -60,3 +60,24 @@ func TestPeerDialogueRejectsSelfAndRequiresFailureReason(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPeerDialogueAutonomousTriggerProvenance(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	budget := PeerDialogueBudget{MaxTurns: 2, MaxTokens: 1000, MaxDurationSeconds: 30, CooldownSeconds: 60}
+	dialogue, err := NewPeerDialogue("dialogue", "a", "b", "run", "purpose", "call", "hash", budget, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dialogue.TriggerKind != PeerDialogueTriggerAgentTool || dialogue.TriggerReason == "" {
+		t.Fatalf("default trigger provenance = %q %q", dialogue.TriggerKind, dialogue.TriggerReason)
+	}
+	if err := dialogue.MarkAutonomous("Нужна независимая проверка плана."); err != nil {
+		t.Fatal(err)
+	}
+	if dialogue.TriggerKind != PeerDialogueTriggerAutonomous || dialogue.TriggerReason != "Нужна независимая проверка плана." {
+		t.Fatalf("autonomous trigger provenance = %q %q", dialogue.TriggerKind, dialogue.TriggerReason)
+	}
+	if err := dialogue.MarkAutonomous(" "); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("empty autonomous reason error = %v", err)
+	}
+}
