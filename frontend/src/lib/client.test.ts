@@ -1304,6 +1304,20 @@ describe('Yuri client contract', () => {
     await expect(client.listPeerDialogues()).resolves.toMatchObject([{ id: 'peer-dialogue-briefing' }, { id: 'peer-dialogue-research', status: 'cancelled' }])
   })
 
+  it('keeps offline peer relationship recovery append-only', async () => {
+    const client = createYuriClient()
+    const [relationship] = await client.listPeerRelationships()
+    expect(relationship).toMatchObject({ peerAgentId: 'agent-mira', version: 2, opinions: [{ label: 'opinion' }] })
+
+    const reset = await client.resetPeerRelationship('agent-mira')
+    expect(reset?.relationship).toMatchObject({ version: 3, opinions: [] })
+    expect(reset?.versions[0]).toMatchObject({ version: 3, operation: 'reset' })
+
+    const restored = await client.rollbackPeerRelationship('agent-mira', 'peer-relationship-version-2')
+    expect(restored?.relationship).toMatchObject({ version: 4, opinions: [{ label: 'opinion' }] })
+    expect(restored?.versions[0]).toMatchObject({ version: 4, operation: 'rollback' })
+  })
+
   it('normalizes and forwards bounded peer dialogue methods through Wails', async () => {
     const calls: Array<{ name: string; args: unknown[] }> = []
     const bridge = {
@@ -1348,6 +1362,55 @@ describe('Yuri client contract', () => {
       expect(calls).toEqual([
         { name: 'ListPeerDialogues', args: [{ limit: 17 }] },
         { name: 'CancelPeerDialogue', args: [{ id: 'peer-1' }] },
+      ])
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
+  it('scopes peer relationship history and owner recovery calls through Wails', async () => {
+    const calls: Array<{ name: string; args: unknown[] }> = []
+    const relationship = {
+      observer_agent_id: 'agent-yuri', peer_agent_id: 'agent-mira', peer_name: 'Мира', relationship_id: 'rel-1',
+      version: 2, current_version_id: 'rel-version-2', summary: 'Надёжная собеседница.',
+      dimensions: { trust: 72, warmth: 0.6 },
+      opinions: [{ id: 'opinion-1', subject: 'Мира', content: 'Хорошо проверяет планы.', label: 'opinion', confidence: 68 }],
+      evidence: [], updated_at: '2026-08-30T10:00:00.000Z',
+    }
+    const detail = {
+      relationship,
+      versions: [{
+        id: 'rel-version-2', version: 2, parent_id: 'rel-version-1', operation: 'update', summary: 'Надёжная собеседница.',
+        dimensions: { trust: 0.72 }, opinions: relationship.opinions, reason: 'Рефлексия.', evidence: [], created_at: '2026-08-30T10:00:00.000Z',
+      }],
+    }
+    const bridge = {
+      ListConversations: () => [],
+      ListPeerRelationships: (input: unknown) => { calls.push({ name: 'ListPeerRelationships', args: [input] }); return { relationships: [relationship] } },
+      GetPeerRelationship: (input: unknown) => { calls.push({ name: 'GetPeerRelationship', args: [input] }); return detail },
+      RollbackPeerRelationship: (input: unknown) => { calls.push({ name: 'RollbackPeerRelationship', args: [input] }); return detail },
+      ResetPeerRelationship: (input: unknown) => { calls.push({ name: 'ResetPeerRelationship', args: [input] }); return detail },
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      const client = createYuriClient()
+      await expect(client.listPeerRelationships({ limit: 9 })).resolves.toMatchObject([{
+        observerAgentId: 'agent-yuri', peerAgentId: 'agent-mira', relationshipId: 'rel-1',
+        dimensions: { trust: 0.72, warmth: 0.6 }, opinions: [{ label: 'opinion', confidence: 0.68 }],
+      }])
+      await expect(client.getPeerRelationship('agent-mira')).resolves.toMatchObject({ versions: [{ operation: 'update' }] })
+      await client.rollbackPeerRelationship('agent-mira', 'rel-version-1')
+      await client.resetPeerRelationship('agent-mira')
+      expect(calls).toEqual([
+        { name: 'ListPeerRelationships', args: [{ limit: 9 }] },
+        { name: 'GetPeerRelationship', args: [{ peerAgentId: 'agent-mira' }] },
+        { name: 'RollbackPeerRelationship', args: [{ peerAgentId: 'agent-mira', versionId: 'rel-version-1' }] },
+        { name: 'ResetPeerRelationship', args: [{ peerAgentId: 'agent-mira' }] },
       ])
     } finally {
       if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window

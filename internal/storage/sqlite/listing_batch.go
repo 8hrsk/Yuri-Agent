@@ -409,6 +409,35 @@ func (r *AgentRepository) ListByIDs(ctx context.Context, ids []domain.ID) (map[d
 	return result, nil
 }
 
+// ListByIDs reads current relationship heads in bounded set-based queries.
+// Missing IDs are absent from the result map.
+func (r *RelationshipRepository) ListByIDs(ctx context.Context, ids []domain.ID) (map[domain.ID]domain.RelationshipState, error) {
+	if err := requireDatabase(r.db); err != nil {
+		return nil, err
+	}
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+	result := make(map[domain.ID]domain.RelationshipState)
+	for _, chunk := range chunkIDs(ids) {
+		placeholders, args := idPlaceholders(chunk)
+		query := relationshipSelect + ` FROM relationship_heads AS rh
+			JOIN relationship_versions AS rv ON rv.relationship_id = rh.relationship_id AND rv.version = rh.version
+			WHERE rh.relationship_id IN (` + placeholders + `) ORDER BY rh.updated_at DESC, rh.relationship_id`
+		if err := eachChunkRow(ctx, r.db, "relationships by ids", query, args, func(row rowScanner) error {
+			state, scanErr := scanRelationship(row)
+			if scanErr != nil {
+				return scanErr
+			}
+			result[state.ID] = state
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
 // ListByDialogues reads the turns of every listed dialogue that the participant
 // is actually a party to, in one statement, each dialogue's slice in sequence
 // order.

@@ -32,6 +32,10 @@ import type {
   OnboardingState,
   PeerDialogue,
   PeerDialogueListOptions,
+  PeerRelationship,
+  PeerRelationshipDetail,
+  PeerRelationshipListOptions,
+  PeerRelationshipVersion,
   PersonaVersion,
   PersonalitySnapshot,
   PluginEnableRequest,
@@ -65,6 +69,54 @@ import { emptyPluginInspection } from './normalize-plugins'
 import { makeId, nowIso, sleep } from './primitives'
 import { defaultLimits, defaultOnboardingState, defaultProactivitySettings, defaultSettings, defaultWebSearchSettings } from './settings'
 
+function starterPeerRelationship(): PeerRelationshipDetail {
+  const now = Date.now()
+  const initial: PeerRelationshipVersion = {
+    id: 'peer-relationship-version-1', version: 1, operation: 'create', summary: 'Отношение ещё не сформировано.',
+    dimensions: {}, opinions: [], reason: 'Создана направленная связь между агентами.', evidence: [],
+    createdAt: new Date(now - 1000 * 60 * 19).toISOString(),
+  }
+  const reflected: PeerRelationshipVersion = {
+    id: 'peer-relationship-version-2', version: 2, parentId: initial.id, operation: 'update',
+    summary: 'Считает Миру вдумчивой и полезной собеседницей для проверки планов.',
+    dimensions: { trust: 0.64, warmth: 0.55, reliability: 0.71 },
+    opinions: [{
+      id: 'peer-opinion-1', subject: 'Мира', content: 'Она хорошо замечает пробелы в структуре задачи.',
+      label: 'opinion', confidence: 0.68, evidence: [], reason: 'Вывод после фонового диалога.',
+      createdAt: new Date(now - 1000 * 60 * 17).toISOString(), updatedAt: new Date(now - 1000 * 60 * 17).toISOString(),
+    }],
+    reason: 'Рефлексия после фонового диалога.', evidence: [],
+    createdAt: new Date(now - 1000 * 60 * 17).toISOString(),
+  }
+  return {
+    relationship: {
+      observerAgentId: 'agent-yuri', peerAgentId: 'agent-mira', peerName: 'Мира', relationshipId: 'peer-relationship-yuri-mira',
+      version: reflected.version, currentVersionId: reflected.id, summary: reflected.summary,
+      dimensions: { ...reflected.dimensions }, opinions: reflected.opinions.map((item) => ({ ...item, evidence: [...item.evidence] })),
+      reason: reflected.reason, evidence: [], updatedAt: reflected.createdAt,
+    },
+    versions: [reflected, initial],
+  }
+}
+
+function clonePeerRelationshipDetail(value: PeerRelationshipDetail): PeerRelationshipDetail {
+  const cloneOpinions = (opinions: PeerRelationship['opinions']) => opinions.map((item) => ({ ...item, evidence: item.evidence.map((evidence) => ({ ...evidence })) }))
+  return {
+    relationship: {
+      ...value.relationship,
+      dimensions: { ...value.relationship.dimensions },
+      opinions: cloneOpinions(value.relationship.opinions),
+      evidence: value.relationship.evidence.map((item) => ({ ...item })),
+    },
+    versions: value.versions.map((version) => ({
+      ...version,
+      dimensions: { ...version.dimensions },
+      opinions: cloneOpinions(version.opinions),
+      evidence: version.evidence.map((item) => ({ ...item })),
+    })),
+  }
+}
+
 class MockYuriClient implements YuriClient {
   readonly mode = 'mock' as const
   private readonly conversations = new Map<string, Conversation>([[starterConversation().id, starterConversation()]])
@@ -87,6 +139,7 @@ class MockYuriClient implements YuriClient {
   private jobRuns: JobRun[] = starterJobRuns()
   private activity: ActivityEvent[] = starterActivity()
   private peerDialogues: PeerDialogue[] = starterPeerDialogues()
+  private peerRelationshipState: PeerRelationshipDetail = starterPeerRelationship()
   private proactivity: ProactivitySettings = { ...defaultProactivitySettings }
   private webSearch: WebSearchSettings = { ...defaultWebSearchSettings }
   private personality: PersonalitySnapshot = createStarterPersonalitySnapshot()
@@ -687,6 +740,71 @@ class MockYuriClient implements YuriClient {
     this.peerDialogues = this.peerDialogues.map((dialogue) => dialogue.id === dialogueId
       ? { ...dialogue, status: 'cancelled', finishedAt, failure: 'Остановлено пользователем.' }
       : dialogue)
+  }
+
+  async listPeerRelationships(options: PeerRelationshipListOptions = {}): Promise<PeerRelationship[]> {
+    const limit = Math.max(1, Math.min(100, Math.round(options.limit ?? 50)))
+    if (limit < 1) return []
+    const detail = clonePeerRelationshipDetail(this.peerRelationshipState)
+    const active = this.activeAgentId ? this.agents.get(this.activeAgentId) : undefined
+    if (active) detail.relationship.observerAgentId = active.id
+    return [detail.relationship]
+  }
+
+  async getPeerRelationship(peerAgentId: string): Promise<PeerRelationshipDetail | undefined> {
+    if (peerAgentId !== this.peerRelationshipState.relationship.peerAgentId) return undefined
+    const detail = clonePeerRelationshipDetail(this.peerRelationshipState)
+    const active = this.activeAgentId ? this.agents.get(this.activeAgentId) : undefined
+    if (active) detail.relationship.observerAgentId = active.id
+    return detail
+  }
+
+  async rollbackPeerRelationship(peerAgentId: string, versionId: string): Promise<PeerRelationshipDetail | undefined> {
+    if (peerAgentId !== this.peerRelationshipState.relationship.peerAgentId) return undefined
+    const target = this.peerRelationshipState.versions.find((version) => version.id === versionId)
+    if (!target) throw new Error('Версия отношения не найдена.')
+    this.appendPeerRelationshipVersion(target, 'rollback', 'Владелец откатил мнение агента о peer.')
+    return this.getPeerRelationship(peerAgentId)
+  }
+
+  async resetPeerRelationship(peerAgentId: string): Promise<PeerRelationshipDetail | undefined> {
+    if (peerAgentId !== this.peerRelationshipState.relationship.peerAgentId) return undefined
+    this.appendPeerRelationshipVersion({
+      id: '', version: 0, operation: 'reset', summary: 'Отношение ещё не сформировано.', dimensions: {}, opinions: [],
+      reason: 'Владелец сбросил мнение агента о peer.', evidence: [], createdAt: nowIso(),
+    }, 'reset', 'Владелец сбросил мнение агента о peer.')
+    return this.getPeerRelationship(peerAgentId)
+  }
+
+  private appendPeerRelationshipVersion(source: PeerRelationshipVersion, operation: 'rollback' | 'reset', reason: string): void {
+    const current = this.peerRelationshipState.relationship
+    const createdAt = nowIso()
+    const next: PeerRelationshipVersion = {
+      ...source,
+      id: makeId('peer-relationship-version'),
+      version: current.version + 1,
+      parentId: current.currentVersionId,
+      operation,
+      reason,
+      dimensions: { ...source.dimensions },
+      opinions: source.opinions.map((item) => ({ ...item, evidence: item.evidence.map((evidence) => ({ ...evidence })) })),
+      evidence: source.evidence.map((item) => ({ ...item })),
+      createdAt,
+    }
+    this.peerRelationshipState = {
+      relationship: {
+        ...current,
+        version: next.version,
+        currentVersionId: next.id,
+        summary: next.summary,
+        dimensions: { ...next.dimensions },
+        opinions: next.opinions.map((item) => ({ ...item, evidence: item.evidence.map((evidence) => ({ ...evidence })) })),
+        reason,
+        evidence: next.evidence.map((item) => ({ ...item })),
+        updatedAt: createdAt,
+      },
+      versions: [next, ...this.peerRelationshipState.versions],
+    }
   }
 
   async getProactivitySettings(): Promise<ProactivitySettings> {

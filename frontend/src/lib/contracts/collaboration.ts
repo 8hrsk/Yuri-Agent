@@ -1,3 +1,5 @@
+import type { PersonaEvidence, SubjectiveOpinion } from './persona'
+
 /**
  * A bounded background conversation between two named agents. The backend
  * keeps this separate from user-facing chat transcripts so the UI can show
@@ -35,6 +37,47 @@ export interface PeerDialogue {
 }
 
 export interface PeerDialogueListOptions {
+  limit?: number
+}
+
+/** The active agent's directional, subjective relationship to one peer. */
+export interface PeerRelationship {
+  observerAgentId: string
+  peerAgentId: string
+  peerName: string
+  relationshipId: string
+  version: number
+  currentVersionId: string
+  summary: string
+  dimensions: Record<string, number>
+  opinions: SubjectiveOpinion[]
+  reason?: string
+  evidence: PersonaEvidence[]
+  updatedAt: string
+}
+
+export type PeerRelationshipOperation = 'create' | 'update' | 'rollback' | 'reset' | 'unknown'
+
+export interface PeerRelationshipVersion {
+  id: string
+  version: number
+  parentId?: string
+  operation: PeerRelationshipOperation
+  summary: string
+  dimensions: Record<string, number>
+  opinions: SubjectiveOpinion[]
+  reason: string
+  evidence: PersonaEvidence[]
+  authorRunId?: string
+  createdAt: string
+}
+
+export interface PeerRelationshipDetail {
+  relationship: PeerRelationship
+  versions: PeerRelationshipVersion[]
+}
+
+export interface PeerRelationshipListOptions {
   limit?: number
 }
 

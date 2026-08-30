@@ -5,7 +5,12 @@ import type {
   PeerDialogue,
   PeerDialogueMessage,
   PeerDialogueStatus,
+  PeerRelationship,
+  PeerRelationshipDetail,
+  PeerRelationshipOperation,
+  PeerRelationshipVersion,
 } from '../contracts'
+import { clampPersonaValue, normalizePersonaEvidence, normalizeSubjectiveOpinions } from '../personality'
 import { nowIso, optionalNumber, optionalString } from './primitives'
 import type { UnknownRecord } from './primitives'
 
@@ -86,6 +91,89 @@ function normalizePeerDialogueList(value: unknown): PeerDialogue[] {
     : []
 }
 
+function normalizeDimensions(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value as UnknownRecord).flatMap(([key, raw]) => {
+    const numeric = Number(raw)
+    return Number.isFinite(numeric) ? [[key, clampPersonaValue(numeric)]] : []
+  }))
+}
+
+function normalizePeerRelationshipOperation(value: unknown): PeerRelationshipOperation {
+  const operation = String(value ?? '').trim().toLowerCase()
+  if (operation === 'create' || operation === 'update' || operation === 'rollback' || operation === 'reset') return operation
+  return 'unknown'
+}
+
+function normalizePeerRelationship(value: unknown): PeerRelationship | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const rawValue = value as UnknownRecord
+  const source = rawValue.relationship && typeof rawValue.relationship === 'object'
+    ? rawValue.relationship as UnknownRecord
+    : rawValue
+  const observerAgentId = optionalString(source, 'observerAgentId', 'observer_agent_id')
+  const peerAgentId = optionalString(source, 'peerAgentId', 'peer_agent_id')
+  const relationshipId = optionalString(source, 'relationshipId', 'relationship_id', 'id')
+  if (!observerAgentId || !peerAgentId || !relationshipId) return undefined
+  return {
+    observerAgentId,
+    peerAgentId,
+    peerName: optionalString(source, 'peerName', 'peer_name') ?? 'Агент',
+    relationshipId,
+    version: Math.max(1, Math.round(optionalNumber(source, 'version') ?? 1)),
+    currentVersionId: optionalString(source, 'currentVersionId', 'current_version_id', 'revisionId', 'revision_id') ?? '',
+    summary: optionalString(source, 'summary') ?? 'Мнение ещё не сформировано.',
+    dimensions: normalizeDimensions(source.dimensions),
+    opinions: normalizeSubjectiveOpinions(source.opinions),
+    reason: optionalString(source, 'reason'),
+    evidence: normalizePersonaEvidence(source.evidence),
+    updatedAt: optionalString(source, 'updatedAt', 'updated_at') ?? nowIso(),
+  }
+}
+
+function normalizePeerRelationshipVersion(value: unknown): PeerRelationshipVersion | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as UnknownRecord
+  const id = optionalString(source, 'id', 'versionId', 'version_id', 'revisionId', 'revision_id')
+  if (!id) return undefined
+  return {
+    id,
+    version: Math.max(1, Math.round(optionalNumber(source, 'version') ?? 1)),
+    parentId: optionalString(source, 'parentId', 'parent_id'),
+    operation: normalizePeerRelationshipOperation(source.operation),
+    summary: optionalString(source, 'summary') ?? 'Мнение ещё не сформировано.',
+    dimensions: normalizeDimensions(source.dimensions),
+    opinions: normalizeSubjectiveOpinions(source.opinions),
+    reason: optionalString(source, 'reason') ?? 'Версия отношения',
+    evidence: normalizePersonaEvidence(source.evidence),
+    authorRunId: optionalString(source, 'authorRunId', 'author_run_id'),
+    createdAt: optionalString(source, 'createdAt', 'created_at') ?? nowIso(),
+  }
+}
+
+function normalizePeerRelationshipList(value: unknown): PeerRelationship[] {
+  const rawItems = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object'
+      ? ((value as UnknownRecord).items ?? (value as UnknownRecord).relationships ?? (value as UnknownRecord).results)
+      : undefined
+  return Array.isArray(rawItems)
+    ? rawItems.map(normalizePeerRelationship).filter((item): item is PeerRelationship => Boolean(item))
+    : []
+}
+
+function normalizePeerRelationshipDetail(value: unknown): PeerRelationshipDetail | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as UnknownRecord
+  const relationship = normalizePeerRelationship(source.relationship ?? source.current ?? source)
+  if (!relationship) return undefined
+  const rawVersions = source.versions ?? source.history
+  const versions = Array.isArray(rawVersions)
+    ? rawVersions.map(normalizePeerRelationshipVersion).filter((item): item is PeerRelationshipVersion => Boolean(item))
+    : []
+  return { relationship, versions }
+}
+
 function normalizeActivityType(value: unknown): ActivityType {
   const type = String(value ?? '').toLowerCase().replace(/[-\s]/g, '_')
   if (type === 'job' || type === 'job_run' || type === 'schedule' || type === 'scheduler') return 'job'
@@ -142,4 +230,9 @@ function normalizeActivityList(value: unknown): ActivityEvent[] {
     : []
 }
 
-export { normalizeActivityList, normalizePeerDialogueList }
+export {
+  normalizeActivityList,
+  normalizePeerDialogueList,
+  normalizePeerRelationshipDetail,
+  normalizePeerRelationshipList,
+}

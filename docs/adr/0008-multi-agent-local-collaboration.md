@@ -20,6 +20,7 @@
 8. Permanent memory создаётся приватной. Владелец может явно опубликовать принадлежащую агенту запись как `owner_shared` или `installation_shared` и отозвать публикацию обратно в `agent_private`. Scope меняется новой append-only revision (`publish`/`revoke`), ownership и provenance сохраняются; highly-sensitive записи не публикуются.
 9. Completed peer dialogue порождает по одной private episodic projection для каждого участника. Детерминированный digest фиксирует событие и bounded-фрагмент завершения, но не интерпретирует его как opinion/affect. Projection имеет стабильный ID и provenance на dialogue/message log; bounded startup reconciliation восстанавливает пропущенную запись после crash.
 10. После episodic projection отдельный bounded social-reflection pass формирует независимое направленное отношение `observer → peer` и, при наличии evidence, краткоживущий affect event observer. Peer transcript остаётся untrusted data; persona, owner relationship, factual memory и permissions не являются допустимыми targets. State revisions и terminal marker коммитятся атомарно, а пропущенный pass повторяется не более чем для одного completed dialogue за следующий model-backed background cycle.
+11. Владелец видит directional relationship только в области активного observer. UI маркирует opinion/inference как субъективные данные и показывает version/evidence history. Reset и rollback не редактируют старые строки: они создают новую relationship revision и owner audit event.
 
 ## Последствия
 

@@ -35,6 +35,14 @@ type PeerSocialMutation struct {
 	AffectEvents         []domain.AffectiveEvent
 }
 
+type PeerRelationshipLink struct {
+	ObserverAgentID domain.ID
+	SubjectAgentID  domain.ID
+	RelationshipID  domain.ID
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 func NewPeerSocialRepository(database *sql.DB) *PeerSocialRepository {
 	return &PeerSocialRepository{db: database}
 }
@@ -104,6 +112,45 @@ func (r *PeerSocialRepository) GetRelationship(ctx context.Context, observer, su
 		return domain.RelationshipState{}, wrappedSQLError("get peer relationship link", err)
 	}
 	return getRelationshipVersion(ctx, r.db, domain.ID(id), 0)
+}
+
+func (r *PeerSocialRepository) ListRelationships(ctx context.Context, observer domain.ID, limit int) ([]PeerRelationshipLink, error) {
+	if r == nil || r.db == nil || observer.Empty() {
+		return nil, domain.ErrInvalidArgument
+	}
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT apr.observer_agent_id, apr.subject_agent_id, apr.relationship_id, apr.created_at, rh.updated_at
+		FROM agent_peer_relationships AS apr
+		JOIN relationship_heads AS rh ON rh.relationship_id = apr.relationship_id
+		WHERE apr.observer_agent_id = ? ORDER BY rh.updated_at DESC, apr.subject_agent_id LIMIT ?`, observer.String(), limit)
+	if err != nil {
+		return nil, wrappedSQLError("list peer relationships", err)
+	}
+	defer rows.Close()
+	result := make([]PeerRelationshipLink, 0)
+	for rows.Next() {
+		var item PeerRelationshipLink
+		var createdAt, updatedAt string
+		if err := rows.Scan(&item.ObserverAgentID, &item.SubjectAgentID, &item.RelationshipID, &createdAt, &updatedAt); err != nil {
+			return nil, wrappedSQLError("scan peer relationship link", err)
+		}
+		if item.CreatedAt, err = scanTime(createdAt); err != nil {
+			return nil, err
+		}
+		if item.UpdatedAt, err = scanTime(updatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrappedSQLError("iterate peer relationships", err)
+	}
+	return result, nil
 }
 
 func (r *PeerSocialRepository) GetReflection(ctx context.Context, dialogueID, observer domain.ID) (PeerSocialReflectionRecord, error) {

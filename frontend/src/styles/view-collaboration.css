@@ -77,6 +77,279 @@
   letter-spacing: -0.03em;
 }
 
+.collaboration-toolbar--dialogues {
+  margin-top: 28px;
+}
+
+.peer-relationship-list {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.peer-relationship-card {
+  min-width: 0;
+  padding: 17px;
+  border: 1px solid rgba(var(--accent-rgb), 0.16);
+  border-radius: 13px;
+  background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.045), var(--surface-wash));
+}
+
+.peer-relationship-card__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.peer-relationship-card__header > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.peer-relationship-card__header > div > span,
+.peer-relationship-card__version {
+  color: #756e84;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  letter-spacing: 0.08em;
+}
+
+.peer-relationship-card__header h3 {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  color: #d9d4e4;
+  font-size: 11px;
+}
+
+.peer-relationship-card__version {
+  margin-left: auto;
+  padding: 4px 6px;
+  border: 1px solid rgba(var(--accent-rgb), 0.15);
+  border-radius: 5px;
+  color: #a99fc2;
+  background: rgba(var(--accent-rgb), 0.04);
+}
+
+.peer-relationship-card__summary {
+  margin: 15px 0 13px;
+  color: #aaa4b6;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.peer-relationship-dimensions {
+  display: grid;
+  gap: 7px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.peer-relationship-dimensions > div {
+  display: grid;
+  grid-template-columns: minmax(66px, 0.8fr) minmax(70px, 1.8fr) 30px;
+  align-items: center;
+  gap: 8px;
+  color: #827b90;
+  font-size: 8px;
+}
+
+.peer-relationship-dimensions i {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(var(--accent-rgb), 0.09);
+}
+
+.peer-relationship-dimensions b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8071bd, var(--accent-light));
+}
+
+.peer-relationship-dimensions strong {
+  color: #9b93ae;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  font-weight: 500;
+  text-align: right;
+}
+
+.peer-opinions {
+  display: grid;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.peer-opinions blockquote {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(217, 191, 135, 0.12);
+  border-left: 2px solid rgba(217, 191, 135, 0.48);
+  border-radius: 6px;
+  background: rgba(217, 191, 135, 0.025);
+}
+
+.peer-opinions p {
+  margin: 0;
+  color: #aaa4b6;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.peer-opinions footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  color: #83774f;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+}
+
+.peer-opinions footer strong {
+  color: #726b7d;
+  font-weight: 400;
+}
+
+.peer-opinions__empty {
+  margin: 10px 0 0;
+  color: #736d7f;
+  font-size: 8px;
+}
+
+.peer-relationship-history {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.peer-relationship-history summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  color: #8d869b;
+  cursor: pointer;
+  font-size: 8px;
+  list-style: none;
+}
+
+.peer-relationship-history summary::-webkit-details-marker {
+  display: none;
+}
+
+.peer-relationship-history summary svg {
+  transition: transform 160ms ease;
+}
+
+.peer-relationship-history[open] summary svg {
+  transform: rotate(90deg);
+}
+
+.peer-relationship-history summary span {
+  margin-left: auto;
+  color: #6e687b;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+}
+
+.peer-relationship-history__loading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 2px;
+  color: #777187;
+  font-size: 8px;
+}
+
+.peer-relationship-versions {
+  display: grid;
+  max-height: 250px;
+  gap: 5px;
+  overflow-y: auto;
+}
+
+.peer-relationship-version {
+  padding: 8px;
+  border: 1px solid rgba(var(--accent-rgb), 0.08);
+  border-radius: 7px;
+  background: rgba(var(--accent-rgb), 0.02);
+}
+
+.peer-relationship-version > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #7d758c;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+}
+
+.peer-relationship-version > div strong {
+  color: #aaa1bd;
+  font-weight: 500;
+}
+
+.peer-relationship-version p {
+  margin: 6px 0 3px;
+  color: #9790a3;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.peer-relationship-version small {
+  color: #6e687b;
+  font-size: 7px;
+}
+
+.peer-relationship-version button,
+.peer-relationship-card__footer button {
+  min-height: 23px;
+  margin-top: 7px;
+  padding: 0 8px;
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
+  border-radius: 6px;
+  color: #a99bc9;
+  cursor: pointer;
+  font-size: 7px;
+  background: rgba(var(--accent-rgb), 0.04);
+}
+
+.peer-relationship-version button:hover:not(:disabled),
+.peer-relationship-card__footer button:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.35);
+  color: var(--accent-light);
+}
+
+.peer-relationship-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  color: #6f697c;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+}
+
+.peer-relationship-card__footer button {
+  margin-top: 0;
+  border-color: rgba(var(--rose-rgb), 0.16);
+  color: #b48698;
+  background: rgba(var(--rose-rgb), 0.035);
+}
+
+.peer-relationship-version button:disabled,
+.peer-relationship-card__footer button:disabled {
+  cursor: wait;
+  opacity: 0.45;
+}
+
 .collaboration-list {
   position: relative;
   z-index: 1;
@@ -424,6 +697,10 @@
   font-size: 12px;
 }
 
+.collaboration-state--compact {
+  min-height: 112px;
+}
+
 .collaboration-state span:last-child {
   max-width: 530px;
   line-height: 1.55;
@@ -466,7 +743,8 @@
 }
 
 @media (max-width: 860px) {
-  .collaboration-list {
+  .collaboration-list,
+  .peer-relationship-list {
     grid-template-columns: 1fr;
   }
 }

@@ -461,6 +461,7 @@ MVP принимается, если:
 16. Antigravity adapter не использует сторонний OAuth piggyback; до появления разрешённого vendor contract он явно сообщает о недоступности и предлагает разрешённый способ подключения.
 17. Все обязательные unit, integration и E2E smoke tests проходят на macOS.
 18. В одной локальной установке создаются как минимум два именованных агента; переключение меняет активные chat/memory/persona scopes, private данные не смешиваются, а каждый агент получает только компактный roster peers без их private preferences.
+19. Collaboration UI показывает направленные мнения только активного агента, явно отличает opinion/inference от факта, предоставляет provenance/version history и выполняет reset/rollback новой append-only версией с owner audit event.
 
 ## 10. Этапы разработки
 
@@ -498,7 +499,7 @@ Cross-platform packaging, updates, backup/export, security review, fault injecti
 
 ### Этап 8. Multiple agents and collaboration
 
-Одна последовательная веха: named `AgentProfile` и onboarding → расширенные bounded traits и fictional backstory seed → миграция текущей Yuri → agent-scoped conversations/memory/context → создание и переключение дополнительных агентов → peer roster → anonymous bounded subagents → background agent-to-agent dialogue с TTL, budgets, cooldown, loop prevention и audit. Веха не добавляет пользователей, server mode или новые внешние разрешения.
+Одна последовательная веха: named `AgentProfile` и onboarding → расширенные bounded traits и fictional backstory seed → миграция текущей Yuri → agent-scoped conversations/memory/context → создание и переключение дополнительных агентов → peer roster → anonymous bounded subagents → background agent-to-agent dialogue с TTL, budgets, cooldown, loop prevention и audit → private peer episodes → directional social reflection → owner-visible history и append-only curation направленных отношений. Веха не добавляет пользователей, server mode или новые внешние разрешения.
 
 ## 11. Решения, которые нужно принять до реализации
 

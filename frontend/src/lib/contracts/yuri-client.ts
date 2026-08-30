@@ -15,6 +15,9 @@ import type {
   ActivityListOptions,
   PeerDialogue,
   PeerDialogueListOptions,
+  PeerRelationship,
+  PeerRelationshipDetail,
+  PeerRelationshipListOptions,
   ProactivitySettings,
 } from './collaboration'
 import type { PersonalitySnapshot } from './persona'
@@ -112,6 +115,10 @@ export interface YuriClient {
   listJobRuns(options?: JobRunListOptions): Promise<JobRun[]>
   listPeerDialogues(options?: PeerDialogueListOptions): Promise<PeerDialogue[]>
   cancelPeerDialogue(dialogueId: string): Promise<void>
+  listPeerRelationships(options?: PeerRelationshipListOptions): Promise<PeerRelationship[]>
+  getPeerRelationship(peerAgentId: string): Promise<PeerRelationshipDetail | undefined>
+  rollbackPeerRelationship(peerAgentId: string, versionId: string): Promise<PeerRelationshipDetail | undefined>
+  resetPeerRelationship(peerAgentId: string): Promise<PeerRelationshipDetail | undefined>
   getProactivitySettings(): Promise<ProactivitySettings>
   saveProactivitySettings(input: ProactivitySettings): Promise<void>
   listActivity(options?: ActivityListOptions): Promise<ActivityEvent[]>

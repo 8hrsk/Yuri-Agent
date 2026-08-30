@@ -31,6 +31,9 @@ import type {
   OnboardingState,
   PeerDialogue,
   PeerDialogueListOptions,
+  PeerRelationship,
+  PeerRelationshipDetail,
+  PeerRelationshipListOptions,
   PersonalitySnapshot,
   PluginEnableRequest,
   PluginInstallRequest,
@@ -53,7 +56,7 @@ import { normalizePersonalitySnapshot } from '../personality'
 import { callBridge, callBridgeSafe, findBridgeMethod, subscribeRuntimeEvent } from './bridge'
 import { MockYuriClient } from './mock-client'
 import { normalizeChatEvent, normalizeChatToolList } from './normalize-chat'
-import { normalizeActivityList, normalizePeerDialogueList } from './normalize-collab'
+import { normalizeActivityList, normalizePeerDialogueList, normalizePeerRelationshipDetail, normalizePeerRelationshipList } from './normalize-collab'
 import { normalizeChatHistoryPage, normalizeConversation, normalizeConversationList } from './normalize-conversation'
 import { normalizeArchiveResponse, normalizeMemory, normalizeMemoryList } from './normalize-memory'
 import { normalizePlugin, normalizePluginInspection, normalizePluginList } from './normalize-plugins'
@@ -648,6 +651,22 @@ class WailsYuriClient implements YuriClient {
 
   async cancelPeerDialogue(dialogueId: string): Promise<void> {
     await callBridge(['CancelPeerDialogue'], [{ id: dialogueId }])
+  }
+
+  async listPeerRelationships(options: PeerRelationshipListOptions = {}): Promise<PeerRelationship[]> {
+    return normalizePeerRelationshipList(await callBridge<unknown>(['ListPeerRelationships'], [options]))
+  }
+
+  async getPeerRelationship(peerAgentId: string): Promise<PeerRelationshipDetail | undefined> {
+    return normalizePeerRelationshipDetail(await callBridge<unknown>(['GetPeerRelationship'], [{ peerAgentId }]))
+  }
+
+  async rollbackPeerRelationship(peerAgentId: string, versionId: string): Promise<PeerRelationshipDetail | undefined> {
+    return normalizePeerRelationshipDetail(await callBridge<unknown>(['RollbackPeerRelationship'], [{ peerAgentId, versionId }]))
+  }
+
+  async resetPeerRelationship(peerAgentId: string): Promise<PeerRelationshipDetail | undefined> {
+    return normalizePeerRelationshipDetail(await callBridge<unknown>(['ResetPeerRelationship'], [{ peerAgentId }]))
   }
 
   async getProactivitySettings(): Promise<ProactivitySettings> {
