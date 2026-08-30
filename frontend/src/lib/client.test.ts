@@ -119,6 +119,30 @@ describe('Yuri client contract', () => {
     })
   })
 
+  it('routes rendered web and local links through dedicated Wails bridge methods', async () => {
+    const calls: Array<{ name: string; value: string }> = []
+    await withWindow({
+      go: {
+        main: {
+          Bridge: {
+            ListConversations: () => [],
+            OpenExternalURL: (url: string) => calls.push({ name: 'OpenExternalURL', value: url }),
+            OpenLocalPath: (path: string) => calls.push({ name: 'OpenLocalPath', value: path }),
+          },
+        },
+      },
+    }, async () => {
+      const client = createYuriClient()
+      await client.openExternalURL('https://example.test/docs')
+      await client.openLocalPath('/Users/owner/My Project/main.go')
+
+      expect(calls).toEqual([
+        { name: 'OpenExternalURL', value: 'https://example.test/docs' },
+        { name: 'OpenLocalPath', value: '/Users/owner/My Project/main.go' },
+      ])
+    })
+  })
+
   it('keeps the mock first-run gate closed until provider probe succeeds', async () => {
     const client = createYuriClient()
     expect(await client.getOnboardingState()).toEqual({ completed: false, providerTested: false, agentConfigured: false })

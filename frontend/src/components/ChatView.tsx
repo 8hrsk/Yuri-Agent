@@ -962,6 +962,16 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
     setAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId))
   }, [])
   const loadAttachment = useCallback((messageId: string, attachmentId: string) => client.getChatAttachment(messageId, attachmentId), [client])
+  const handleOpenExternalURL = useCallback((url: string) => {
+    void client.openExternalURL(url).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : 'Не удалось открыть ссылку.')
+    })
+  }, [client])
+  const handleOpenLocalPath = useCallback((path: string) => {
+    void client.openLocalPath(path).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : 'Не удалось открыть локальный путь.')
+    })
+  }, [client])
   const running = Boolean(runId)
 
   return (
@@ -1017,6 +1027,8 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
             messagesEndRef={messagesEndRef}
             messagesRef={messagesRef}
             onJumpToBottom={handleJumpToBottom}
+            onOpenExternalURL={handleOpenExternalURL}
+            onOpenLocalPath={handleOpenLocalPath}
             onRetry={handleRetry}
             onScroll={handleMessagesScroll}
             onShowEarlier={handleShowEarlier}

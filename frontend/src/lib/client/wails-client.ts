@@ -314,6 +314,14 @@ class WailsYuriClient implements YuriClient {
     }
   }
 
+  async openExternalURL(url: string): Promise<void> {
+    await callBridge(['OpenExternalURL'], [url])
+  }
+
+  async openLocalPath(path: string): Promise<void> {
+    await callBridge(['OpenLocalPath'], [path])
+  }
+
   async cancelRun(runId: string): Promise<void> {
     await callBridge(['CancelRun', 'CancelAgentRun'], [runId])
   }

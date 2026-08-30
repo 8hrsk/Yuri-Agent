@@ -227,6 +227,10 @@ class MockYuriClient implements YuriClient {
     return undefined
   }
 
+  async openExternalURL(_url: string): Promise<void> {}
+
+  async openLocalPath(_path: string): Promise<void> {}
+
   async cancelRun(runId: string): Promise<void> {
     this.cancelledRuns.add(runId)
     // Wake a run that is waiting for a user decision so cancellation is deterministic.

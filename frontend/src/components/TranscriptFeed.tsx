@@ -21,6 +21,8 @@ type TranscriptFeedProps = {
   messagesRef: RefObject<HTMLDivElement>
   loadAttachment: (messageId: string, attachmentId: string) => Promise<ChatAttachmentContent | undefined>
   onJumpToBottom: () => void
+  onOpenExternalURL: (url: string) => void
+  onOpenLocalPath: (path: string) => void
   onRetry: (messageId: string) => void
   onScroll: (event: UIEvent<HTMLDivElement>) => void
   onShowEarlier: () => void
@@ -43,6 +45,8 @@ export function TranscriptFeed({
   messagesRef,
   loadAttachment,
   onJumpToBottom,
+  onOpenExternalURL,
+  onOpenLocalPath,
   onRetry,
   onScroll,
   onShowEarlier,
@@ -76,6 +80,8 @@ export function TranscriptFeed({
         agentName={agentName}
         entries={entries}
         loadAttachment={loadAttachment}
+        onOpenExternalURL={onOpenExternalURL}
+        onOpenLocalPath={onOpenLocalPath}
         onRetry={onRetry}
         onSpeak={onSpeak}
         onStopSpeaking={onStopSpeaking}

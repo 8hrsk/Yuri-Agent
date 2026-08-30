@@ -4,6 +4,7 @@ import { approvalStatusLabel, runStatusLabel, toolStatusLabel, type ChatTimeline
 import type { ChatAttachment, ChatAttachmentContent, ChatMessage, RunTrace, RunTraceStep, ToolCall } from '../lib/contracts'
 import { formatClock } from '../lib/datetime'
 import { Icon } from './Icon'
+import { MarkdownMessage } from './MarkdownMessage'
 
 /**
  * Every component in this file is wrapped in `React.memo`.
@@ -151,6 +152,8 @@ type MessageBubbleProps = {
   speechSupported: boolean
   onRetry: (messageId: string) => void
   loadAttachment: (messageId: string, attachmentId: string) => Promise<ChatAttachmentContent | undefined>
+  onOpenExternalURL: (url: string) => void
+  onOpenLocalPath: (path: string) => void
 }
 
 function AttachmentCard({ attachment, messageId, loadAttachment }: {
@@ -188,6 +191,8 @@ export const MessageBubble = memo(function MessageBubble({
   speechSupported,
   onRetry,
   loadAttachment,
+  onOpenExternalURL,
+  onOpenLocalPath,
 }: MessageBubbleProps) {
   if (message.role === 'tool' && message.toolCall) return <ToolCallCard toolCall={message.toolCall} />
 
@@ -209,7 +214,13 @@ export const MessageBubble = memo(function MessageBubble({
         {statusLabel && <span className="message__status">{statusLabel}</span>}
       </div>
       <div className="message__content">
-        {message.content || (message.status === 'streaming' ? <span className="typing-indicator" aria-label={`${agentName} печатает`}><i /><i /><i /></span> : null)}
+        {message.content
+          ? isAssistant
+            ? <MarkdownMessage content={message.content} onOpenExternalURL={onOpenExternalURL} onOpenLocalPath={onOpenLocalPath} />
+            : message.content
+          : message.status === 'streaming'
+            ? <span className="typing-indicator" aria-label={`${agentName} печатает`}><i /><i /><i /></span>
+            : null}
         {message.status === 'streaming' && message.content && <span className="stream-cursor" aria-hidden="true" />}
       </div>
       {message.attachments && message.attachments.length > 0 && (
@@ -252,6 +263,8 @@ type ChatTimelineProps = {
   speakingId?: string
   speechSupported: boolean
   loadAttachment: MessageBubbleProps['loadAttachment']
+  onOpenExternalURL: MessageBubbleProps['onOpenExternalURL']
+  onOpenLocalPath: MessageBubbleProps['onOpenLocalPath']
 }
 
 /**
@@ -268,6 +281,8 @@ export const ChatTimeline = memo(function ChatTimeline({
   speakingId,
   speechSupported,
   loadAttachment,
+  onOpenExternalURL,
+  onOpenLocalPath,
 }: ChatTimelineProps) {
   return (
     <>
@@ -278,6 +293,8 @@ export const ChatTimeline = memo(function ChatTimeline({
             key={entry.key}
             message={entry.message}
             loadAttachment={loadAttachment}
+            onOpenExternalURL={onOpenExternalURL}
+            onOpenLocalPath={onOpenLocalPath}
             onRetry={onRetry}
             onSpeak={onSpeak}
             onStopSpeaking={onStopSpeaking}

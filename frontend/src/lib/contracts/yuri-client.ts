@@ -54,6 +54,8 @@ export interface YuriClient {
   approve(approvalId: string, decision: ApprovalDecision): Promise<void>
   retryLast(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult>
   getChatAttachment(messageId: string, attachmentId: string): Promise<ChatAttachmentContent | undefined>
+  openExternalURL(url: string): Promise<void>
+  openLocalPath(path: string): Promise<void>
   getProviderSnapshot(): Promise<ProviderSnapshot>
   saveProviderSettings(settings: ProviderSettings, apiKey?: string): Promise<void>
   testProvider(settings: ProviderSettings): Promise<ProviderTestResult>
