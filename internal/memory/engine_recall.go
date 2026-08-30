@@ -45,7 +45,7 @@ func (e *Engine) Recall(ctx context.Context, query string, options RecallOptions
 		options.Limit = budget.MaxItems
 	}
 	agentID := firstAgentID(options.AgentID, e.agentID)
-	filter := MemoryFilter{AgentID: agentID, States: []LifecycleState{StateActive}, IncludeDormant: options.Mode == RecallDeliberate, IncludeHidden: options.IncludeHidden, Limit: 0}
+	filter := MemoryFilter{AgentID: agentID, IncludeShared: true, States: []LifecycleState{StateActive}, IncludeDormant: options.Mode == RecallDeliberate, IncludeHidden: options.IncludeHidden, Limit: 0}
 	if options.Mode == RecallDeliberate {
 		filter.States = []LifecycleState{StateActive, StateDormant}
 	}
@@ -168,10 +168,7 @@ func (e *Engine) Recall(ctx context.Context, query string, options RecallOptions
 }
 
 func eligible(memory domain.Memory, filter MemoryFilter) bool {
-	if !filter.AgentID.Empty() && memory.AgentID != filter.AgentID {
-		return false
-	}
-	if memory.Scope != "" && memory.Scope != domain.MemoryScopeAgentPrivate {
+	if !memoryVisibleTo(memory, filter.AgentID, filter.IncludeShared) {
 		return false
 	}
 	if memory.Lifecycle == domain.MemoryLifecycleDeleted {
@@ -187,6 +184,13 @@ func eligible(memory domain.Memory, filter MemoryFilter) bool {
 		return false
 	}
 	return true
+}
+
+func memoryVisibleTo(item domain.Memory, agentID domain.ID, includeShared bool) bool {
+	if item.Scope == "" || item.Scope == domain.MemoryScopeAgentPrivate {
+		return agentID.Empty() || item.AgentID == agentID
+	}
+	return includeShared && item.Scope.Shared()
 }
 
 func (e *Engine) applyRecallBudget(ctx context.Context, results []RecallResult, budget Budget, limit int) ([]RecallResult, error) {

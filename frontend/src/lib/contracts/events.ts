@@ -6,6 +6,9 @@ interface ChatEventMeta {
   /** Event time is advisory and falls back to renderer receipt time. */
   createdAt?: string
   timestamp?: string
+  /** Operational provenance for nested anonymous runs. */
+  runKind?: string
+  parentRunId?: string
 }
 
 export type ChatEvent =

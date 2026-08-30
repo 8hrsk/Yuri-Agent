@@ -17,6 +17,7 @@ type MemoryListInput struct {
 	Lifecycle      string `json:"lifecycle,omitempty"`
 	LifecycleState string `json:"lifecycleState,omitempty"`
 	Kind           string `json:"kind,omitempty"`
+	Scope          string `json:"scope,omitempty"`
 	Query          string `json:"query,omitempty"`
 	IncludeDormant bool   `json:"includeDormant,omitempty"`
 	IncludeDeleted bool   `json:"includeDeleted,omitempty"`
@@ -39,6 +40,7 @@ type MemorySourceView struct {
 type MemoryView struct {
 	ID               string             `json:"id"`
 	AgentID          string             `json:"agentId"`
+	AgentName        string             `json:"agentName,omitempty"`
 	Scope            string             `json:"scope"`
 	Version          uint64             `json:"version"`
 	Kind             string             `json:"kind"`
@@ -85,6 +87,12 @@ type DeleteMemoryInput struct {
 	MemoryID string `json:"memoryId"`
 }
 
+type SetMemoryScopeInput struct {
+	ID       string `json:"id"`
+	MemoryID string `json:"memoryId"`
+	Scope    string `json:"scope"`
+}
+
 type ArchiveSearchInput struct {
 	Query          string `json:"query"`
 	IncludeDormant bool   `json:"includeDormant,omitempty"`
@@ -119,9 +127,15 @@ func (b *Bridge) ListMemories(input MemoryListInput) ([]MemoryView, error) {
 	includeDormant := input.IncludeDormant || lifecycle == "dormant" || lifecycle == "all"
 	includeDeleted := input.IncludeDeleted || lifecycle == "deleted" || lifecycle == "all"
 	options := storage.MemoryListOptions{
-		AgentID: b.personaProfileID(), Scope: domain.MemoryScopeAgentPrivate,
+		AgentID:        b.personaProfileID(),
 		IncludeDormant: includeDormant, IncludeDeleted: includeDeleted,
 		Limit: input.Limit, Offset: input.Offset,
+	}
+	if input.Scope != "" && input.Scope != "all" {
+		options.Scope = domain.MemoryScope(input.Scope)
+		if !options.Scope.Valid() {
+			return nil, fmt.Errorf("%w: invalid memory scope %q", domain.ErrInvalidArgument, input.Scope)
+		}
 	}
 	// Push an exact lifecycle filter into SQL so it is applied before
 	// LIMIT/OFFSET. Filtering after pagination returned short pages and made
@@ -148,7 +162,7 @@ func (b *Bridge) ListMemories(input MemoryListInput) ([]MemoryView, error) {
 		}
 	} else {
 		hits, err := b.repositories.Memories.Search(ctx, query, storage.MemorySearchOptions{
-			AgentID: b.personaProfileID(), Scope: domain.MemoryScopeAgentPrivate,
+			AgentID: b.personaProfileID(), Scope: options.Scope,
 			IncludeDormant: includeDormant, IncludeDeleted: includeDeleted, Kind: options.Kind,
 			Lifecycle: exactLifecycle,
 			Limit:     input.Limit, Offset: input.Offset,
@@ -170,6 +184,47 @@ func (b *Bridge) ListMemories(input MemoryListInput) ([]MemoryView, error) {
 		views = append(views, view)
 	}
 	return views, nil
+}
+
+// SetMemoryScope publishes an owned memory to the local roster or revokes a
+// prior publication. It is exposed only as an explicit owner UI action; the
+// model-facing memory extractor always writes agent_private records.
+func (b *Bridge) SetMemoryScope(input SetMemoryScopeInput) (MemoryView, error) {
+	ctx, cancel := b.context()
+	defer cancel()
+	id := memoryInputID(input.ID, input.MemoryID)
+	current, err := b.repositories.Memories.GetForAgent(ctx, b.personaProfileID(), id)
+	if err != nil {
+		return MemoryView{}, err
+	}
+	scope := domain.MemoryScope(strings.TrimSpace(input.Scope))
+	if !scope.Valid() || scope == "" {
+		return MemoryView{}, fmt.Errorf("%w: invalid memory scope %q", domain.ErrInvalidArgument, input.Scope)
+	}
+	if scope.Shared() && current.Sensitivity == domain.MemorySensitivityHighlySensitive {
+		return MemoryView{}, fmt.Errorf("%w: highly sensitive memory cannot be shared", domain.ErrInvalidArgument)
+	}
+	if current.Scope == scope {
+		return b.memoryView(ctx, current)
+	}
+	previousVersion := current.Version
+	current.Version++
+	current.Scope = scope
+	current.UpdatedAt = time.Now().UTC()
+	operation := "publish"
+	reason := "owner published memory to " + string(scope)
+	if scope == domain.MemoryScopeAgentPrivate {
+		operation = "revoke"
+		reason = "owner revoked shared memory"
+	}
+	current.Reason = reason
+	current, err = b.repositories.Memories.AppendVersionWithMetadata(ctx, current, previousVersion, storage.MemoryVersionMetadata{
+		Operation: operation, ParentVersion: previousVersion, Reason: reason,
+	})
+	if err != nil {
+		return MemoryView{}, err
+	}
+	return b.memoryView(ctx, current)
 }
 
 func (b *Bridge) UpdateMemory(input UpdateMemoryInput) (MemoryView, error) {
@@ -351,6 +406,10 @@ func (b *Bridge) memoryView(ctx context.Context, item domain.Memory) (MemoryView
 			if message, getErr := b.repositories.Messages.Get(ctx, source.MessageID); getErr == nil {
 				view.Excerpt = truncateRunes(message.Content, 240)
 			}
+		} else if source.SourceType == "peer_dialogue_message" && !source.SourceID.Empty() {
+			if message, getErr := b.repositories.PeerDialogueMessages.Get(ctx, source.SourceID); getErr == nil {
+				view.Excerpt = truncateRunes(message.Content, 240)
+			}
 		}
 		views = append(views, view)
 	}
@@ -361,6 +420,9 @@ func (b *Bridge) memoryView(ctx context.Context, item domain.Memory) (MemoryView
 		AccessCount: item.AccessCount, DecayPolicy: string(item.Retention), EmbeddingVersion: item.EmbeddingVersion,
 		CreatedAt: item.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: item.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		Sources: views,
+	}
+	if profile, getErr := b.repositories.Agents.Get(ctx, item.AgentID); getErr == nil {
+		result.AgentName = profile.Name
 	}
 	if !item.LastRecalledAt.IsZero() {
 		result.LastRecalledAt = item.LastRecalledAt.UTC().Format(time.RFC3339Nano)

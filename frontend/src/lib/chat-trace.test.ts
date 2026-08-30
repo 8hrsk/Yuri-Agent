@@ -100,6 +100,28 @@ describe('chat execution trace', () => {
     expect(sorted.map((trace) => trace.id)).toEqual(['earlier', 'same-second-b', 'same-second-a', 'later'])
   })
 
+  it('retains anonymous child provenance for live and persisted traces', () => {
+    const live = aggregateChatEvent([], {
+      type: 'run.started',
+      runId: 'run-child',
+      runKind: 'subagent',
+      parentRunId: 'run-parent',
+      conversationId: 'conversation-1',
+      createdAt: '2026-08-29T10:00:00Z',
+    })
+    expect(live[0]).toMatchObject({ kind: 'subagent', parentRunId: 'run-parent' })
+
+    const persisted = normalizeRunTrace({
+      id: 'run-child',
+      kind: 'subagent',
+      parentRunId: 'run-parent',
+      status: 'completed',
+      createdAt: '2026-08-29T10:00:00Z',
+      toolCalls: [],
+    })
+    expect(persisted).toMatchObject({ kind: 'subagent', parentRunId: 'run-parent' })
+  })
+
   it('splits a run into one thinking block and one block per tool call', () => {
     const trace = normalizeRunTrace({
       id: 'trace-1', runId: 'run-1', status: 'completed',

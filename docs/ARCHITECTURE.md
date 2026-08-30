@@ -111,6 +111,12 @@ Application services открывают use cases: создать run, прин�
 
 `ContextSnapshot` фиксируется на входе foreground run. Это позволяет кэшировать prefix и воспроизводить решение. Memory write или событие текущего run могут обновить live state через memory port; обновлённое состояние попадёт в следующий snapshot или явно запрошенный memory tool result, но не меняет уже зафиксированный policy.
 
+Memory visibility вычисляется на storage boundary: `(owner_agent = active_agent AND scope = agent_private) OR scope IN (owner_shared, installation_shared)`. Поэтому shared records допускаются в bounded core/recall, но чужие private rows не становятся даже кандидатами ранжирования. Scope publication является owner-only desktop command, а не model tool; journal сохраняет операции `publish`/`revoke`, прежние версии и provenance.
+
+`PeerDialogueCompleted` имеет производную private episodic projection для каждого participant. Projection строится детерминированно после terminal save, ссылается через `memory_sources` на dialogue и peer-message IDs и не является частью aggregate transaction. Разрыв после terminal save восстанавливается bounded reconciliation последних completed aggregates при старте; deterministic memory ID делает повтор безопасным. Ошибка проекции не переводит успешно завершённый dialogue в failed.
+
+Отдельный model-backed social-reflection pass читает тот же transcript как untrusted evidence и обновляет направленную модель `observer_agent_id → subject_agent_id`. Она использует обычный append-only `RelationshipState`, но отдельный relationship ID и mapping, поэтому мнение о peer не смешивается с primary relationship к владельцу. Допустим также небольшой краткоживущий affect event наблюдателя; persona, facts, permissions и identity seed отсутствуют среди разрешённых targets. Relationship revision, affect revision/events и terminal idempotency marker пишутся одной SQLite-транзакцией. После crash/provider failure один пропущенный completed dialogue повторяется при следующем model-backed background pass; уже отмеченный observer больше не вызывает модель.
+
 При приближении к context limit runtime выполняет memory flush и handoff compression: цель, решения, незавершённые действия, устойчивые факты и ссылки на исходные сообщения сохраняются отдельно; оригинальный transcript никогда не переписывается.
 
 ## 5. Immutable policy, identity и mutable persona
@@ -131,11 +137,11 @@ Application services открывают use cases: создать run, прин�
 
 `MutablePersona` — версия traits и identity prompt, применяемая поверх seed. Reflection может менять его только малыми bounded delta, с evidence, reason, parent version и rollback record. Изменение личности не меняет `ImmutablePolicy`, grants, provider credentials, history или user data.
 
-`RelationshipState` и `AffectiveState` — субъективные, временные данные Yuri. Они могут влиять на тон, инициативность и avatar state, но не на allow/deny, полноту retrieval, доступ к файлам, retention или право на внешний side effect. Opinion о владельце хранится отдельно от фактической памяти, имеет confidence/evidence и не показывается в UI как установленный факт.
+`RelationshipState` и `AffectiveState` — субъективные, временные данные Yuri. Primary relationship keyed by agent ID относится к владельцу; отдельные directional IDs описывают мнение конкретного observer о peer. Они могут влиять на тон, инициативность и avatar state, но не на allow/deny, полноту retrieval, доступ к файлам, retention или право на внешний side effect. Opinion хранится отдельно от фактической памяти, имеет confidence/evidence и не показывается в UI как установленный факт.
 
-Anonymous subagent — отдельный `RunKindSubagent` с обязательным root parent, глубиной 1 и без conversation/profile/memory namespace. `agent.delegate` передаёт ему только bounded task/context в отдельном prompt envelope. В первом срезе tool registry ребёнка пуст; durable delegation хранит principal agent, parent/child IDs, request hash, budget, lifecycle и bounded result, но не исходный prompt.
+Anonymous subagent — отдельный `RunKindSubagent` с обязательным root parent, глубиной 1 и без conversation/profile/memory namespace. `agent.delegate` передаёт ему только bounded task/context в отдельном prompt envelope. По умолчанию tool registry ребёнка пуст; вызов может явно запросить до трёх read-only tools из `filesystem.read`, `web.search` и `web.fetch`. Фактический registry равен пересечению requested scope, registry родителя и immutable delegation policy. `filesystem.read` использует только уже одобренные owner roots и не показывает approval UI из child run. Policy проверяется повторно непосредственно перед каждым вызовом. Durable delegation хранит principal agent, parent/child IDs, request hash, нормализованный tool/capability scope, budget, lifecycle и bounded result, но не исходный prompt.
 
-Peer dialogue — отдельный aggregate между двумя существующими `AgentProfile`, а не пользовательский `Conversation`. Opening message принадлежит root run инициатора; единственная ответная реплика создаётся отдельным background run peer. Runtime не вызывает общий context assembler: получает immutable policy, identity/persona отвечающего агента, публичную identity peer и bounded transcript как untrusted data. Tool registry пуст, а запись сообщения и advancement dialogue counters выполняются атомарно.
+Peer dialogue — отдельный aggregate между двумя существующими `AgentProfile`, а не пользовательский `Conversation`. Opening message принадлежит root run инициатора; единственная ответная реплика создаётся отдельным background run peer. Runtime не вызывает общий context assembler: получает immutable policy, identity/persona отвечающего агента, публичную identity peer, собственную directional opinion о нём и bounded transcript как untrusted data. Tool registry пуст, а запись сообщения и advancement dialogue counters выполняются атомарно. Social reflection выполняется только после terminal completion и потому не может менять уже зафиксированный transcript.
 
 ## 6. Хранилища и восстановление
 
@@ -147,7 +153,7 @@ SQLite хранит все данные, необходимые для восс�
 - именованные agent profiles и их активный selection;
 - runs, anonymous delegations, peer dialogues/messages, tool calls, approvals и audit metadata;
 - memory versions, sources, lifecycle state и retrieval metadata;
-- relationship/affect events и persona/reflection versions;
+- owner/peer relationship mappings and versions, affect events, social-reflection markers и persona/reflection versions;
 - schedules, job runs, plugin metadata, permission grants;
 - provider account metadata без секретов и настройки без секретов.
 

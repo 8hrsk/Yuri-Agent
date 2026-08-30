@@ -26,6 +26,7 @@ import type {
   MemoryLifecycleState,
   MemoryListOptions,
   MemoryRecord,
+  MemoryScope,
   MemoryUpdate,
   OnboardingResult,
   OnboardingState,
@@ -418,6 +419,10 @@ class MockYuriClient implements YuriClient {
   }
 
   async updateMemory(_memoryId: string, _update: MemoryUpdate): Promise<MemoryRecord | undefined> {
+    return undefined
+  }
+
+  async setMemoryScope(_memoryId: string, _scope: MemoryScope): Promise<MemoryRecord | undefined> {
     return undefined
   }
 

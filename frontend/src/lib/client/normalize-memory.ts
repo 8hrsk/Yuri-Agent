@@ -80,6 +80,9 @@ function normalizeMemory(value: unknown): MemoryRecord | undefined {
   const valenceValue = source.valence === undefined ? undefined : Number(source.valence)
   return {
     id,
+    agentId: source.agentId || source.agent_id ? String(source.agentId ?? source.agent_id) : undefined,
+    agentName: source.agentName || source.agent_name ? String(source.agentName ?? source.agent_name) : undefined,
+    scope: source.scope === 'owner_shared' || source.scope === 'installation_shared' ? source.scope : 'agent_private',
     kind: normalizeMemoryKind(source.kind ?? source.memoryKind ?? source.memory_kind),
     contentKind: normalizeMemoryContentKind(source.contentKind ?? source.content_kind ?? source.nature ?? source.category),
     content: typeof contentValue === 'string' ? contentValue : JSON.stringify(contentValue),

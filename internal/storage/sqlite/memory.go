@@ -10,9 +10,10 @@ import (
 // By default only active memories are returned. The UI can opt into dormant
 // and deleted records for review without changing normal retrieval behavior.
 type MemoryListOptions struct {
-	AgentID domain.ID
-	Scope   domain.MemoryScope
-	Kind    domain.MemoryKind
+	AgentID          domain.ID
+	VisibleToAgentID domain.ID
+	Scope            domain.MemoryScope
+	Kind             domain.MemoryKind
 	// Lifecycle restricts the projection to one exact lifecycle state. It is
 	// applied in SQL, before LIMIT/OFFSET, and overrides the
 	// IncludeDormant/IncludeDeleted shorthands. Callers that page a single
@@ -44,9 +45,10 @@ type CoreMemoryOptions struct {
 // similarity is supplied by the memory service; this repository owns the FTS
 // lexical leg and returns a deterministic lexical score and provenance.
 type MemorySearchOptions struct {
-	AgentID        domain.ID
-	Scope          domain.MemoryScope
-	IncludeDormant bool
+	AgentID          domain.ID
+	VisibleToAgentID domain.ID
+	Scope            domain.MemoryScope
+	IncludeDormant   bool
 	// Deliberate is an explicit opt-in alias for IncludeDormant. It is useful
 	// for callers representing a user-requested retrospective search.
 	Deliberate     bool

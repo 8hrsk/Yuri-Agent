@@ -142,12 +142,15 @@ const (
 	OperationForget  MemoryOperation = "forget"
 	OperationDelete  MemoryOperation = "delete"
 	OperationTouch   MemoryOperation = "touch"
+	OperationPublish MemoryOperation = "publish"
+	OperationRevoke  MemoryOperation = "revoke"
 )
 
 func (o MemoryOperation) Valid() bool {
 	switch o {
 	case OperationCreate, OperationUpdate, OperationMerge, OperationRestore,
-		OperationDormant, OperationHide, OperationForget, OperationDelete, OperationTouch:
+		OperationDormant, OperationHide, OperationForget, OperationDelete, OperationTouch,
+		OperationPublish, OperationRevoke:
 		return true
 	default:
 		return false
@@ -310,6 +313,7 @@ func (b Budget) normalize(defaultItems int) Budget {
 
 type MemoryFilter struct {
 	AgentID        domain.ID
+	IncludeShared  bool
 	States         []LifecycleState
 	Kinds          []Kind
 	IncludeDormant bool

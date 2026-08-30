@@ -9,6 +9,7 @@ import type {
   MemoryLifecycleState,
   MemoryListOptions,
   MemoryRecord,
+  MemoryScope,
   MemorySource,
 } from '../lib/contracts'
 import { formatDateTime } from '../lib/datetime'
@@ -39,6 +40,19 @@ const contentKindLabels: Record<MemoryContentKind, string> = {
   inference: 'вывод',
 }
 
+const scopeLabels: Record<MemoryScope, string> = {
+  agent_private: 'Личная память агента',
+  owner_shared: 'Общее о владельце',
+  installation_shared: 'Общее знание',
+}
+
+const scopeOptions: Array<{ value: MemoryListOptions['scope']; label: string }> = [
+  { value: 'all', label: 'Любая видимость' },
+  { value: 'agent_private', label: 'Личная' },
+  { value: 'owner_shared', label: 'Общее о владельце' },
+  { value: 'installation_shared', label: 'Общее знание' },
+]
+
 const kindOptions: Array<{ value: MemoryListOptions['kind']; label: string }> = [
   { value: 'all', label: 'Все типы' },
   { value: 'core', label: 'Core' },
@@ -62,6 +76,8 @@ function formatPercent(value: number): string {
 
 function sourceLabel(source: MemorySource): string {
   if (source.conversationTitle) return source.conversationTitle
+  if (source.sourceType === 'peer_dialogue') return 'Межагентный диалог'
+  if (source.sourceType === 'peer_dialogue_message') return 'Реплика агента'
   if (source.sourceType === 'message' && source.messageId) return `Сообщение ${source.messageId.slice(0, 8)}`
   if (source.sourceType) return source.sourceType
   return 'Источник'
@@ -84,10 +100,11 @@ type MemoryCardProps = {
   onPin: (memory: MemoryRecord) => void
   onEdit: (memory: MemoryRecord, content: string) => void
   onLifecycle: (memory: MemoryRecord, state: MemoryLifecycleState) => void
+  onScope: (memory: MemoryRecord, scope: MemoryScope) => void
   onDelete: (memory: MemoryRecord) => void
 }
 
-function MemoryCard({ memory, busy, onPin, onEdit, onLifecycle, onDelete }: MemoryCardProps) {
+function MemoryCard({ memory, busy, onPin, onEdit, onLifecycle, onScope, onDelete }: MemoryCardProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(memory.content)
 
@@ -159,6 +176,18 @@ function MemoryCard({ memory, busy, onPin, onEdit, onLifecycle, onDelete }: Memo
         <span>Обновлено {formatDate(memory.updatedAt)}</span>
         <span>{memory.accessCount} {memory.accessCount === 1 ? 'воспоминание' : 'вызовов'}</span>
       </div>
+
+      <label className="memory-card__scope">
+        <span><strong>Видимость</strong><small>{memory.scope === 'agent_private' ? `Только ${memory.agentName || 'этот агент'}` : 'Доступно всем локальным агентам'}</small></span>
+        <select
+          aria-label="Видимость воспоминания"
+          disabled={busy}
+          onChange={(event) => onScope(memory, event.target.value as MemoryScope)}
+          value={memory.scope}
+        >
+          {(scopeOptions.slice(1) as Array<{ value: MemoryScope; label: string }>).map((option) => <option key={option.value} value={option.value}>{scopeLabels[option.value]}</option>)}
+        </select>
+      </label>
 
       <div className="memory-card__provenance">
         <span className="memory-card__section-label">Источники</span>
@@ -278,6 +307,7 @@ export function MemoryView() {
   const [mode, setMode] = useState<MemoryViewMode>('memory')
   const [lifecycle, setLifecycle] = useState<LifecycleFilter>('active')
   const [kind, setKind] = useState<MemoryListOptions['kind']>('all')
+  const [scope, setScope] = useState<MemoryListOptions['scope']>('all')
   const [query, setQuery] = useState('')
   const [records, setRecords] = useState<MemoryRecord[]>([])
   const [loading, setLoading] = useState(true)
@@ -294,6 +324,7 @@ export function MemoryView() {
       const result = await client.listMemories({
         lifecycleState: lifecycle,
         kind,
+        scope,
         query: query.trim() || undefined,
         limit: 80,
       })
@@ -306,7 +337,7 @@ export function MemoryView() {
     } finally {
       if (currentRequest === requestId.current) setLoading(false)
     }
-  }, [client, kind, lifecycle, query])
+  }, [client, kind, lifecycle, query, scope])
 
   useEffect(() => {
     const timer = globalThis.setTimeout(() => { void load() }, query.trim() ? 220 : 0)
@@ -346,6 +377,15 @@ export function MemoryView() {
 
   const handleLifecycle = (memory: MemoryRecord, state: MemoryLifecycleState) => {
     void runMutation(memory.id, () => client.setMemoryLifecycle(memory.id, state))
+  }
+
+  const handleScope = (memory: MemoryRecord, nextScope: MemoryScope) => {
+    if (nextScope === memory.scope) return
+    if (nextScope !== 'agent_private') {
+      const confirmed = globalThis.confirm(`Открыть это воспоминание всем локальным агентам?\n\n${memory.content.slice(0, 160)}`)
+      if (!confirmed) return
+    }
+    void runMutation(memory.id, () => client.setMemoryScope(memory.id, nextScope))
   }
 
   const handleDelete = (memory: MemoryRecord) => {
@@ -399,6 +439,12 @@ export function MemoryView() {
                   {kindOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </label>
+              <label className="memory-select-label">
+                <span className="sr-only">Видимость памяти</span>
+                <select onChange={(event) => setScope(event.target.value as MemoryListOptions['scope'])} value={scope}>
+                  {scopeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
             </div>
           </div>
 
@@ -413,7 +459,7 @@ export function MemoryView() {
           {error && <div className="memory-feedback memory-feedback--error" role="alert"><Icon name="warning" width={14} height={14} /> {error}<button aria-label="Закрыть ошибку" className="icon-button icon-button--small" onClick={() => setError(undefined)} type="button"><Icon name="x" width={13} height={13} /></button></div>}
           {loading && <div className="memory-state memory-state--loading"><span className="memory-spinner" /> Загружаю память Yuri…</div>}
           {!loading && !error && records.length === 0 && <div className="memory-state memory-state--empty"><Icon name="memory" width={22} height={22} /><strong>{query ? 'Ничего не найдено' : lifecycle === 'dormant' ? 'Спящих записей нет' : 'Память пока пуста'}</strong><span>{query ? 'Измените фильтр или выполните поиск по архиву сессий.' : 'После содержательного диалога Yuri сама выберет материал, который может пригодиться в будущем.'}</span></div>}
-          {!loading && records.length > 0 && <div className="memory-grid">{records.map((memory) => <MemoryCard busy={busyIds.has(memory.id)} key={memory.id} memory={memory} onDelete={handleDelete} onEdit={handleEdit} onLifecycle={handleLifecycle} onPin={handlePin} />)}</div>}
+          {!loading && records.length > 0 && <div className="memory-grid">{records.map((memory) => <MemoryCard busy={busyIds.has(memory.id)} key={memory.id} memory={memory} onDelete={handleDelete} onEdit={handleEdit} onLifecycle={handleLifecycle} onPin={handlePin} onScope={handleScope} />)}</div>}
         </section>
       )}
     </div>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -152,6 +153,9 @@ func (b *Bridge) ListConversationsPage(options ConversationPageOptions) ([]Conve
 	if err != nil {
 		return nil, err
 	}
+	if err := b.includeChildRuns(ctx, runsByConversation); err != nil {
+		return nil, err
+	}
 	runIDs := make([]domain.ID, 0)
 	for _, runs := range runsByConversation {
 		for _, run := range runs {
@@ -274,9 +278,18 @@ func (b *Bridge) ListMessages(conversationID string, limit int, before string) (
 	if err != nil {
 		return ChatHistoryPage{}, err
 	}
-	traceIDs := make([]domain.ID, 0, len(runs))
+	childrenByParent, err := b.repositories.Runs.ListChildrenByParents(ctx, runIDs)
+	if err != nil {
+		return ChatHistoryPage{}, err
+	}
+	traceIDs := make([]domain.ID, 0, len(runs)+len(childrenByParent)*delegationMaxPerParent)
 	for _, run := range runs {
 		traceIDs = append(traceIDs, run.ID)
+	}
+	for _, children := range childrenByParent {
+		for _, child := range children {
+			traceIDs = append(traceIDs, child.ID)
+		}
 	}
 	callsByRun, err := b.repositories.ToolCalls.ListByRuns(ctx, traceIDs)
 	if err != nil {
@@ -295,8 +308,47 @@ func (b *Bridge) ListMessages(conversationID string, limit int, before string) (
 			continue
 		}
 		page.Traces = append(page.Traces, runTraceView(run, callsByRun[runID]))
+		for _, child := range childrenByParent[runID] {
+			page.Traces = append(page.Traces, runTraceView(child, callsByRun[child.ID]))
+		}
 	}
 	return page, nil
+}
+
+// includeChildRuns attaches anonymous delegation traces to the conversation of
+// their root run. Child runs intentionally have no conversation_id of their
+// own, but their operational trace belongs next to the agent.delegate call
+// that created them and must survive a renderer reload.
+func (b *Bridge) includeChildRuns(ctx context.Context, runsByConversation map[domain.ID][]domain.AgentRun) error {
+	parentIDs := make([]domain.ID, 0)
+	conversationByParent := make(map[domain.ID]domain.ID)
+	for conversationID, runs := range runsByConversation {
+		for _, run := range runs {
+			parentIDs = append(parentIDs, run.ID)
+			conversationByParent[run.ID] = conversationID
+		}
+	}
+	childrenByParent, err := b.repositories.Runs.ListChildrenByParents(ctx, parentIDs)
+	if err != nil {
+		return err
+	}
+	for parentID, children := range childrenByParent {
+		conversationID, exists := conversationByParent[parentID]
+		if !exists {
+			continue
+		}
+		runsByConversation[conversationID] = append(runsByConversation[conversationID], children...)
+	}
+	for conversationID, runs := range runsByConversation {
+		sort.SliceStable(runs, func(left, right int) bool {
+			if runs[left].CreatedAt.Equal(runs[right].CreatedAt) {
+				return runs[left].ID < runs[right].ID
+			}
+			return runs[left].CreatedAt.Before(runs[right].CreatedAt)
+		})
+		runsByConversation[conversationID] = runs
+	}
+	return nil
 }
 
 func chatMessageView(message storage.Message) ChatMessageView {
@@ -312,7 +364,7 @@ func chatMessageView(message storage.Message) ChatMessageView {
 // one set-based query instead of one query per run.
 func runTraceView(run domain.AgentRun, calls []storage.ToolCall) RunTraceView {
 	view := RunTraceView{
-		ID: string(run.ID), Kind: string(run.Kind), Status: string(run.State),
+		ID: string(run.ID), Kind: string(run.Kind), ParentRunID: string(run.ParentRunID), Status: string(run.State),
 		CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339Nano), Failure: safeError(run.Failure),
 		ToolCalls: make([]ToolCallView, 0, len(calls)),
 	}

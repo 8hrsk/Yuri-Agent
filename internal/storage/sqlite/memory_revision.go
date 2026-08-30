@@ -246,8 +246,11 @@ func validateMemoryForStorage(memory domain.Memory) error {
 	if memory.AgentID.Empty() {
 		return fmt.Errorf("%w: memory agent id is required", domain.ErrInvalidArgument)
 	}
-	if memory.Scope != domain.MemoryScopeAgentPrivate {
+	if memory.Scope == "" || !memory.Scope.Valid() {
 		return fmt.Errorf("%w: unsupported memory scope %q", domain.ErrInvalidArgument, memory.Scope)
+	}
+	if memory.Scope.Shared() && memory.Sensitivity == domain.MemorySensitivityHighlySensitive {
+		return fmt.Errorf("%w: highly sensitive memory cannot be shared", domain.ErrInvalidArgument)
 	}
 	if memory.Lifecycle == domain.MemoryLifecycleDormant && !memory.DeletedAt.IsZero() {
 		return fmt.Errorf("%w: dormant memory cannot have deleted_at", domain.ErrInvalidArgument)

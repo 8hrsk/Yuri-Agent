@@ -72,17 +72,28 @@ func (l MemoryLifecycle) Valid() bool {
 	}
 }
 
-// MemoryScope identifies the owner-visible namespace of a memory. Memories
-// are private to one named agent; the explicit scope prevents future shared
-// projections from widening retrieval accidentally.
+// MemoryScope identifies who may retrieve a memory. Shared records remain
+// owned by their creating agent, but become visible to the other local agents
+// only after an explicit owner publication.
 type MemoryScope string
 
 const (
-	MemoryScopeAgentPrivate MemoryScope = "agent_private"
+	MemoryScopeAgentPrivate       MemoryScope = "agent_private"
+	MemoryScopeOwnerShared        MemoryScope = "owner_shared"
+	MemoryScopeInstallationShared MemoryScope = "installation_shared"
 )
 
 func (s MemoryScope) Valid() bool {
-	return s == "" || s == MemoryScopeAgentPrivate
+	switch s {
+	case "", MemoryScopeAgentPrivate, MemoryScopeOwnerShared, MemoryScopeInstallationShared:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s MemoryScope) Shared() bool {
+	return s == MemoryScopeOwnerShared || s == MemoryScopeInstallationShared
 }
 
 // MemoryState is an architectural alias used by context and reflection code.

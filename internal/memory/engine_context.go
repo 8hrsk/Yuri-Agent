@@ -25,13 +25,13 @@ func (e *Engine) CoreSnapshot(ctx context.Context, options Budget) (ContextSnaps
 		options = e.coreBudget
 	}
 	options = options.normalize(16)
-	items, err := e.store.ListMemories(ctx, MemoryFilter{AgentID: e.agentID, States: []LifecycleState{StateActive}, Kinds: []Kind{KindCore, KindUserProfile, KindSemantic, KindProcedural, KindRelationship}, IncludeHidden: false, Limit: 0})
+	items, err := e.store.ListMemories(ctx, MemoryFilter{AgentID: e.agentID, IncludeShared: true, States: []LifecycleState{StateActive}, Kinds: []Kind{KindCore, KindUserProfile, KindSemantic, KindProcedural, KindRelationship}, IncludeHidden: false, Limit: 0})
 	if err != nil {
 		return ContextSnapshot{}, err
 	}
 	candidates := make([]RankCandidate, 0, len(items))
 	for _, item := range items {
-		if (!e.agentID.Empty() && item.AgentID != e.agentID) || item.Lifecycle != domain.MemoryLifecycleActive || item.HiddenFromCore || item.Lifecycle == domain.MemoryLifecycleDeleted ||
+		if !memoryVisibleTo(item, e.agentID, true) || item.Lifecycle != domain.MemoryLifecycleActive || item.HiddenFromCore || item.Lifecycle == domain.MemoryLifecycleDeleted ||
 			item.Sensitivity == domain.MemorySensitivityHighlySensitive {
 			continue
 		}
@@ -97,6 +97,12 @@ func FormatContext(entries []ContextEntry) string {
 		builder.WriteString(escapeContext(string(entry.Memory.Kind)))
 		builder.WriteString("\" nature=\"")
 		builder.WriteString(escapeContext(string(entry.Memory.Nature)))
+		if entry.Memory.Scope.Shared() {
+			builder.WriteString("\" scope=\"")
+			builder.WriteString(escapeContext(string(entry.Memory.Scope)))
+			builder.WriteString("\" owner-agent=\"")
+			builder.WriteString(escapeContext(entry.Memory.AgentID.String()))
+		}
 		builder.WriteString("\" source=\"")
 		builder.WriteString(escapeContext(sourceLabel(entry.Evidence.Sources)))
 		builder.WriteString("\">\n    ")

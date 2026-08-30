@@ -348,6 +348,34 @@ func (r *RunRepository) ListByIDs(ctx context.Context, ids []domain.ID) (map[dom
 	return result, nil
 }
 
+// ListChildrenByParents reads anonymous child runs for a bounded set of root
+// runs. Stage 8 limits children per parent at creation time; this batch lookup
+// keeps conversation history from falling back to one query per delegation.
+func (r *RunRepository) ListChildrenByParents(ctx context.Context, parentRunIDs []domain.ID) (map[domain.ID][]domain.AgentRun, error) {
+	if err := requireDatabase(r.db); err != nil {
+		return nil, err
+	}
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+	result := make(map[domain.ID][]domain.AgentRun)
+	for _, chunk := range chunkIDs(parentRunIDs) {
+		placeholders, args := idPlaceholders(chunk)
+		query := runSelect + ` WHERE parent_run_id IN (` + placeholders + `) ORDER BY created_at ASC, id ASC`
+		if err := eachChunkRow(ctx, r.db, "child runs by parents", query, args, func(row rowScanner) error {
+			run, scanErr := scanRun(row)
+			if scanErr != nil {
+				return scanErr
+			}
+			result[run.ParentRunID] = append(result[run.ParentRunID], run)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
 // ListByIDs reads the named agent profiles in one statement, keyed by id. Ids
 // that do not exist are simply absent from the map.
 //

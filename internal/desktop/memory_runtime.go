@@ -134,6 +134,18 @@ func memoryProvenance(sources []domain.MemorySource) string {
 	}
 }
 
+func (b *Bridge) emitMemoryUpdated(writes int) {
+	if b == nil || writes <= 0 {
+		return
+	}
+	b.mu.RLock()
+	appContext := b.appCtx
+	b.mu.RUnlock()
+	if appContext != nil {
+		wailsruntime.EventsEmit(appContext, memoryEventName, map[string]any{"type": "memory.updated", "writes": writes})
+	}
+}
+
 var _ contextbuilder.Source = desktopContextSource{}
 
 func (b *Bridge) reviewTurnInBackground(engine *memory.Engine, backend agent.ModelBackend, model string, allowReflection bool, turn memory.Turn, agentID domain.ID) {
@@ -189,15 +201,13 @@ func (b *Bridge) reviewTurnInBackground(engine *memory.Engine, backend agent.Mod
 			b.logger.InfoContext(ctx, "post-turn memory review completed", "run_id", turn.RunID, "writes", writes)
 		}
 		if writes > 0 {
-			b.mu.RLock()
-			appContext := b.appCtx
-			b.mu.RUnlock()
-			if appContext != nil {
-				wailsruntime.EventsEmit(appContext, memoryEventName, map[string]any{"type": "memory.updated", "writes": writes})
-			}
+			b.emitMemoryUpdated(writes)
 		}
 		if allowReflection {
 			b.reflectOnTurn(ctx, backend, model, turn, agentID)
+			if _, reconcileErr := b.reconcileCompletedPeerSocialReflections(ctx, backend, model, 10); reconcileErr != nil && b.logger != nil && ctx.Err() == nil {
+				b.logger.WarnContext(ctx, "reconcile peer social reflection", "run_id", turn.RunID, "error", safeError(reconcileErr.Error()))
+			}
 		}
 	}()
 }

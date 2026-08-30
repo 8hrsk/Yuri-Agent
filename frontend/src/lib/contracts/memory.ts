@@ -9,6 +9,8 @@ export type MemoryContentKind = 'fact' | 'opinion' | 'emotion' | 'inference'
 
 export type MemoryLifecycleState = 'active' | 'dormant' | 'deleted'
 
+export type MemoryScope = 'agent_private' | 'owner_shared' | 'installation_shared'
+
 export interface MemorySource {
   sourceType: string
   sourceId?: string
@@ -23,6 +25,9 @@ export interface MemorySource {
 
 export interface MemoryRecord {
   id: string
+  agentId?: string
+  agentName?: string
+  scope: MemoryScope
   kind: MemoryKind
   contentKind: MemoryContentKind
   content: string
@@ -44,6 +49,7 @@ export interface MemoryRecord {
 export interface MemoryListOptions {
   lifecycleState?: MemoryLifecycleState | 'all'
   kind?: MemoryKind | 'all'
+  scope?: MemoryScope | 'all'
   query?: string
   limit?: number
   offset?: number

@@ -21,13 +21,17 @@ function normalizeChatEvent(value: unknown): ChatEvent | undefined {
                 : rawType
   const runId = String(nested.runId ?? nested.run_id ?? '')
   if (!type || !runId) return undefined
-  const base: { runId: string; conversationId?: string; createdAt?: string; timestamp?: string } = { runId }
+  const base: { runId: string; conversationId?: string; createdAt?: string; timestamp?: string; runKind?: string; parentRunId?: string } = { runId }
   const conversationId = optionalString(nested, 'conversationId', 'conversation_id')
   const createdAt = optionalString(nested, 'createdAt', 'created_at')
   const timestamp = optionalString(nested, 'timestamp', 'at')
+  const runKind = optionalString(nested, 'runKind', 'run_kind', 'kind')
+  const parentRunId = optionalString(nested, 'parentRunId', 'parent_run_id')
   if (conversationId) base.conversationId = conversationId
   if (createdAt) base.createdAt = createdAt
   if (timestamp) base.timestamp = timestamp
+  if (runKind) base.runKind = runKind
+  if (parentRunId) base.parentRunId = parentRunId
   switch (type) {
     case 'run.started':
       return { type, ...base }

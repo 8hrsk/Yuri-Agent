@@ -9,7 +9,7 @@ import type {
 import type { ChatEvent, RunResult } from './events'
 import type { ApprovalDecision, ChatAttachmentContent, ChatHistoryPage, ChatTool, Conversation, ConversationPageOptions } from './chat'
 import type { JobRun, JobRunListOptions, Schedule, ScheduleInput } from './scheduler'
-import type { MemoryLifecycleState, MemoryListOptions, MemoryRecord, MemoryUpdate } from './memory'
+import type { MemoryLifecycleState, MemoryListOptions, MemoryRecord, MemoryScope, MemoryUpdate } from './memory'
 import type {
   ActivityEvent,
   ActivityListOptions,
@@ -78,6 +78,7 @@ export interface YuriClient {
   listMemories(options?: MemoryListOptions): Promise<MemoryRecord[]>
   searchArchive(request: ArchiveSearchRequest): Promise<ArchiveSearchResponse>
   updateMemory(memoryId: string, update: MemoryUpdate): Promise<MemoryRecord | undefined>
+  setMemoryScope(memoryId: string, scope: MemoryScope): Promise<MemoryRecord | undefined>
   setMemoryLifecycle(memoryId: string, state: MemoryLifecycleState): Promise<MemoryRecord | undefined>
   deleteMemory(memoryId: string): Promise<void>
   listPlugins(): Promise<PluginRecord[]>

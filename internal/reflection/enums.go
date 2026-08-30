@@ -4,12 +4,13 @@ package reflection
 type Trigger string
 
 const (
-	TriggerPostTurn   Trigger = "post_turn"
-	TriggerIdle       Trigger = "idle"
-	TriggerCron       Trigger = "cron"
-	TriggerBeforeComp Trigger = "before_compression"
-	TriggerSessionEnd Trigger = "session_end"
-	TriggerManual     Trigger = "manual"
+	TriggerPostTurn     Trigger = "post_turn"
+	TriggerIdle         Trigger = "idle"
+	TriggerCron         Trigger = "cron"
+	TriggerBeforeComp   Trigger = "before_compression"
+	TriggerSessionEnd   Trigger = "session_end"
+	TriggerManual       Trigger = "manual"
+	TriggerPeerDialogue Trigger = "peer_dialogue"
 )
 
 // Valid reports whether the trigger is part of the stable reflection
@@ -18,7 +19,7 @@ const (
 func (t Trigger) Valid() bool {
 	switch t {
 	case TriggerPostTurn, TriggerIdle, TriggerCron, TriggerBeforeComp,
-		TriggerSessionEnd, TriggerManual:
+		TriggerSessionEnd, TriggerManual, TriggerPeerDialogue:
 		return true
 	default:
 		return false

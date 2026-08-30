@@ -193,7 +193,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if runKind != domain.RunKindSubagent {
 		if err := registry.Register(delegationAgentTool{
 			bridge: b, backend: backend, model: model,
-			principalAgentID: agentID, parentRunID: runID,
+			principalAgentID: agentID, parentRunID: runID, conversationID: conversationID, parentTools: registry,
 		}); err != nil {
 			return b.failChatRun(runContext, &run, emitter, err), nil
 		}

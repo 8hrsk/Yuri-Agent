@@ -25,6 +25,7 @@ import type {
   MemoryLifecycleState,
   MemoryListOptions,
   MemoryRecord,
+  MemoryScope,
   MemoryUpdate,
   OnboardingResult,
   OnboardingState,
@@ -543,6 +544,10 @@ class WailsYuriClient implements YuriClient {
   async updateMemory(memoryId: string, update: MemoryUpdate): Promise<MemoryRecord | undefined> {
     const result = await callBridge<unknown>(['UpdateMemory'], [{ id: memoryId, memoryId, ...update }])
     return normalizeMemory(result)
+  }
+
+  async setMemoryScope(memoryId: string, scope: MemoryScope): Promise<MemoryRecord | undefined> {
+    return normalizeMemory(await callBridge<unknown>(['SetMemoryScope'], [{ id: memoryId, memoryId, scope }]))
   }
 
   async setMemoryLifecycle(memoryId: string, state: MemoryLifecycleState): Promise<MemoryRecord | undefined> {

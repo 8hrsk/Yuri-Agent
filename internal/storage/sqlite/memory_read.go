@@ -24,6 +24,7 @@ func (r *MemoryRepository) Get(ctx context.Context, id domain.ID) (domain.Memory
 }
 
 // GetForAgent returns a memory only when it belongs to the requested agent.
+// Ownership is stable across private/shared scope changes.
 // This scoped variant is used by the desktop adapter; the unscoped method is
 // retained for migrations and administrative tooling.
 func (r *MemoryRepository) GetForAgent(ctx context.Context, agentID, id domain.ID) (domain.Memory, error) {

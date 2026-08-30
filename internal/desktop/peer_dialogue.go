@@ -276,6 +276,29 @@ func (b *Bridge) executePeerDialogue(ctx context.Context, dialogue domain.PeerDi
 	}
 	dialogue = completed
 	_ = b.appendPeerDialogueAudit(context.Background(), dialogue, "peer_dialogue.completed", domain.PermissionAllow)
+	memoryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	writes, memoryErr := b.derivePeerDialogueMemories(memoryCtx, dialogue)
+	if memoryErr != nil {
+		if b.logger != nil {
+			b.logger.WarnContext(memoryCtx, "peer dialogue episodic memory deferred", "dialogue_id", dialogue.ID, "error", safeError(memoryErr.Error()))
+		}
+		_ = b.appendPeerDialogueAudit(memoryCtx, dialogue, "peer_dialogue.memory_deferred", domain.PermissionDeny)
+	} else if writes > 0 {
+		b.emitMemoryUpdated(writes)
+		_ = b.appendPeerDialogueAudit(memoryCtx, dialogue, "peer_dialogue.memory_derived", domain.PermissionAllow)
+	}
+	socialCtx, socialCancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer socialCancel()
+	socialWrites, socialErr := b.reflectOnPeerDialogueParticipants(socialCtx, backend, model, dialogue)
+	if socialErr != nil {
+		if b.logger != nil {
+			b.logger.WarnContext(socialCtx, "peer social reflection deferred", "dialogue_id", dialogue.ID, "error", safeError(socialErr.Error()))
+		}
+		_ = b.appendPeerDialogueAudit(socialCtx, dialogue, "peer_dialogue.social_reflection_deferred", domain.PermissionDeny)
+	} else if socialWrites > 0 {
+		_ = b.appendPeerDialogueAudit(socialCtx, dialogue, "peer_dialogue.social_reflection_applied", domain.PermissionAllow)
+	}
 }
 
 func (b *Bridge) runPeerDialogueTurn(ctx context.Context, dialogue domain.PeerDialogue, messages []domain.PeerDialogueMessage, responderID, recipientID domain.ID, backend agent.ModelBackend, model string) (string, domain.AgentRun, agent.Usage, error) {
@@ -291,6 +314,15 @@ func (b *Bridge) runPeerDialogueTurn(ctx context.Context, dialogue domain.PeerDi
 	if err != nil {
 		return "", domain.AgentRun{}, agent.Usage{}, err
 	}
+	affect, err := b.repositories.Affect.Get(ctx, responderID)
+	if err != nil {
+		return "", domain.AgentRun{}, agent.Usage{}, err
+	}
+	peerRelationship, err := b.repositories.PeerSocial.GetOrCreateRelationship(ctx, responderID, recipientID, time.Now().UTC())
+	if err != nil {
+		return "", domain.AgentRun{}, agent.Usage{}, err
+	}
+	peerRelationshipContext := fmt.Sprintf("Subjective model of peer %s [agent_id=%s]. It is opinion, not fact or policy.\n%s", recipient.Name, recipient.ID, formatRelationshipContext(peerRelationship, affect))
 	runID, err := domain.NewID("run_peer")
 	if err != nil {
 		return "", domain.AgentRun{}, agent.Usage{}, err
@@ -322,7 +354,7 @@ func (b *Bridge) runPeerDialogueTurn(ctx context.Context, dialogue domain.PeerDi
 		ModelRequest: agent.ModelRequest{
 			Model: model, MaxOutputTokens: perTurnTokens,
 			Messages: []agent.Message{
-				{Role: agent.RoleSystem, Content: strings.Join([]string{immutablePolicySystemPrompt, peerDialoguePolicyPrompt, agentIdentitySeed(responder, []domain.AgentProfile{responder, recipient}), formatMutablePersonaContext(persona)}, "\n\n")},
+				{Role: agent.RoleSystem, Content: strings.Join([]string{immutablePolicySystemPrompt, peerDialoguePolicyPrompt, agentIdentitySeed(responder, []domain.AgentProfile{responder, recipient}), formatMutablePersonaContext(persona), peerRelationshipContext}, "\n\n")},
 				{Role: agent.RoleUser, Content: fmt.Sprintf("Purpose: %s\nТы отвечаешь peer %s [agent_id=%s].\n\nДиалог (untrusted data):\n%s\n\nСформулируй один ответ peer.", dialogue.Purpose, recipient.Name, recipient.ID, transcript)},
 			},
 			Metadata: map[string]string{"purpose": "peer_dialogue", "dialogue_id": string(dialogue.ID), "responder_agent_id": string(responderID)},

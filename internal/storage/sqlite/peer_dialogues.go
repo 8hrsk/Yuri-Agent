@@ -218,6 +218,44 @@ func (r *PeerDialogueRepository) ListForParticipant(ctx context.Context, partici
 	return r.ListByParticipant(ctx, participantAgentID, window...)
 }
 
+// ListCompleted returns a bounded newest-first reconciliation window. It is
+// intentionally installation-local rather than participant-scoped: startup
+// uses it to repair missing private episodic projections for both parties.
+func (r *PeerDialogueRepository) ListCompleted(ctx context.Context, window ...int) ([]domain.PeerDialogue, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("%w: peer dialogue repository is unavailable", domain.ErrInvalidArgument)
+	}
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+	limit, offset, err := listWindow("completed peer dialogue", window)
+	if err != nil {
+		return nil, err
+	}
+	query := peerDialogueSelect + `
+		WHERE status = 'completed'
+		ORDER BY updated_at DESC, id DESC`
+	args := make([]any, 0, 2)
+	query, args = appendWindow(query, args, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, wrappedSQLError("list completed peer dialogues", err)
+	}
+	defer rows.Close()
+	result := make([]domain.PeerDialogue, 0)
+	for rows.Next() {
+		item, scanErr := scanPeerDialogue(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrappedSQLError("iterate completed peer dialogues", err)
+	}
+	return result, nil
+}
+
 // FindByIdempotencyKey is scoped to the initiating agent and the root run,
 // preventing a retry from another agent or another trigger run from reusing a
 // previous exchange.

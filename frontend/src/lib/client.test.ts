@@ -689,6 +689,37 @@ describe('Yuri client contract', () => {
     })
   })
 
+  it('normalizes shared-memory ownership and forwards explicit scope changes', async () => {
+    const calls: unknown[] = []
+    await withWindow({
+      go: { main: { Bridge: {
+        ListConversations: () => [],
+        ListMemories: (input: unknown) => {
+          calls.push(['list', input])
+          return [{
+            id: 'memory-1', agentId: 'agent-yuri', agentName: 'Yuri', scope: 'owner_shared',
+            kind: 'semantic', nature: 'fact', content: 'Владелец любит сенчу', confidence: .9,
+            salience: .8, lifecycle: 'active', createdAt: '2026-08-30T00:00:00Z', updatedAt: '2026-08-30T00:00:00Z',
+          }]
+        },
+        SetMemoryScope: (input: unknown) => {
+          calls.push(['scope', input])
+          return { id: 'memory-1', scope: 'agent_private', kind: 'semantic', nature: 'fact', content: 'Владелец любит сенчу', lifecycle: 'active' }
+        },
+      } } },
+    }, async () => {
+      const client = createYuriClient()
+      await expect(client.listMemories({ scope: 'owner_shared' })).resolves.toMatchObject([{
+        id: 'memory-1', agentId: 'agent-yuri', agentName: 'Yuri', scope: 'owner_shared',
+      }])
+      await expect(client.setMemoryScope('memory-1', 'agent_private')).resolves.toMatchObject({ scope: 'agent_private' })
+      expect(calls).toEqual([
+        ['list', expect.objectContaining({ scope: 'owner_shared' })],
+        ['scope', { id: 'memory-1', memoryId: 'memory-1', scope: 'agent_private' }],
+      ])
+    })
+  })
+
   it('exposes the plugin lifecycle contract in the offline preview', async () => {
     const client = createYuriClient()
 

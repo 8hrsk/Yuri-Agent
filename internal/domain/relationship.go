@@ -97,9 +97,10 @@ func (o RelationshipOpinion) Validate() error {
 	return nil
 }
 
-// RelationshipState is a versioned snapshot of Yuri's subjective model of
-// the owner. Dimensions and opinions are stored separately from factual
-// memory and have no policy authority.
+// RelationshipState is a versioned snapshot of one subjective relationship.
+// The primary state keyed by agent ID models the owner; directional peer
+// states use separate derived IDs and an explicit observer/subject mapping.
+// Dimensions and opinions are not factual memory and have no policy authority.
 type RelationshipState struct {
 	ID            ID                    `json:"id"`
 	RevisionID    ID                    `json:"revision_id,omitempty"`

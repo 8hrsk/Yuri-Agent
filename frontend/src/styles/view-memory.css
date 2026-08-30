@@ -438,6 +438,44 @@
   font-size: 8px;
 }
 
+.memory-card__scope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.memory-card__scope > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.memory-card__scope strong {
+  color: #9c95ad;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.memory-card__scope small {
+  color: #686377;
+  font-size: 8px;
+}
+
+.memory-card__scope select {
+  min-width: 150px;
+  max-width: 56%;
+  height: 29px;
+  padding: 0 8px;
+  border: 1px solid rgba(var(--accent-rgb), 0.16);
+  border-radius: 7px;
+  color: #aaa3bb;
+  background: #191723;
+  font-size: 8px;
+}
+
 .memory-card__provenance {
   min-height: 45px;
   padding: 12px 0 11px;
@@ -809,4 +847,3 @@
     flex-basis: 100%;
   }
 }
-

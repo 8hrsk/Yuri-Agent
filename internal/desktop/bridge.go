@@ -111,6 +111,11 @@ func NewBridge(ctx context.Context) (*Bridge, error) {
 		database.Close()
 		return nil, fmt.Errorf("initialize agent roster: %w", err)
 	}
+	if writes, reconcileErr := bridge.reconcileCompletedPeerDialogueMemories(ctx, peerDialogueMemoryReconcileLimit); reconcileErr != nil {
+		logger.WarnContext(ctx, "reconcile peer dialogue episodic memories", "writes", writes, "error", safeError(reconcileErr.Error()))
+	} else if writes > 0 {
+		logger.InfoContext(ctx, "reconciled peer dialogue episodic memories", "writes", writes)
+	}
 	service, err := proactivity.NewService(proactivitySettings(value.Proactivity), proactivity.FuncNotifier(bridge.emitNotification))
 	if err != nil {
 		database.Close()

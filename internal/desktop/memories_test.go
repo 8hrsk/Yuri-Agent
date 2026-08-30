@@ -96,6 +96,78 @@ func TestMemoryBridgeListsEditsAndTransitionsLifecycle(t *testing.T) {
 	}
 }
 
+func TestMemoryBridgePublishesRecallsAndRevokesAcrossAgents(t *testing.T) {
+	bridge := newMemoryTestBridge(t)
+	memoryID, _ := seedMemoryTest(t, bridge)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 27, 13, 0, 0, 0, time.UTC)
+	peer, err := domain.NewAgentProfile("agent-peer", "Mika", 22, "female", "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.repositories.Agents.Create(ctx, peer); err != nil {
+		t.Fatal(err)
+	}
+
+	published, err := bridge.SetMemoryScope(SetMemoryScopeInput{MemoryID: string(memoryID), Scope: string(domain.MemoryScopeOwnerShared)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if published.Scope != string(domain.MemoryScopeOwnerShared) || published.Version != 2 {
+		t.Fatalf("published memory = %#v", published)
+	}
+	versions, err := bridge.repositories.Memories.ListVersions(ctx, memoryID, 1)
+	if err != nil || len(versions) != 1 || versions[0].Operation != "publish" {
+		t.Fatalf("publish journal = %#v, %v", versions, err)
+	}
+
+	peerAdapter := sqliteMemoryAdapter{repositories: bridge.repositories, agentID: peer.ID}
+	engine, err := memory.NewEngine(memory.Config{Store: peerAdapter, Lexical: peerAdapter})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recalled, err := engine.Recall(ctx, "зелёный чай", memory.RecallOptions{Mode: memory.RecallAutomatic, Limit: 5, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recalled) != 1 || recalled[0].Memory.ID != memoryID || recalled[0].Memory.AgentID == peer.ID {
+		t.Fatalf("peer recall = %#v", recalled)
+	}
+
+	revoked, err := bridge.SetMemoryScope(SetMemoryScopeInput{MemoryID: string(memoryID), Scope: string(domain.MemoryScopeAgentPrivate)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revoked.Scope != string(domain.MemoryScopeAgentPrivate) || revoked.Version != 3 {
+		t.Fatalf("revoked memory = %#v", revoked)
+	}
+	recalled, err = engine.Recall(ctx, "зелёный чай", memory.RecallOptions{Mode: memory.RecallAutomatic, Limit: 5, Now: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recalled) != 0 {
+		t.Fatalf("revoked private memory leaked to peer: %#v", recalled)
+	}
+}
+
+func TestMemoryBridgeRejectsPublishingHighlySensitiveMemory(t *testing.T) {
+	bridge := newMemoryTestBridge(t)
+	memoryID, _ := seedMemoryTest(t, bridge)
+	current, err := bridge.repositories.Memories.GetForAgent(context.Background(), bridge.personaProfileID(), memoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.Version++
+	current.Sensitivity = domain.MemorySensitivityHighlySensitive
+	current.UpdatedAt = current.UpdatedAt.Add(time.Minute)
+	if err := bridge.repositories.Memories.Save(context.Background(), current); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bridge.SetMemoryScope(SetMemoryScopeInput{MemoryID: string(memoryID), Scope: string(domain.MemoryScopeInstallationShared)}); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("publish highly-sensitive memory error = %v", err)
+	}
+}
+
 func TestMemoryBridgeDeliberateArchiveSearchReturnsOriginalMessage(t *testing.T) {
 	bridge := newMemoryTestBridge(t)
 	_, messageID := seedMemoryTest(t, bridge)

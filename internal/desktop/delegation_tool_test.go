@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -18,17 +19,23 @@ type delegationBackendStub struct {
 	mu       sync.Mutex
 	requests []agent.ModelRequest
 	events   []agent.ModelEvent
+	batches  [][]agent.ModelEvent
 	block    bool
 }
 
 func (backend *delegationBackendStub) Start(_ context.Context, request agent.ModelRequest) (agent.ModelStream, error) {
 	backend.mu.Lock()
 	backend.requests = append(backend.requests, request)
+	requestIndex := len(backend.requests) - 1
+	events := backend.events
+	if requestIndex < len(backend.batches) {
+		events = backend.batches[requestIndex]
+	}
 	backend.mu.Unlock()
 	if backend.block {
 		return delegationBlockingStream{}, nil
 	}
-	return &delegationStreamStub{events: append([]agent.ModelEvent(nil), backend.events...)}, nil
+	return &delegationStreamStub{events: append([]agent.ModelEvent(nil), events...)}, nil
 }
 
 func (backend *delegationBackendStub) snapshot() []agent.ModelRequest {
@@ -51,6 +58,33 @@ func (stream *delegationStreamStub) Recv(context.Context) (agent.ModelEvent, err
 	return event, nil
 }
 func (*delegationStreamStub) Close() error { return nil }
+
+type delegationReadToolStub struct {
+	name       string
+	capability domain.Capability
+	mu         sync.Mutex
+	calls      []agent.ToolCall
+}
+
+func (tool *delegationReadToolStub) Descriptor() agent.ToolDescriptor {
+	return agent.ToolDescriptor{
+		Name: tool.name, Description: "test read-only tool", InputSchema: json.RawMessage(`{"type":"object"}`),
+		Risk: domain.RiskLow, Capabilities: domain.CapabilitySet{tool.capability},
+	}
+}
+
+func (tool *delegationReadToolStub) Execute(_ context.Context, call agent.ToolCall) (agent.ToolResult, error) {
+	tool.mu.Lock()
+	tool.calls = append(tool.calls, call)
+	tool.mu.Unlock()
+	return agent.ToolResult{Content: `{"content":"bounded public result"}`}, nil
+}
+
+func (tool *delegationReadToolStub) callCount() int {
+	tool.mu.Lock()
+	defer tool.mu.Unlock()
+	return len(tool.calls)
+}
 
 type delegationBlockingStream struct{}
 
@@ -142,6 +176,175 @@ func TestDelegationToolBoundsChildrenPerParent(t *testing.T) {
 	}
 	if len(backend.snapshot()) != delegationMaxPerParent {
 		t.Fatalf("backend requests=%d, want %d", len(backend.snapshot()), delegationMaxPerParent)
+	}
+}
+
+func TestDelegationToolExecutesExplicitReadOnlyScopeAndPersistsChildTrace(t *testing.T) {
+	bridge, agentID, parent := newDelegationTestBridge(t)
+	readTool := &delegationReadToolStub{name: "web.fetch", capability: domain.CapabilityNetworkHTTP}
+	parentTools := agent.NewToolRegistry()
+	if err := parentTools.Register(readTool); err != nil {
+		t.Fatal(err)
+	}
+	backend := &delegationBackendStub{batches: [][]agent.ModelEvent{
+		{
+			{Type: agent.ModelEventToolCallStarted, ToolCallID: "child-fetch", ToolName: "web.fetch", Arguments: `{"url":"https://example.com"}`},
+			{Type: agent.ModelEventToolCallDone, ToolCallID: "child-fetch", ToolName: "web.fetch", Arguments: `{"url":"https://example.com"}`},
+			{Type: agent.ModelEventCompleted, Usage: agent.Usage{TotalTokens: 10}},
+		},
+		{
+			{Type: agent.ModelEventTextDelta, Delta: "Проверил источник и подготовил результат."},
+			{Type: agent.ModelEventCompleted, Usage: agent.Usage{TotalTokens: 12}},
+		},
+	}}
+	tool := delegationAgentTool{
+		bridge: bridge, backend: backend, model: "test-model", principalAgentID: agentID,
+		parentRunID: parent.ID, conversationID: parent.ConversationID, parentTools: parentTools,
+	}
+	call := agent.ToolCall{
+		ID: "delegate-read-only", Name: delegationToolID,
+		Arguments: json.RawMessage(`{"task":"Проверь страницу","tools":["web.fetch"]}`),
+	}
+	result, err := tool.Execute(context.Background(), call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Content, "Проверил источник") || readTool.callCount() != 1 {
+		t.Fatalf("result=%s calls=%d", result.Content, readTool.callCount())
+	}
+	requests := backend.snapshot()
+	if len(requests) != 2 || len(requests[0].Tools) != 1 || requests[0].Tools[0].Name != "web.fetch" || len(requests[1].Tools) != 1 {
+		t.Fatalf("child requests did not retain the explicit tool scope: %#v", requests)
+	}
+	// A completed idempotent replay returns the durable result even if the
+	// parent registry changed after execution; it must not repeat the side
+	// effect or reinterpret the old scope through current availability.
+	tool.parentTools = agent.NewToolRegistry()
+	replayed, err := tool.Execute(context.Background(), call)
+	if err != nil || replayed.Content != result.Content || len(backend.snapshot()) != 2 || readTool.callCount() != 1 {
+		t.Fatalf("idempotent replay=%q err=%v requests=%d calls=%d", replayed.Content, err, len(backend.snapshot()), readTool.callCount())
+	}
+
+	delegations, err := bridge.repositories.Delegations.ListByParent(context.Background(), agentID, parent.ID)
+	if err != nil || len(delegations) != 1 {
+		t.Fatalf("delegations=%#v err=%v", delegations, err)
+	}
+	var scope struct {
+		Tools        []string `json:"tools"`
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := json.Unmarshal([]byte(delegations[0].ScopeJSON), &scope); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(scope.Tools, ",") != "web.fetch" || strings.Join(scope.Capabilities, ",") != "network.http" {
+		t.Fatalf("stored scope=%#v", scope)
+	}
+	childCalls, err := bridge.repositories.ToolCalls.ListByRun(context.Background(), delegations[0].ChildRunID)
+	if err != nil || len(childCalls) != 1 || childCalls[0].ToolID != "web.fetch" || childCalls[0].Status != "succeeded" {
+		t.Fatalf("child calls=%#v err=%v", childCalls, err)
+	}
+	audit, err := bridge.repositories.Audit.ListByRun(context.Background(), delegations[0].ChildRunID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions := make(map[string]bool, len(audit))
+	for _, event := range audit {
+		actions[event.Action] = true
+	}
+	for _, action := range []string{"tool.proposed", "tool.execute", "tool.completed", "delegation.completed"} {
+		if !actions[action] {
+			t.Fatalf("missing %s in child audit: %#v", action, actions)
+		}
+	}
+	conversations, err := bridge.ListConversations()
+	if err != nil || len(conversations) != 1 {
+		t.Fatalf("conversations=%#v err=%v", conversations, err)
+	}
+	var childTrace *RunTraceView
+	for index := range conversations[0].Traces {
+		if conversations[0].Traces[index].ID == string(delegations[0].ChildRunID) {
+			childTrace = &conversations[0].Traces[index]
+			break
+		}
+	}
+	if childTrace == nil || childTrace.Kind != string(domain.RunKindSubagent) || childTrace.ParentRunID != string(parent.ID) || len(childTrace.ToolCalls) != 1 {
+		t.Fatalf("persisted child trace=%#v", childTrace)
+	}
+}
+
+func TestDelegationToolRejectsWritableUnavailableAndUnapprovedScopes(t *testing.T) {
+	bridge, agentID, parent := newDelegationTestBridge(t)
+	parentTools := agent.NewToolRegistry()
+	readTool := &delegationReadToolStub{name: "filesystem.read", capability: domain.CapabilityFilesystemRead}
+	if err := parentTools.Register(readTool); err != nil {
+		t.Fatal(err)
+	}
+	tool := delegationAgentTool{
+		bridge: bridge, backend: &delegationBackendStub{}, model: "test-model", principalAgentID: agentID,
+		parentRunID: parent.ID, conversationID: parent.ConversationID, parentTools: parentTools,
+	}
+	checks := []struct {
+		id   string
+		args string
+	}{
+		{id: "delegate-write", args: `{"task":"Измени файл","tools":["filesystem.write"]}`},
+		{id: "delegate-search", args: `{"task":"Найди","tools":["web.search"]}`},
+		{id: "delegate-no-root", args: `{"task":"Прочитай","tools":["filesystem.read"]}`},
+	}
+	for _, check := range checks {
+		_, err := tool.Execute(context.Background(), agent.ToolCall{ID: check.id, Name: delegationToolID, Arguments: json.RawMessage(check.args)})
+		if !errors.Is(err, domain.ErrNotPermitted) {
+			t.Fatalf("%s error=%v, want not permitted", check.id, err)
+		}
+	}
+	delegations, err := bridge.repositories.Delegations.ListByParent(context.Background(), agentID, parent.ID)
+	if err != nil || len(delegations) != 0 {
+		t.Fatalf("rejected scope created delegations=%#v err=%v", delegations, err)
+	}
+
+	authorizer := delegationToolAuthorizer{bridge: bridge, allowed: map[string]domain.Capability{"filesystem.read": domain.CapabilityFilesystemRead}}
+	decision, err := authorizer.Authorize(context.Background(), agent.ToolAuthorizationRequest{
+		Tool: agent.ToolDescriptor{Name: "filesystem.write", InputSchema: json.RawMessage(`{"type":"object"}`), Risk: domain.RiskMedium, Capabilities: domain.CapabilitySet{domain.CapabilityFilesystemWrite}},
+		Call: agent.ToolCall{ID: "write", Name: "filesystem.write", Arguments: json.RawMessage(`{"path":"/tmp/x"}`)},
+	})
+	if err != nil || decision.Decision != domain.PermissionDeny {
+		t.Fatalf("write authorization=%#v err=%v", decision, err)
+	}
+}
+
+func TestDelegationToolFailsClosedWhenChildExceedsToolBudget(t *testing.T) {
+	bridge, agentID, parent := newDelegationTestBridge(t)
+	readTool := &delegationReadToolStub{name: "web.fetch", capability: domain.CapabilityNetworkHTTP}
+	parentTools := agent.NewToolRegistry()
+	if err := parentTools.Register(readTool); err != nil {
+		t.Fatal(err)
+	}
+	events := make([]agent.ModelEvent, 0, defaultDelegationBudget.MaxToolCalls+1)
+	for index := 0; index <= defaultDelegationBudget.MaxToolCalls; index++ {
+		events = append(events, agent.ModelEvent{
+			Type: agent.ModelEventToolCallDone, ToolCallID: fmt.Sprintf("child-overflow-%d", index),
+			ToolName: "web.fetch", Arguments: `{"url":"https://example.com"}`,
+		})
+	}
+	events = append(events, agent.ModelEvent{Type: agent.ModelEventCompleted})
+	backend := &delegationBackendStub{batches: [][]agent.ModelEvent{events}}
+	tool := delegationAgentTool{
+		bridge: bridge, backend: backend, model: "test-model", principalAgentID: agentID,
+		parentRunID: parent.ID, conversationID: parent.ConversationID, parentTools: parentTools,
+	}
+	_, err := tool.Execute(context.Background(), agent.ToolCall{
+		ID: "delegate-over-budget", Name: delegationToolID,
+		Arguments: json.RawMessage(`{"task":"Сделай слишком много вызовов","tools":["web.fetch"]}`),
+	})
+	if !errors.Is(err, agent.ErrBudgetExceeded) {
+		t.Fatalf("overflow error=%v, want budget exceeded", err)
+	}
+	if readTool.callCount() != 0 {
+		t.Fatalf("tool executed %d times even though the turn exceeded its budget", readTool.callCount())
+	}
+	delegations, listErr := bridge.repositories.Delegations.ListByParent(context.Background(), agentID, parent.ID)
+	if listErr != nil || len(delegations) != 1 || delegations[0].Status != domain.DelegationStatusFailed {
+		t.Fatalf("failed delegation=%#v err=%v", delegations, listErr)
 	}
 }
 

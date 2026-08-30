@@ -307,8 +307,9 @@ func TestConversationMetadataPageCostsTwoQueriesAndCarriesNoTranscripts(t *testi
 	}
 
 	// Preservation guard (H-16/M-35): the transcript-carrying shape is still
-	// four queries for the whole page, not one read per conversation. Asserted
-	// twice at different page sizes, because "four" and "constant in the page
+	// five queries for the whole page (the fifth batch-loads anonymous child
+	// traces), not one read per conversation. Asserted twice at different page
+	// sizes, because "five" and "constant in the page
 	// size" are different claims and only the second is the property that
 	// matters — a per-conversation read would satisfy neither.
 	var full []ConversationView
@@ -318,8 +319,8 @@ func TestConversationMetadataPageCostsTwoQueriesAndCarriesNoTranscripts(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if queries != 4 {
-		t.Fatalf("transcript page issued %d queries for %d conversations, want 4", queries, conversations)
+	if queries != 5 {
+		t.Fatalf("transcript page issued %d queries for %d conversations, want 5", queries, conversations)
 	}
 	narrow := countBridgeQueries(func() {
 		_, err = bridge.ListConversationsPage(ConversationPageOptions{Limit: 4, MessageLimit: 5})

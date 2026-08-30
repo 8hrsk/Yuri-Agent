@@ -37,6 +37,7 @@ export type {
   MemoryKind,
   MemoryContentKind,
   MemoryLifecycleState,
+  MemoryScope,
   MemorySource,
   MemoryRecord,
   MemoryListOptions,

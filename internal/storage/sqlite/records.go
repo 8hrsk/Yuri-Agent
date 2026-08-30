@@ -100,6 +100,7 @@ type Repositories struct {
 	Relationships        *RelationshipRepository
 	Affect               *AffectiveRepository
 	Affective            *AffectiveRepository
+	PeerSocial           *PeerSocialRepository
 }
 
 // NewRepositories constructs all repositories over one authoritative SQLite
@@ -129,6 +130,7 @@ func NewRepositories(database *sql.DB) (*Repositories, error) {
 		Relationships:        NewRelationshipRepository(database),
 		Affect:               NewAffectiveRepository(database),
 		Affective:            NewAffectiveRepository(database),
+		PeerSocial:           NewPeerSocialRepository(database),
 	}, nil
 }
 

@@ -123,6 +123,7 @@ export interface RunTrace {
   finishedAt?: string
   /** Optional persistence metadata retained for future trace screens. */
   kind?: string
+  parentRunId?: string
   failure?: string
   toolCalls?: ToolCall[]
   steps: RunTraceStep[]

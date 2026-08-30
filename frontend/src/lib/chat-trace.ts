@@ -382,6 +382,8 @@ export function reduceRunTrace(trace: RunTrace, event: ChatEvent, at = eventTime
       return withUpdatedTrace(next, at, {
         status: 'running',
         startedAt: trace.startedAt || at,
+        kind: event.runKind ?? trace.kind,
+        parentRunId: event.parentRunId ?? trace.parentRunId,
         steps: upsertStep(next.steps, thinkingStep(trace.runId, at)),
       })
     case 'run.status':
@@ -643,6 +645,7 @@ export function normalizeRunTrace(value: unknown, fallbackIndex = 0): RunTrace |
     updatedAt: optionalString(value, 'updatedAt', 'updated_at', 'timestamp'),
     finishedAt,
     kind: optionalString(value, 'kind', 'runKind', 'run_kind'),
+    parentRunId: optionalString(value, 'parentRunId', 'parent_run_id'),
     failure,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     steps: sortSteps(steps),

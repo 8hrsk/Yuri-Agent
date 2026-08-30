@@ -55,6 +55,14 @@ function traceWith(toolCall: ToolCall): RunTrace {
 }
 
 describe('a collapsed execution trace renders nothing (H-18/M-40)', () => {
+  it('identifies a nested anonymous run as a subagent', () => {
+    const { toolCall } = spyingToolCall()
+    render(<ExecutionTrace trace={{ ...traceWith(toolCall), kind: 'subagent', parentRunId: 'run-parent' }} />)
+
+    expect(screen.getByText('Субагент')).toBeInTheDocument()
+    expect(document.querySelector('.run-trace__body')).toBeNull()
+  })
+
   it.each([
     ['web.fetch', 'Чтение веб-страницы'],
     ['agent.delegate', 'Субагент'],

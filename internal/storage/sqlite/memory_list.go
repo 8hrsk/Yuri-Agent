@@ -28,7 +28,10 @@ func (r *MemoryRepository) List(ctx context.Context, options ...MemoryListOption
 	}
 	where := []string{"1 = 1"}
 	args := make([]any, 0, 5)
-	if !opts.AgentID.Empty() {
+	if !opts.VisibleToAgentID.Empty() {
+		where = append(where, "((mv.agent_id = ? AND mv.scope = 'agent_private') OR mv.scope IN ('owner_shared', 'installation_shared'))")
+		args = append(args, string(opts.VisibleToAgentID))
+	} else if !opts.AgentID.Empty() {
 		where = append(where, "mv.agent_id = ?")
 		args = append(args, string(opts.AgentID))
 	}

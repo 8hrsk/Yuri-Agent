@@ -30,10 +30,16 @@ func (adapter sqliteMemoryAdapter) ListMemories(ctx context.Context, filter memo
 	if !adapter.agentID.Empty() && !filter.AgentID.Empty() && filter.AgentID != adapter.agentID {
 		return nil, domain.ErrConflict
 	}
-	items, err := adapter.repositories.Memories.List(ctx, storage.MemoryListOptions{
+	options := storage.MemoryListOptions{
 		AgentID: adapter.agentID, Scope: domain.MemoryScopeAgentPrivate,
 		IncludeDormant: filter.IncludeDormant, IncludeDeleted: filter.IncludeDeleted, Limit: filter.Limit,
-	})
+	}
+	if filter.IncludeShared {
+		options.AgentID = ""
+		options.Scope = ""
+		options.VisibleToAgentID = adapter.agentID
+	}
+	items, err := adapter.repositories.Memories.List(ctx, options)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +110,14 @@ func (adapter sqliteMemoryAdapter) ApplyMemoryChange(ctx context.Context, change
 
 func (adapter sqliteMemoryAdapter) TouchMemory(ctx context.Context, id domain.ID, at time.Time) error {
 	if !adapter.agentID.Empty() {
-		_, err := adapter.repositories.Memories.RecordRecallForAgent(ctx, adapter.agentID, id, at)
+		item, err := adapter.repositories.Memories.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if item.AgentID != adapter.agentID && !item.Scope.Shared() {
+			return domain.ErrNotFound
+		}
+		_, err = adapter.repositories.Memories.RecordRecall(ctx, id, at)
 		return err
 	}
 	_, err := adapter.repositories.Memories.RecordRecall(ctx, id, at)
@@ -113,7 +126,14 @@ func (adapter sqliteMemoryAdapter) TouchMemory(ctx context.Context, id domain.ID
 
 func (adapter sqliteMemoryAdapter) ListMemorySources(ctx context.Context, id domain.ID) ([]domain.MemorySource, error) {
 	if !adapter.agentID.Empty() {
-		return adapter.repositories.Memories.ListSourcesForAgent(ctx, adapter.agentID, id)
+		item, err := adapter.repositories.Memories.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if item.AgentID != adapter.agentID && !item.Scope.Shared() {
+			return nil, domain.ErrNotFound
+		}
+		return adapter.repositories.Memories.ListSources(ctx, id)
 	}
 	return adapter.repositories.Memories.ListSources(ctx, id)
 }
@@ -144,11 +164,17 @@ func (adapter sqliteMemoryAdapter) SearchMemoryLexical(ctx context.Context, quer
 	if !adapter.agentID.Empty() && !filter.AgentID.Empty() && filter.AgentID != adapter.agentID {
 		return nil, domain.ErrConflict
 	}
-	hits, err := adapter.repositories.Memories.Search(ctx, query, storage.MemorySearchOptions{
+	searchOptions := storage.MemorySearchOptions{
 		AgentID: adapter.agentID, Scope: domain.MemoryScopeAgentPrivate,
 		IncludeDormant: filter.IncludeDormant, IncludeDeleted: filter.IncludeDeleted,
 		Limit: limit,
-	})
+	}
+	if filter.IncludeShared {
+		searchOptions.AgentID = ""
+		searchOptions.Scope = ""
+		searchOptions.VisibleToAgentID = adapter.agentID
+	}
+	hits, err := adapter.repositories.Memories.Search(ctx, query, searchOptions)
 	if err != nil {
 		return nil, err
 	}

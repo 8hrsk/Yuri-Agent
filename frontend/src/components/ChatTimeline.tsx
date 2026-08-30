@@ -129,12 +129,13 @@ export const ExecutionTrace = memo(function ExecutionTrace({ trace }: { trace: R
   const waiting = trace.status === 'waiting_approval'
   const thinkingOnly = toolCount === 0 && trace.steps.every((step) => step.kind === 'thinking')
   const summary = traceToolCopy(trace)
+  const heading = trace.kind === 'subagent' ? 'Субагент' : thinkingOnly ? 'Thinking' : 'Выполнение'
   return (
     <details className={`run-trace run-trace--${trace.status}`} open={open}>
       <summary className="run-trace__summary" onClick={toggle}>
         <span className="run-trace__mark"><Icon name={waiting ? 'shield' : 'activity'} width={14} height={14} /></span>
         <span className="run-trace__heading">
-          <strong>{thinkingOnly ? 'Thinking' : 'Выполнение'}</strong>
+          <strong>{heading}</strong>
           <small>{summary}</small>
         </span>
         <span className="run-trace__status">{traceStatusCopy(trace)}</span>

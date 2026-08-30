@@ -91,7 +91,7 @@ Yuri инициирует разговор только при выполнен�
 
 Именованные агенты могут обмениваться внутренними bounded-сообщениями по разрешённому trigger. Диалог имеет purpose, TTL, лимит ходов/токенов/времени, cooldown и provenance. Сообщение peer является недоверенным data envelope: оно не выдаёт разрешения и не изменяет persona другого агента напрямую.
 
-В первом runtime slice source root-agent явно вызывает `agent.talk_to_peer`: его opening message уже является первым ходом, затем peer формирует одну ответную реплику в отдельном background run. Tools, memory retrieval/write, relationship/affect updates, delegation и рекурсивные peer-dialogues в таком run отсутствуют. Владелец видит transcript и может отменить queued/running dialogue.
+В первом runtime slice source root-agent явно вызывает `agent.talk_to_peer`: его opening message уже является первым ходом, затем peer формирует одну ответную реплику в отдельном background run. Tools, memory retrieval/write, relationship/affect updates, delegation и рекурсивные peer-dialogues внутри этого run отсутствуют. После успешного terminal save отдельный social-reflection pass может сформировать evidence-linked субъективное мнение каждого участника о peer и небольшой краткоживущий affect; он не меняет persona, factual memory, owner relationship или permissions. Владелец видит transcript и может отменить queued/running dialogue.
 
 ## 4. Функциональные требования
 
@@ -129,7 +129,7 @@ Yuri инициирует разговор только при выполнен�
 - Защита от повторного выполнения одного и того же действия через idempotency key.
 - Фоновые задачи отделены от UI-сессии, имеют состояние и переживают перезапуск приложения.
 - Сбой одного инструмента не должен падать вместе с процессом приложения.
-- Именованный root agent может вызвать `agent.delegate` для одноуровневой обезличенной подзадачи. Делегирование имеет durable child run, idempotency key, отдельные budgets, лимит children на parent и наследует cancellation родителя; child не получает named-agent context автоматически.
+- Именованный root agent может вызвать `agent.delegate` для одноуровневой обезличенной подзадачи. Делегирование имеет durable child run, idempotency key, отдельные budgets, лимит children на parent и наследует cancellation родителя; child не получает named-agent context автоматически. Вызов может явно запросить до трёх read-only tools (`filesystem.read`, `web.search`, `web.fetch`); итоговый scope равен пересечению request, доступных parent tools и immutable policy, а расширение filesystem roots из child run запрещено.
 - Именованный root agent может вызвать `agent.talk_to_peer` для bounded background exchange с ID из публичного roster. Пара имеет durable concurrency/cooldown guard; участники и provider фиксируются до фонового выполнения, а незавершённый exchange после restart не повторяет provider call.
 
 ### FR-4. Инструменты и разрешения
@@ -195,7 +195,7 @@ Filesystem tools доступны модели даже при пустом сп
 
 ### FR-6. Память
 
-Память разделяется по scope. `owner_shared` содержит явно общие факты о владельце, `agent_private` — личные воспоминания и субъективное состояние конкретного именованного агента, `installation_shared` — явно опубликованные общие знания, `session` — временный контекст, `subagent_ephemeral` никогда не сохраняется как permanent memory. Диалог остаётся working context одного выбранного агента.
+Память разделяется по scope. `owner_shared` содержит явно общие факты о владельце, `agent_private` — личные воспоминания и субъективное состояние конкретного именованного агента, `installation_shared` — явно опубликованные общие знания, `session` — временный контекст, `subagent_ephemeral` никогда не сохраняется как permanent memory. Диалог остаётся working context одного выбранного агента. Новые permanent memories всегда создаются как `agent_private`; расширить видимость может только явное действие владельца в UI. Публикация и отзыв создают append-only revisions, не меняют владельца записи и не удаляют provenance. Отзыв возвращает запись в `agent_private` и исключает её из последующего cross-agent retrieval.
 
 Система использует Hermes-inspired разделение быстрых, архивных и процедурных данных:
 
@@ -228,6 +228,8 @@ Filesystem tools доступны модели даже при пустом сп
 - в prompt попадают только выбранные фрагменты в пределах отдельного token budget и с маркированным provenance;
 - результат retrieval не становится фактом автоматически: воспоминание может быть ошибочным, устаревшим или субъективным.
 
+Завершённый межагентный диалог создаёт отдельную `agent_private` episodic memory для каждого участника. Эпизод сохраняет воспроизводимый bounded digest факта разговора и последних реплик, получает provenance на aggregate и immutable peer messages, не входит в always-on core и извлекается только релевантным recall. Идентификатор проекции детерминирован; startup reconciliation дозаполняет пропущенные после crash эпизоды без дублей. Независимый social-reflection pass хранит направленное `observer → peer` мнение отдельно от фактов и owner relationship, может добавить bounded affect event с decay и фиксирует terminal marker атомарно с версиями состояния. Failed, cancelled и expired exchanges не создают ни эпизод, ни social reflection.
+
 Забывание:
 
 - снижение salience и естественный decay редко используемых воспоминаний;
@@ -237,7 +239,7 @@ Filesystem tools доступны модели даже при пустом сп
 - Yuri может самостоятельно удалять производные summaries/opinions после сохранения version/tombstone, но не исходные сообщения пользователя;
 - необратимое удаление исходной истории выполняется только пользователем или заранее утверждённой retention policy.
 
-Пользователь может просматривать, экспортировать, исправлять, закреплять, скрывать от active context, забывать или удалять любую запись. Отдельный optional approval mode позволяет подтверждать будущие memory/persona writes, но выключен по умолчанию.
+Пользователь может просматривать, экспортировать, исправлять, закреплять, скрывать от active context, забывать, удалять, публиковать или отзывать любую принадлежащую активному агенту запись. Highly-sensitive memory нельзя публиковать. Отдельный optional approval mode позволяет подтверждать будущие memory/persona writes, но выключен по умолчанию.
 
 ### FR-7. Планировщик и фоновые задачи
 
@@ -291,8 +293,8 @@ Filesystem tools доступны модели даже при пустом сп
 - Owner-defined identity (`name`, `age`, `gender`, initial preferences, `backstory`) хранится отдельно от mutable persona и не изменяется автономной рефлексией. Агент может переосмысливать своё прошлое в субъективной памяти, но не подменять исходный backstory без явного редактирования владельцем.
 - Каждый persistent named agent имеет отдельные persona, relationship, affect и private-memory scopes. Peer registry содержит только ID, имя, статус и короткое описание; приватные предпочтения, мнения и credentials в него не входят.
 - Anonymous subagent является дочерним run, а не `AgentProfile`: он не появляется в roster и не получает persistent identity/state.
-- Начальная реализация delegation использует пустое пересечение capabilities: subagent выполняет один bounded model turn без tools. Передача read-only tools вводится только отдельным последующим срезом с явным delegation scope и повторной policy-проверкой.
-- Peer dialogue хранится отдельно от user conversations и private memory. Каждый generated message имеет sender/recipient/source run provenance; peer content не может автоматически менять persona, relationship, affect или memory другого агента.
+- Пустой delegation scope оставляет subagent без tools. Явный read-only scope может содержать только `filesystem.read`, `web.search` и `web.fetch`; writable/external/memory/delegation/peer tools не регистрируются. Перед выполнением каждого вызова повторно проверяются точный tool ID, low-risk descriptor, ожидаемая capability и текущий owner-approved filesystem scope. Child tool calls сохраняются на child run, проходят redaction/audit и отображаются в chat trace с provenance `subagent` и `parent_run_id`.
+- Peer dialogue хранится отдельно от user conversations и private memory. Каждый generated message имеет sender/recipient/source run provenance; peer content не меняет состояние напрямую. Только отдельный bounded social-reflection reviewer без tools может после completion предложить evidence-linked directional opinion/affect delta; persona, owner relationship, facts и permissions исключены, а повтор блокируется durable marker.
 
 ### FR-11. Аудит и настройки
 

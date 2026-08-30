@@ -32,7 +32,7 @@ func getCurrentMemoryForAgent(ctx context.Context, queryer interface {
 	row := queryer.QueryRowContext(ctx, memoryHeadSelectPrefix+`
 		FROM memory_heads AS mh
 		JOIN memory_versions AS mv ON mv.memory_id = mh.memory_id AND mv.version = mh.version`+memoryRecallJoin+`
-		WHERE mh.memory_id = ? AND mv.agent_id = ? AND mv.scope = 'agent_private'`, string(id), string(agentID))
+		WHERE mh.memory_id = ? AND mv.agent_id = ?`, string(id), string(agentID))
 	item, err := scanMemory(row)
 	if err != nil {
 		return domain.Memory{}, wrappedSQLError("get agent memory", err)

@@ -33,7 +33,10 @@ func (r *MemoryRepository) Search(ctx context.Context, query string, options ...
 	}
 	where := []string{"memory_fts MATCH ?"}
 	args := []any{ftsQuery}
-	if !opts.AgentID.Empty() {
+	if !opts.VisibleToAgentID.Empty() {
+		where = append(where, "((mv.agent_id = ? AND mv.scope = 'agent_private') OR mv.scope IN ('owner_shared', 'installation_shared'))")
+		args = append(args, string(opts.VisibleToAgentID))
+	} else if !opts.AgentID.Empty() {
 		where = append(where, "mv.agent_id = ?")
 		args = append(args, string(opts.AgentID))
 	}
