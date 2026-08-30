@@ -8,6 +8,7 @@ import type {
   PersonalitySnapshot,
   RelationshipDimension,
   RelationshipState,
+  RelationshipVersion,
   RunStatus,
   SubjectiveLabel,
   SubjectiveOpinion,
@@ -321,9 +322,46 @@ function normalizeRelationshipDimensions(value: unknown): RelationshipDimension[
   return Object.entries(source).map(([key, item], index) => normalizeRelationshipDimension(item, key, index)).filter((item): item is RelationshipDimension => Boolean(item))
 }
 
+function relationshipDimensionRecord(value: unknown): Record<string, number> {
+  return Object.fromEntries(normalizeRelationshipDimensions(value).map((dimension) => [dimension.id, dimension.value]))
+}
+
+function relationshipDiffRecord(value: unknown): Record<string, number> | undefined {
+  const source = asRecord(value)
+  if (!source) return undefined
+  const entries = Object.entries(source).flatMap(([key, item]) => {
+    const numeric = Number(item)
+    return Number.isFinite(numeric) ? [[key, clampSigned(numeric)]] as const : []
+  })
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined
+}
+
+function normalizeRelationshipVersion(value: unknown, index: number): RelationshipVersion | undefined {
+  const source = asRecord(value)
+  if (!source) return undefined
+  const version = normalizeVersion(source.version ?? source.versionNumber ?? source.version_number, index + 1)
+  return {
+    id: optionalString(source, 'id', 'versionId', 'version_id', 'revisionId', 'revision_id') ?? `relationship-v${version}`,
+    version,
+    parentId: optionalString(source, 'parentId', 'parent_id'),
+    operation: optionalString(source, 'operation', 'kind') ?? (version === 1 ? 'create' : 'update'),
+    summary: optionalString(source, 'summary', 'description', 'state') ?? 'Состояние связи обновлено.',
+    dimensions: relationshipDimensionRecord(source.dimensions ?? source.dimensionsJson ?? source.dimensions_json),
+    diff: relationshipDiffRecord(source.diff ?? source.changes),
+    reason: optionalString(source, 'reason', 'why', 'explanation') ?? 'Изменение состояния связи.',
+    evidence: normalizePersonaEvidence(source.evidence ?? source.evidenceLinks ?? source.evidence_links ?? source.sources),
+    authorRunId: optionalString(source, 'authorRunId', 'author_run_id', 'runId', 'run_id'),
+    createdAt: optionalString(source, 'createdAt', 'created_at', 'timestamp') ?? new Date(0).toISOString(),
+  }
+}
+
 function normalizeRelationship(value: unknown, affect: AffectiveState, opinions: SubjectiveOpinion[], fallbackId: string): RelationshipState {
   const source = asRecord(value) ?? {}
   const dimensions = normalizeRelationshipDimensions(source.dimensions ?? source.dimensionsJson ?? source.dimensions_json ?? source.signals)
+  const rawVersions = source.versions ?? source.history ?? source.relationshipVersions ?? source.relationship_versions
+  const versions = Array.isArray(rawVersions)
+    ? rawVersions.map((item, index) => normalizeRelationshipVersion(item, index)).filter((item): item is RelationshipVersion => Boolean(item))
+    : []
   return {
     id: optionalString(source, 'id', 'relationshipId', 'relationship_id') ?? fallbackId,
     version: normalizeVersion(source.version ?? source.versionNumber ?? source.version_number, 1),
@@ -333,6 +371,7 @@ function normalizeRelationship(value: unknown, affect: AffectiveState, opinions:
     affect: normalizeAffectiveState(source.affect ?? source.affectiveState ?? source.affective_state, affect),
     reason: optionalString(source, 'reason', 'why', 'explanation'),
     evidence: normalizePersonaEvidence(source.evidence ?? source.evidenceLinks ?? source.evidence_links ?? source.sources),
+    versions,
     updatedAt: optionalString(source, 'updatedAt', 'updated_at', 'createdAt', 'created_at'),
   }
 }
@@ -384,6 +423,38 @@ export function createStarterPersonalitySnapshot(): PersonalitySnapshot {
   const now = new Date().toISOString()
   const traits = copyTraits(defaultTraitSeed)
   const affect = copyAffect(defaultAffectSeed)
+  const relationshipVersions: RelationshipVersion[] = [{
+    id: 'relationship-v1',
+    version: 1,
+    operation: 'create',
+    summary: 'Yuri воспринимает связь как новое знакомство.',
+    dimensions: { trust: 0.35, warmth: 0.42, familiarity: 0.15, reliability: 0.5 },
+    reason: 'Связь создана из relationship seed.',
+    evidence: [],
+    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 12).toISOString(),
+  }, {
+    id: 'relationship-v2',
+    version: 2,
+    parentId: 'relationship-v1',
+    operation: 'update',
+    summary: 'Yuri воспринимает связь как надёжное знакомство.',
+    dimensions: { trust: 0.54, warmth: 0.66, familiarity: 0.36, reliability: 0.62 },
+    diff: { trust: 0.19, warmth: 0.24, familiarity: 0.21, reliability: 0.12 },
+    reason: 'Последовательные диалоги сформировали знакомство и базовую надёжность.',
+    evidence: [],
+    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 5).toISOString(),
+  }, {
+    id: 'relationship-v3',
+    version: 3,
+    parentId: 'relationship-v2',
+    operation: 'update',
+    summary: 'Yuri воспринимает связь как спокойную и постепенно углубляющуюся.',
+    dimensions: { trust: 0.62, warmth: 0.71, familiarity: 0.48, reliability: 0.66 },
+    diff: { trust: 0.08, warmth: 0.05, familiarity: 0.12, reliability: 0.04 },
+    reason: 'Повторяющиеся спокойные диалоги повысили доверие и знакомство.',
+    evidence: [],
+    createdAt: now,
+  }]
   const relationship: RelationshipState = {
     id: 'relationship-local',
     version: 3,
@@ -405,6 +476,9 @@ export function createStarterPersonalitySnapshot(): PersonalitySnapshot {
       createdAt: now,
     }],
     affect,
+    reason: relationshipVersions[2].reason,
+    evidence: [],
+    versions: relationshipVersions,
     updatedAt: now,
   }
   const versions = [
@@ -494,6 +568,12 @@ export function clonePersonalitySnapshot(snapshot: PersonalitySnapshot): Persona
       opinions: snapshot.relationship.opinions.map((opinion) => ({ ...opinion, evidence: opinion.evidence.map((item) => ({ ...item })) })),
       affect: copyAffect(snapshot.relationship.affect),
       evidence: snapshot.relationship.evidence?.map((item) => ({ ...item })),
+      versions: snapshot.relationship.versions.map((version) => ({
+        ...version,
+        dimensions: { ...version.dimensions },
+        diff: version.diff ? { ...version.diff } : undefined,
+        evidence: version.evidence.map((item) => ({ ...item })),
+      })),
     },
     versions: snapshot.versions.map((version) => ({
       ...version,

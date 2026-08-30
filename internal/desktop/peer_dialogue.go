@@ -324,7 +324,7 @@ func (b *Bridge) runPeerDialogueTurn(ctx context.Context, dialogue domain.PeerDi
 	if err != nil {
 		return "", domain.AgentRun{}, agent.Usage{}, err
 	}
-	peerRelationship, err := b.repositories.PeerSocial.GetOrCreateRelationship(ctx, responderID, recipientID, time.Now().UTC())
+	peerRelationship, err := b.repositories.PeerSocial.GetOrCreateRelationshipForProfile(ctx, responderID, recipientID, personalization, time.Now().UTC())
 	if err != nil {
 		return "", domain.AgentRun{}, agent.Usage{}, err
 	}

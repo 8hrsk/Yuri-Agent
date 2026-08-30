@@ -144,6 +144,71 @@ func NewRelationshipState(id ID, dimensions map[string]float64, summary string, 
 	return result, nil
 }
 
+// NewOwnerRelationshipState projects the current owner-authored relationship
+// seed into an independent mutable state. The seed remains append-only and is
+// referenced as provenance; fictional custom history is never promoted to a
+// factual memory by this projection.
+func NewOwnerRelationshipState(seed PersonalizationSeed, now time.Time) (RelationshipState, error) {
+	if err := seed.Validate(); err != nil {
+		return RelationshipState{}, err
+	}
+	state, err := NewRelationshipState(seed.AgentID, seed.RelationshipSeed.Dimensions, seed.RelationshipSeed.Summary, now)
+	if err != nil {
+		return RelationshipState{}, err
+	}
+	provenance := "owner_relationship_seed"
+	if seed.RelationshipSeed.Preset == RelationshipSeedCustom {
+		provenance = "fictional_owner_relationship_seed"
+	}
+	state.Reason = "relationship initialized from owner seed: " + string(seed.RelationshipSeed.Preset)
+	state.Evidence = []EvidenceLink{{
+		ID: ID(fmt.Sprintf("%s:relationship-seed:v%d", seed.AgentID, seed.Version)), SourceType: "personalization_seed",
+		SourceID: seed.RevisionID, Provenance: provenance, UserConfirmed: true, CreatedAt: now.UTC(),
+	}}
+	if err := state.Validate(); err != nil {
+		return RelationshipState{}, err
+	}
+	return state, nil
+}
+
+// NewPeerRelationshipState projects only stable social predispositions from
+// the observer profile. It deliberately does not reuse the owner's relationship
+// story or parse backstory text, so a peer starts as a distinct subject rather
+// than inheriting closeness or romance intended for the owner.
+func NewPeerRelationshipState(id ID, observer PersonalizationSeed, now time.Time) (RelationshipState, error) {
+	if id.Empty() || now.IsZero() {
+		return RelationshipState{}, fmt.Errorf("%w: peer relationship id and timestamp are required", ErrInvalidArgument)
+	}
+	if err := observer.Validate(); err != nil {
+		return RelationshipState{}, err
+	}
+	temperament := observer.Temperament
+	dimensions := map[string]float64{
+		RelationshipDimensionTrust:       clamp(.25+.35*temperament.Trust, 0, 1),
+		RelationshipDimensionAttachment:  clamp(.08+.20*temperament.Attachment, 0, 1),
+		RelationshipDimensionRespect:     clamp(.42+.16*temperament.Empathy+.12*temperament.Curiosity, 0, 1),
+		RelationshipDimensionCloseness:   clamp(.10+.25*temperament.Sociability, 0, 1),
+		RelationshipDimensionReliability: .50,
+		RelationshipDimensionIrritation:  0,
+		RelationshipDimensionJealousy:    0,
+		RelationshipDimensionResentment:  0,
+		RelationshipDimensionGratitude:   0,
+	}
+	state, err := NewRelationshipState(id, dimensions, "Новое знакомство с peer; исходные сигналы отражают только социальные предрасположенности наблюдателя.", now)
+	if err != nil {
+		return RelationshipState{}, err
+	}
+	state.Reason = "peer relationship initialized from observer temperament"
+	state.Evidence = []EvidenceLink{{
+		ID: ID(fmt.Sprintf("%s:peer-relationship-seed:v%d", observer.AgentID, observer.Version)), SourceType: "personalization_seed",
+		SourceID: observer.RevisionID, Provenance: "observer_temperament_seed", UserConfirmed: true, CreatedAt: now.UTC(),
+	}}
+	if err := state.Validate(); err != nil {
+		return RelationshipState{}, err
+	}
+	return state, nil
+}
+
 func (r RelationshipState) Valid() bool { return r.Validate() == nil }
 
 func (r RelationshipState) Validate() error {

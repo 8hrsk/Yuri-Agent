@@ -205,6 +205,14 @@ func TestCreateAgentRoundTripsPersonalizationProfileV2(t *testing.T) {
 		stored.EvolutionPolicy.TraitBounds["warmth"] != (domain.NumericRange{Min: 0, Max: 1}) || stored.EvolutionPolicy.ReflectionMode != domain.PersonalizationReflectionDisabled || stored.EvolutionPolicy.ReflectionCooldownMinutes != 90 {
 		t.Fatalf("personalization v2 did not round-trip: %#v", stored)
 	}
+	ownerRelationship, err := bridge.repositories.Relationship.Get(context.Background(), domain.ID(created.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ownerRelationship.Version != 1 || ownerRelationship.Dimensions["trust"] != .72 || ownerRelationship.Dimensions["closeness"] != .66 || ownerRelationship.Summary != template.RelationshipSeed.Summary ||
+		!strings.Contains(ownerRelationship.Reason, string(domain.RelationshipSeedFriends)) || len(ownerRelationship.Evidence) != 1 || ownerRelationship.Evidence[0].Provenance != "owner_relationship_seed" {
+		t.Fatalf("owner relationship did not initialize from personalization seed: %#v", ownerRelationship)
+	}
 	view, err := bridge.GetActiveAgentPersonalization()
 	if err != nil || view.AgentID != created.ID || view.Identity.UserAddress != "капитан" || view.Backstory.Episodes[0].Place != "обсерватория" {
 		t.Fatalf("personalization view = %#v, %v", view, err)

@@ -106,6 +106,7 @@ export type {
   AffectiveDimension,
   AffectiveState,
   RelationshipDimension,
+  RelationshipVersion,
   RelationshipState,
   PersonaVersion,
   PersonalitySnapshot,

@@ -231,6 +231,8 @@ Flow:
 
 ### P4. Relationship initialization и развитие
 
+Статус: завершено.
+
 **Задача:** отказаться от одинакового стартового отношения всех агентов к владельцу.
 
 Работы:
@@ -243,6 +245,8 @@ Flow:
 - применить те же различия к направленным peer relationships.
 
 **Готово, когда:** два агента с разными relationship seeds начинают с разного отношения, развиваются независимо, а reset одного отношения не затрагивает persona, memory или другие relationships.
+
+Реализовано: primary owner relationship создаётся непосредственной проекцией выбранного `RelationshipSeed`, сохраняет preset/summary/dimensions и evidence на конкретную owner-authored personalization revision. Custom seed получает provenance `fictional_owner_relationship_seed` и не создаёт factual memory. Старые untouched v1 relationships один раз reconciled к сохранённому seed; накопленное состояние version > 1 не переписывается. Directional peer relation начинает с отдельной проекции социальных predispositions observer-а и никогда не наследует owner romance/backstory. В Relationship UI доступны причина текущего состояния, evidence count, append-only история значимых дельт, rollback и reset к текущему owner seed. Reset меняет только выбранную relationship stream; persona, affect, personalization, memory и обратные/прочие peer relationships остаются независимыми.
 
 ### P5. Backstory memory hydration
 

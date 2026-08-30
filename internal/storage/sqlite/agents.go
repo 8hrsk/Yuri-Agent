@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/OrdoAI/yuri-agent/internal/domain"
@@ -91,6 +92,13 @@ func (repositories *Repositories) createAgentWithDefaults(ctx context.Context, p
 		}
 		if err := personalization.Validate(); err != nil {
 			return err
+		}
+		expectedRelationship, err := domain.NewOwnerRelationshipState(*personalization, relationship.CreatedAt)
+		if err != nil {
+			return err
+		}
+		if !maps.Equal(relationship.Dimensions, expectedRelationship.Dimensions) || strings.TrimSpace(relationship.Summary) != expectedRelationship.Summary {
+			return fmt.Errorf("%w: initial owner relationship must project its personalization seed", domain.ErrInvalidArgument)
 		}
 	}
 	tx, err := repositories.Agents.db.BeginTx(ctx, nil)

@@ -292,6 +292,10 @@ func (b *Bridge) CreateAgent(input CreateAgentInput) (AgentProfileView, error) {
 			return AgentProfileView{}, err
 		}
 	}
+	relationship, err = domain.NewOwnerRelationshipState(personalization, now)
+	if err != nil {
+		return AgentProfileView{}, err
+	}
 	if err := b.repositories.CreateAgentWithPersonalizationDefaults(ctx, profile, seed, relationship, affect, personalization); err != nil {
 		return AgentProfileView{}, fmt.Errorf("initialize agent personality: %w", err)
 	}

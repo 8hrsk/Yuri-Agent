@@ -95,15 +95,30 @@ type AffectiveStateView struct {
 }
 
 type RelationshipStateView struct {
-	ID         string                  `json:"id"`
-	Version    uint64                  `json:"version"`
-	Summary    string                  `json:"summary"`
-	Dimensions map[string]float64      `json:"dimensions"`
-	Opinions   []SubjectiveOpinionView `json:"opinions"`
-	Affect     AffectiveStateView      `json:"affect"`
-	Reason     string                  `json:"reason,omitempty"`
-	Evidence   []PersonaEvidenceView   `json:"evidence,omitempty"`
-	UpdatedAt  string                  `json:"updatedAt,omitempty"`
+	ID         string                    `json:"id"`
+	Version    uint64                    `json:"version"`
+	Summary    string                    `json:"summary"`
+	Dimensions map[string]float64        `json:"dimensions"`
+	Opinions   []SubjectiveOpinionView   `json:"opinions"`
+	Affect     AffectiveStateView        `json:"affect"`
+	Reason     string                    `json:"reason,omitempty"`
+	Evidence   []PersonaEvidenceView     `json:"evidence,omitempty"`
+	Versions   []RelationshipVersionView `json:"versions"`
+	UpdatedAt  string                    `json:"updatedAt,omitempty"`
+}
+
+type RelationshipVersionView struct {
+	ID          string                `json:"id"`
+	Version     uint64                `json:"version"`
+	ParentID    string                `json:"parentId,omitempty"`
+	Operation   string                `json:"operation"`
+	Summary     string                `json:"summary"`
+	Dimensions  map[string]float64    `json:"dimensions"`
+	Diff        map[string]float64    `json:"diff,omitempty"`
+	Reason      string                `json:"reason"`
+	Evidence    []PersonaEvidenceView `json:"evidence"`
+	AuthorRunID string                `json:"authorRunId,omitempty"`
+	CreatedAt   string                `json:"createdAt"`
 }
 
 type PersonaVersionView struct {
@@ -164,16 +179,50 @@ func (b *Bridge) ensurePersonaStateFor(ctx context.Context, profileID domain.ID,
 	} else if err != nil {
 		return err
 	}
-	if _, err := b.repositories.Relationship.Get(ctx, profileID); errors.Is(err, domain.ErrNotFound) {
-		seed, createErr := domain.NewRelationshipState(profileID, defaultRelationshipDimensions(), "Связь только начинает формироваться из совместных диалогов.", now)
+	if b.repositories.Personalization == nil {
+		return errors.New("personalization repository is unavailable")
+	}
+	relationship, relationshipErr := b.repositories.Relationship.Get(ctx, profileID)
+	relationshipMissing := errors.Is(relationshipErr, domain.ErrNotFound)
+	if relationshipErr != nil && !relationshipMissing {
+		return relationshipErr
+	}
+	personalization, personalizationErr := b.repositories.Personalization.Get(ctx, profileID)
+	if errors.Is(personalizationErr, domain.ErrNotFound) {
+		profile, profileErr := b.repositories.Agents.Get(ctx, profileID)
+		if profileErr != nil {
+			return profileErr
+		}
+		persona, personaErr := b.repositories.Persona.Get(ctx, profileID)
+		if personaErr != nil {
+			return personaErr
+		}
+		dimensions := defaultRelationshipDimensions()
+		if !relationshipMissing {
+			dimensions = relationship.Dimensions
+		}
+		personalization, personalizationErr = domain.NewPersonalizationSeed(profile, persona.Traits, dimensions, now)
+		if personalizationErr != nil {
+			return personalizationErr
+		}
+		if personalizationErr = b.repositories.Personalization.Create(ctx, personalization); personalizationErr != nil && !errors.Is(personalizationErr, domain.ErrConflict) {
+			return personalizationErr
+		}
+		if errors.Is(personalizationErr, domain.ErrConflict) {
+			personalization, personalizationErr = b.repositories.Personalization.Get(ctx, profileID)
+		}
+	}
+	if personalizationErr != nil {
+		return personalizationErr
+	}
+	if relationshipMissing {
+		seed, createErr := domain.NewOwnerRelationshipState(personalization, now)
 		if createErr != nil {
 			return createErr
 		}
 		if createErr = b.repositories.Relationship.Create(ctx, seed); createErr != nil && !errors.Is(createErr, domain.ErrConflict) {
 			return createErr
 		}
-	} else if err != nil {
-		return err
 	}
 	if _, err := b.repositories.Affect.Get(ctx, profileID); errors.Is(err, domain.ErrNotFound) {
 		seed, createErr := domain.NewAffectiveState(profileID, defaultAffectDimensions(), "спокойное внимание", now)
@@ -186,33 +235,40 @@ func (b *Bridge) ensurePersonaStateFor(ctx context.Context, profileID domain.ID,
 	} else if err != nil {
 		return err
 	}
-	if b.repositories.Personalization == nil {
-		return errors.New("personalization repository is unavailable")
-	}
-	if _, err := b.repositories.Personalization.Get(ctx, profileID); errors.Is(err, domain.ErrNotFound) {
-		profile, profileErr := b.repositories.Agents.Get(ctx, profileID)
-		if profileErr != nil {
-			return profileErr
-		}
-		persona, personaErr := b.repositories.Persona.Get(ctx, profileID)
-		if personaErr != nil {
-			return personaErr
-		}
-		relationship, relationshipErr := b.repositories.Relationship.Get(ctx, profileID)
-		if relationshipErr != nil {
-			return relationshipErr
-		}
-		seed, createErr := domain.NewPersonalizationSeed(profile, persona.Traits, relationship.Dimensions, now)
-		if createErr != nil {
-			return createErr
-		}
-		if createErr = b.repositories.Personalization.Create(ctx, seed); createErr != nil && !errors.Is(createErr, domain.ErrConflict) {
-			return createErr
-		}
-	} else if err != nil {
+	return b.reconcileInitialOwnerRelationshipSeed(ctx, profileID, now)
+}
+
+// reconcileInitialOwnerRelationshipSeed upgrades profiles created before P4.
+// Only an untouched v1 owner relationship is eligible: once reflection or an
+// owner action has produced a later version, initialization must never rewrite
+// that accumulated subject-specific state.
+func (b *Bridge) reconcileInitialOwnerRelationshipSeed(ctx context.Context, profileID domain.ID, now time.Time) error {
+	current, err := b.repositories.Relationship.Get(ctx, profileID)
+	if err != nil {
 		return err
 	}
-	return nil
+	if current.Version != 1 || strings.HasPrefix(current.Reason, "relationship initialized from owner seed:") {
+		return nil
+	}
+	personalization, err := b.repositories.Personalization.Get(ctx, profileID)
+	if err != nil {
+		return err
+	}
+	desired, err := domain.NewOwnerRelationshipState(personalization, now)
+	if err != nil {
+		return err
+	}
+	desired.Version = current.Version + 1
+	desired.RevisionID = ""
+	desired.ParentID = current.RevisionID
+	desired.ParentVersion = current.Version
+	desired.Operation = domain.RelationshipOperationReset
+	desired.CreatedAt = current.CreatedAt
+	desired.UpdatedAt = now.UTC()
+	_, err = b.repositories.Relationship.AppendVersion(ctx, desired, current.Version, storage.RelationshipVersionMetadata{
+		Operation: domain.RelationshipOperationReset, Reason: desired.Reason, Evidence: desired.Evidence,
+	})
+	return err
 }
 
 func (b *Bridge) GetPersonalitySnapshot() (PersonalitySnapshotView, error) {
@@ -313,6 +369,65 @@ func (b *Bridge) ResetPersona(_ struct{}) (PersonalitySnapshotView, error) {
 	return b.emitPersonalitySnapshot(ctx)
 }
 
+func (b *Bridge) RollbackRelationship(input PersonaVersionInput) (PersonalitySnapshotView, error) {
+	ctx, cancel := b.context()
+	defer cancel()
+	profileID := b.personaProfileID()
+	history, err := b.repositories.Relationship.ListVersions(ctx, profileID, 100)
+	if err != nil {
+		return PersonalitySnapshotView{}, err
+	}
+	var target uint64
+	for _, record := range history {
+		if firstDomainID(record.RevisionID, record.Relationship.RevisionID).String() == strings.TrimSpace(input.VersionID) {
+			target = record.Relationship.Version
+			break
+		}
+	}
+	if target == 0 {
+		return PersonalitySnapshotView{}, domain.ErrNotFound
+	}
+	current, err := b.repositories.Relationship.Get(ctx, profileID)
+	if err != nil {
+		return PersonalitySnapshotView{}, err
+	}
+	if _, err = b.repositories.Relationship.Rollback(ctx, profileID, current.Version, target, "Владелец откатил отношение к предыдущей версии", time.Now().UTC()); err != nil {
+		return PersonalitySnapshotView{}, err
+	}
+	return b.emitPersonalitySnapshot(ctx)
+}
+
+func (b *Bridge) ResetRelationship(_ struct{}) (PersonalitySnapshotView, error) {
+	ctx, cancel := b.context()
+	defer cancel()
+	profileID := b.personaProfileID()
+	current, err := b.repositories.Relationship.Get(ctx, profileID)
+	if err != nil {
+		return PersonalitySnapshotView{}, err
+	}
+	personalization, err := b.repositories.Personalization.Get(ctx, profileID)
+	if err != nil {
+		return PersonalitySnapshotView{}, err
+	}
+	next, err := domain.NewOwnerRelationshipState(personalization, time.Now().UTC())
+	if err != nil {
+		return PersonalitySnapshotView{}, err
+	}
+	next.Version = current.Version + 1
+	next.RevisionID = ""
+	next.ParentID = current.RevisionID
+	next.ParentVersion = current.Version
+	next.Operation = domain.RelationshipOperationReset
+	next.CreatedAt = current.CreatedAt
+	next.Reason = "Владелец сбросил отношение к текущему relationship seed: " + string(personalization.RelationshipSeed.Preset)
+	if _, err = b.repositories.Relationship.AppendVersion(ctx, next, current.Version, storage.RelationshipVersionMetadata{
+		Operation: domain.RelationshipOperationReset, Reason: next.Reason, Evidence: next.Evidence,
+	}); err != nil {
+		return PersonalitySnapshotView{}, err
+	}
+	return b.emitPersonalitySnapshot(ctx)
+}
+
 func (b *Bridge) personalitySnapshot(ctx context.Context) (PersonalitySnapshotView, error) {
 	if err := b.ensurePersonaState(ctx); err != nil {
 		return PersonalitySnapshotView{}, err
@@ -335,6 +450,10 @@ func (b *Bridge) personalitySnapshot(ctx context.Context) (PersonalitySnapshotVi
 		return PersonalitySnapshotView{}, err
 	}
 	history, err := b.repositories.Persona.ListVersions(ctx, profileID, 100)
+	if err != nil {
+		return PersonalitySnapshotView{}, err
+	}
+	relationshipHistory, err := b.repositories.Relationship.ListVersions(ctx, profileID, 100)
 	if err != nil {
 		return PersonalitySnapshotView{}, err
 	}
@@ -374,7 +493,8 @@ func (b *Bridge) personalitySnapshot(ctx context.Context) (PersonalitySnapshotVi
 		Affect: affectView, Relationship: RelationshipStateView{
 			ID: string(relationship.ID), Version: relationship.Version, Summary: relationship.Summary,
 			Dimensions: relationship.Dimensions, Opinions: opinions, Affect: affectView,
-			Reason: relationship.Reason, Evidence: evidenceViews(relationship.Evidence), UpdatedAt: relationship.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			Reason: relationship.Reason, Evidence: evidenceViews(relationship.Evidence), Versions: relationshipVersionViews(relationshipHistory),
+			UpdatedAt: relationship.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		},
 		Versions: versions, AutoEvolution: autoEvolution,
 	}
@@ -382,6 +502,46 @@ func (b *Bridge) personalitySnapshot(ctx context.Context) (PersonalitySnapshotVi
 		view.LastReflectionAt = lastReflection.UTC().Format(time.RFC3339Nano)
 	}
 	return view, nil
+}
+
+func relationshipVersionViews(history []domain.RelationshipVersionRecord) []RelationshipVersionView {
+	byVersion := make(map[uint64]domain.RelationshipState, len(history))
+	for _, record := range history {
+		byVersion[record.Relationship.Version] = record.Relationship
+	}
+	result := make([]RelationshipVersionView, 0, len(history))
+	for _, record := range history {
+		item := record.Relationship
+		parentVersion := record.ParentVersion
+		if parentVersion == 0 {
+			parentVersion = item.ParentVersion
+		}
+		var diff map[string]float64
+		if parent, ok := byVersion[parentVersion]; ok {
+			diff = relationshipDimensionDiff(parent.Dimensions, item.Dimensions)
+		}
+		result = append(result, RelationshipVersionView{
+			ID: firstDomainID(record.RevisionID, item.RevisionID).String(), Version: item.Version,
+			ParentID: firstDomainID(record.ParentID, item.ParentID).String(), Operation: string(firstRelationshipOperation(record.Operation, item.Operation)),
+			Summary: item.Summary, Dimensions: copyFloatMap(item.Dimensions), Diff: diff,
+			Reason: firstNonEmpty(record.Reason, item.Reason, "Версия отношения"), Evidence: evidenceViews(firstEvidence(record.Evidence, item.Evidence)),
+			AuthorRunID: firstDomainID(record.AuthorRunID, item.AuthorRunID).String(), CreatedAt: item.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	return result
+}
+
+func relationshipDimensionDiff(previous, next map[string]float64) map[string]float64 {
+	result := make(map[string]float64)
+	for name, value := range next {
+		if delta := value - previous[name]; math.Abs(delta) > 1e-12 {
+			result[name] = delta
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func (b *Bridge) emitPersonalitySnapshot(ctx context.Context) (PersonalitySnapshotView, error) {

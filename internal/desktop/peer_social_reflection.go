@@ -131,7 +131,7 @@ func (b *Bridge) reflectOnPeerDialogue(ctx context.Context, backend agent.ModelB
 	if !personalization.EvolutionPolicy.ReflectionEnabled(evolutionEnabled) {
 		return false, nil
 	}
-	relationship, err := b.repositories.PeerSocial.GetOrCreateRelationship(ctx, observerID, subjectID, dialogue.FinishedAt)
+	relationship, err := b.repositories.PeerSocial.GetOrCreateRelationshipForProfile(ctx, observerID, subjectID, personalization, dialogue.FinishedAt)
 	if err != nil {
 		return false, err
 	}

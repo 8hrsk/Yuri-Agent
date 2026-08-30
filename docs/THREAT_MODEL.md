@@ -147,6 +147,7 @@ Reflection — отдельный background run с read-only внешним к�
 - immutable policy/identity seed, grants и file roots не являются изменяемыми traits;
 - owner-authored `PersonalizationSeed` хранится отдельным append-only журналом; reflection не получает repository/API для его update/reset, а mutable persona не является его новой версией;
 - вымышленный backstory маркируется как `identity_seed`/`fictional`, не смешивается с фактами о владельце или реальном мире и никогда не является основанием для permissions, capabilities или security decision;
+- owner relationship seed и его custom narrative остаются субъективным baseline с provenance на personalization revision; они не создают factual memory, а owner-specific closeness/romance не копируются в directional peer relationships;
 - rollback/reset не удаляет исходную историю и не маскирует факт изменения;
 - негативные эмоции не могут влиять на security decision или уменьшать доступ владельца.
 

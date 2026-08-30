@@ -76,6 +76,35 @@ func (r *PeerSocialRepository) GetOrCreateRelationship(ctx context.Context, obse
 	if err != nil {
 		return domain.RelationshipState{}, err
 	}
+	return r.getOrCreateRelationshipState(ctx, observer, subject, state, at)
+}
+
+// GetOrCreateRelationshipForProfile initializes a directional peer relation
+// from the observer's stable social predispositions. The owner's relationship
+// scenario and fictional backstory are deliberately not copied to the peer.
+func (r *PeerSocialRepository) GetOrCreateRelationshipForProfile(ctx context.Context, observer, subject domain.ID, profile domain.PersonalizationSeed, at time.Time) (domain.RelationshipState, error) {
+	if observer.Empty() || profile.AgentID != observer {
+		return domain.RelationshipState{}, fmt.Errorf("%w: observer personalization does not match peer relationship", domain.ErrInvalidArgument)
+	}
+	if existing, err := r.GetRelationship(ctx, observer, subject); err == nil {
+		return existing, nil
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return domain.RelationshipState{}, err
+	}
+	state, err := domain.NewPeerRelationshipState(peerRelationshipID(observer, subject), profile, at)
+	if err != nil {
+		return domain.RelationshipState{}, err
+	}
+	return r.getOrCreateRelationshipState(ctx, observer, subject, state, at)
+}
+
+func (r *PeerSocialRepository) getOrCreateRelationshipState(ctx context.Context, observer, subject domain.ID, state domain.RelationshipState, at time.Time) (domain.RelationshipState, error) {
+	if r == nil || r.db == nil || observer.Empty() || subject.Empty() || observer == subject || at.IsZero() || state.ID != peerRelationshipID(observer, subject) {
+		return domain.RelationshipState{}, fmt.Errorf("%w: peer relationship seed is invalid", domain.ErrInvalidArgument)
+	}
+	if err := state.Validate(); err != nil {
+		return domain.RelationshipState{}, err
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.RelationshipState{}, wrappedSQLError("begin peer relationship", err)
@@ -92,7 +121,7 @@ func (r *PeerSocialRepository) GetOrCreateRelationship(ctx context.Context, obse
 			return domain.RelationshipState{}, wrappedSQLError("link peer relationship", err)
 		}
 		_ = tx.Rollback()
-		return r.GetOrCreateRelationship(ctx, observer, subject, at)
+		return r.GetRelationship(ctx, observer, subject)
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.RelationshipState{}, wrappedSQLError("commit peer relationship", err)

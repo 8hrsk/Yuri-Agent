@@ -45,9 +45,11 @@ describe('Personality and Relationship are two destinations, not one page', () =
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Сигналы связи' })).toBeInTheDocument())
 
     expect(screen.getByRole('heading', { name: 'Мнение о пользователе' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'История связи' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Управление связью' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Черты характера' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'История и причины' })).not.toBeInTheDocument()
-    // Rollback and reset act on the persona, so they belong to that page only.
+    // Persona recovery remains separate from relationship recovery.
     expect(screen.queryByRole('heading', { name: 'Управление состоянием' })).not.toBeInTheDocument()
   })
 

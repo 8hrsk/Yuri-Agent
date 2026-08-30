@@ -7,6 +7,7 @@ import type {
   PersonaVersion,
   PersonalitySnapshot,
   RelationshipDimension,
+  RelationshipVersion,
   SubjectiveOpinion,
 } from '../lib/contracts'
 import { formatDateTime } from '../lib/datetime'
@@ -113,6 +114,21 @@ function VersionItem({ version, currentVersion, onRollback, busy }: { version: P
   </article>
 }
 
+function RelationshipVersionItem({ version, currentVersion, labels, onRollback, busy }: { version: RelationshipVersion; currentVersion: number; labels: Record<string, string>; onRollback: (version: RelationshipVersion) => void; busy: boolean }) {
+  const current = version.version === currentVersion
+  const changes = Object.entries(version.diff ?? {}).filter(([, value]) => Math.abs(value) >= 0.001)
+  return <article className={`persona-version${current ? ' persona-version--current' : ''}`}>
+    <div className="persona-version__marker"><span>v{version.version}</span><i /></div>
+    <div className="persona-version__body">
+      <div className="persona-version__heading"><strong>{current ? 'Текущая связь' : `Версия ${version.version}`} · {version.operation}</strong><time dateTime={version.createdAt}>{formatDate(version.createdAt)}</time></div>
+      <p>{version.reason}</p>
+      {changes.length > 0 && <div className="relationship-version__diff">{changes.map(([id, value]) => <span className={value < 0 ? 'relationship-version__change relationship-version__change--negative' : 'relationship-version__change'} key={id}>{labels[id] ?? id} {signedPercentage(value)}</span>)}</div>}
+      <div className="persona-version__meta"><span>evidence · {version.evidence.length}</span>{version.authorRunId && <span>run · {version.authorRunId}</span>}{version.parentId && <span>parent · {version.parentId}</span>}</div>
+      {!current && <button className="button button--quiet persona-version__rollback" disabled={busy} onClick={() => onRollback(version)} type="button"><Icon name="refresh" width={13} height={13} /> Вернуть состояние v{version.version}</button>}
+    </div>
+  </article>
+}
+
 function SnapshotHeader({ snapshot, busy, onEvolution }: { snapshot: PersonalitySnapshot; busy: boolean; onEvolution: () => void }) {
   const mood = dominantAffectMood(snapshot.affect)
   const moodClass = `persona-mood persona-mood--${mood}`
@@ -211,7 +227,35 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
     }
   }
 
+  const rollbackRelationship = async (version: RelationshipVersion) => {
+    setBusy('rollback')
+    setFeedback(undefined)
+    try {
+      updateSnapshot(await client.rollbackRelationship(version.id))
+      setFeedback({ kind: 'success', text: `Связь возвращена к состоянию версии ${version.version}. История сохранена.` })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось вернуть состояние связи.' })
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
+  const resetRelationship = async () => {
+    setBusy('reset')
+    setFeedback(undefined)
+    try {
+      updateSnapshot(await client.resetRelationship())
+      setFeedback({ kind: 'success', text: 'Связь сброшена к текущему relationship seed. Persona и память не изменены.' })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось сбросить состояние связи.' })
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const versions = useMemo(() => [...snapshot.versions].sort((a, b) => b.version - a.version), [snapshot.versions])
+  const relationshipVersions = useMemo(() => [...snapshot.relationship.versions].sort((a, b) => b.version - a.version), [snapshot.relationship.versions])
+  const relationshipLabels = useMemo(() => Object.fromEntries(snapshot.relationship.dimensions.map((dimension) => [dimension.id, dimension.label])), [snapshot.relationship.dimensions])
   const opinions = snapshot.opinions.length > 0 ? snapshot.opinions : snapshot.relationship.opinions
   const loading = busy === 'loading'
 
@@ -257,9 +301,17 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
             <section aria-labelledby="relationship-state-title" className="persona-panel persona-relationship-panel persona-panel--selected">
               <div className="persona-panel__heading"><div><span className="section-heading__overline">RELATIONSHIP STATE · v{snapshot.relationship.version}</span><h2 id="relationship-state-title">Сигналы связи</h2></div><Icon name="relationship" width={18} height={18} /></div>
               <p className="persona-panel__lead">{snapshot.relationship.summary}</p>
+              {snapshot.relationship.reason && <div className="relationship-reason"><span>Почему состояние изменилось</span><p>{snapshot.relationship.reason}</p><small>evidence · {snapshot.relationship.evidence?.length ?? 0}</small></div>}
               <div className="relationship-signals">{snapshot.relationship.dimensions.map((dimension) => <RelationshipBar dimension={dimension} key={dimension.id} />)}</div>
               {snapshot.relationship.dimensions.length === 0 && <div className="persona-empty">Сигналы связи ещё не рассчитаны.</div>}
               <div className="persona-relationship-panel__meta"><span>Обновлено</span><time dateTime={snapshot.relationship.updatedAt}>{formatDate(snapshot.relationship.updatedAt)}</time></div>
+            </section>
+
+            <section aria-labelledby="relationship-history-title" className="persona-panel persona-history-panel">
+              <div className="persona-panel__heading"><div><span className="section-heading__overline">RELATIONSHIP HISTORY</span><h2 id="relationship-history-title">История связи</h2></div><button aria-label="Обновить историю связи" className="icon-button" disabled={busy !== undefined} onClick={() => void load()} type="button"><Icon name="refresh" width={15} height={15} /></button></div>
+              <p className="persona-panel__lead">Каждое значимое изменение хранит причину, evidence и дельты сигналов. Rollback создаёт новую версию и не стирает историю.</p>
+              <div className="persona-history">{relationshipVersions.map((version) => <RelationshipVersionItem busy={busy !== undefined} currentVersion={snapshot.relationship.version} key={`${version.id}-${version.version}`} labels={relationshipLabels} onRollback={(next) => void rollbackRelationship(next)} version={version} />)}</div>
+              {relationshipVersions.length === 0 && <div className="persona-empty">История связи пока не сформирована.</div>}
             </section>
 
             <section aria-labelledby="persona-opinions-title" className="persona-panel">
@@ -293,6 +345,7 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
         <section className="persona-safety-note"><span className="persona-safety-note__icon"><Icon name="shield" width={16} height={16} /></span><div><strong>Security boundary</strong><p>Негативный affect, ревность и tsundere-поведение не могут выполнять месть, саботаж, угрозы, шантаж или скрывать данные. Все внешние действия проходят обычный policy/approval flow.</p></div></section>
 
         {!relationship && <section aria-labelledby="persona-controls-title" className="persona-panel persona-controls"><div className="persona-panel__heading"><div><span className="section-heading__overline">RECOVERY</span><h2 id="persona-controls-title">Управление состоянием</h2></div><Icon name="refresh" width={17} height={17} /></div><p>Сброс возвращает исходный identity seed. Запись истории и evidence остаётся доступной для проверки.</p><button className="button button--quiet" disabled={busy !== undefined} onClick={() => void reset()} type="button"><Icon name="refresh" width={13} height={13} /> Сбросить к identity seed</button><span className="persona-controls__mode"><i /> {client.mode === 'wails' ? 'Wails backend' : 'Локальный preview'}</span></section>}
+        {relationship && <section aria-labelledby="relationship-controls-title" className="persona-panel persona-controls"><div className="persona-panel__heading"><div><span className="section-heading__overline">RELATIONSHIP RECOVERY</span><h2 id="relationship-controls-title">Управление связью</h2></div><Icon name="refresh" width={17} height={17} /></div><p>Сброс возвращает только отношение к владельцу к текущему relationship seed. Persona, память, affect и отношения с другими агентами остаются неизменными.</p><button className="button button--quiet" disabled={busy !== undefined} onClick={() => void resetRelationship()} type="button"><Icon name="refresh" width={13} height={13} /> Сбросить связь к seed</button><span className="persona-controls__mode"><i /> {client.mode === 'wails' ? 'Wails backend' : 'Локальный preview'}</span></section>}
       </aside>
     </div>
 

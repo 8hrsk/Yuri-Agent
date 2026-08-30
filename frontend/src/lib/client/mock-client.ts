@@ -910,6 +910,75 @@ class MockYuriClient implements YuriClient {
     return this.getPersonaSnapshot()
   }
 
+  async rollbackRelationship(versionId: string): Promise<PersonalitySnapshot | undefined> {
+    const target = this.personality.relationship.versions.find((item) => item.id === versionId || String(item.version) === versionId)
+    if (!target) return undefined
+    const current = this.personality.relationship
+    const nextVersion = Math.max(current.version, ...current.versions.map((item) => item.version)) + 1
+    const next = {
+      ...target,
+      id: makeId('relationship-rollback'),
+      version: nextVersion,
+      parentId: current.versions.find((item) => item.version === current.version)?.id,
+      operation: 'rollback',
+      reason: `Владелец откатил связь к версии ${target.version}.`,
+      createdAt: nowIso(),
+      dimensions: { ...target.dimensions },
+      diff: Object.fromEntries(Object.keys({ ...target.dimensions, ...Object.fromEntries(current.dimensions.map((item) => [item.id, item.value])) })
+        .map((key) => [key, (target.dimensions[key] ?? 0) - (current.dimensions.find((item) => item.id === key)?.value ?? 0)])),
+      evidence: target.evidence.map((item) => ({ ...item })),
+    }
+    this.personality = {
+      ...this.personality,
+      relationship: {
+        ...current,
+        version: nextVersion,
+        summary: target.summary,
+        dimensions: Object.entries(target.dimensions).map(([id, value]) => ({ id, label: current.dimensions.find((item) => item.id === id)?.label ?? id, value })),
+        reason: next.reason,
+        evidence: next.evidence.map((item) => ({ ...item })),
+        versions: [...current.versions, next],
+        updatedAt: next.createdAt,
+      },
+    }
+    return this.getPersonaSnapshot()
+  }
+
+  async resetRelationship(): Promise<PersonalitySnapshot | undefined> {
+    const seed = this.personalitySeed.relationship.versions.find((item) => item.operation === 'create')
+      ?? this.personalitySeed.relationship.versions[0]
+    if (!seed) return undefined
+    const current = this.personality.relationship
+    const nextVersion = Math.max(current.version, ...current.versions.map((item) => item.version)) + 1
+    const next = {
+      ...seed,
+      id: makeId('relationship-reset'),
+      version: nextVersion,
+      parentId: current.versions.find((item) => item.version === current.version)?.id,
+      operation: 'reset',
+      reason: 'Владелец сбросил связь к relationship seed.',
+      createdAt: nowIso(),
+      dimensions: { ...seed.dimensions },
+      evidence: seed.evidence.map((item) => ({ ...item })),
+    }
+    this.personality = {
+      ...this.personality,
+      relationship: {
+        ...current,
+        version: nextVersion,
+        summary: seed.summary,
+        dimensions: Object.entries(seed.dimensions).map(([id, value]) => ({ id, label: current.dimensions.find((item) => item.id === id)?.label ?? id, value })),
+        opinions: [],
+        reason: next.reason,
+        evidence: next.evidence.map((item) => ({ ...item })),
+        versions: [...current.versions, next],
+        updatedAt: next.createdAt,
+      },
+      opinions: [],
+    }
+    return this.getPersonaSnapshot()
+  }
+
   async getPersonalitySnapshot(): Promise<PersonalitySnapshot> {
     return this.getPersonaSnapshot()
   }

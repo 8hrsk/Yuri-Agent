@@ -128,6 +128,8 @@ export interface YuriClient {
   setPersonaTraitPinned(traitId: string, pinned: boolean): Promise<PersonalitySnapshot | undefined>
   rollbackPersona(versionId: string): Promise<PersonalitySnapshot | undefined>
   resetPersona(): Promise<PersonalitySnapshot | undefined>
+  rollbackRelationship(versionId: string): Promise<PersonalitySnapshot | undefined>
+  resetRelationship(): Promise<PersonalitySnapshot | undefined>
   /** Personality-named aliases keep the bridge ergonomic for external callers. */
   getPersonalitySnapshot(): Promise<PersonalitySnapshot>
   setPersonalityAutoEvolution(enabled: boolean): Promise<PersonalitySnapshot | undefined>

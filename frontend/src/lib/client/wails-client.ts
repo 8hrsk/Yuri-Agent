@@ -733,6 +733,16 @@ class WailsYuriClient implements YuriClient {
     return result === undefined ? this.getPersonaSnapshot() : normalizePersonalitySnapshot(result)
   }
 
+  async rollbackRelationship(versionId: string): Promise<PersonalitySnapshot | undefined> {
+    const result = await callBridge<unknown>(['RollbackRelationship'], [{ id: versionId, versionId, version_id: versionId }])
+    return result === undefined ? this.getPersonaSnapshot() : normalizePersonalitySnapshot(result)
+  }
+
+  async resetRelationship(): Promise<PersonalitySnapshot | undefined> {
+    const result = await callBridge<unknown>(['ResetRelationship'], [{}])
+    return result === undefined ? this.getPersonaSnapshot() : normalizePersonalitySnapshot(result)
+  }
+
   async getPersonalitySnapshot(): Promise<PersonalitySnapshot> {
     return this.getPersonaSnapshot()
   }

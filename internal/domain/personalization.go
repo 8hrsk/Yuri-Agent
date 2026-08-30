@@ -243,6 +243,24 @@ type RelationshipSeed struct {
 	Summary    string                 `json:"summary,omitempty"`
 }
 
+func (seed RelationshipSeed) Validate() error {
+	if !seed.Preset.Valid() {
+		return fmt.Errorf("%w: invalid relationship seed preset", ErrInvalidArgument)
+	}
+	if len(seed.Dimensions) == 0 || len(seed.Dimensions) > DefaultPersonaLimits.MaxTraits {
+		return fmt.Errorf("%w: relationship seed dimensions are required", ErrInvalidArgument)
+	}
+	for name, value := range seed.Dimensions {
+		if !validDimensionName(name) || !finite(value) || value < 0 || value > 1 {
+			return fmt.Errorf("%w: relationship seed dimension %q is invalid", ErrInvalidArgument, name)
+		}
+	}
+	if utf8.RuneCountInString(strings.TrimSpace(seed.Summary)) > PersonalizationTextMaxRunes || strings.ContainsRune(seed.Summary, '\x00') {
+		return fmt.Errorf("%w: relationship seed summary is invalid", ErrInvalidArgument)
+	}
+	return nil
+}
+
 type BackstoryEpisode struct {
 	ID               string   `json:"id"`
 	Title            string   `json:"title,omitempty"`
@@ -410,16 +428,8 @@ func (seed PersonalizationSeed) Validate() error {
 	if err := validateIdentityPersonalization(seed.Identity); err != nil {
 		return err
 	}
-	if !seed.RelationshipSeed.Preset.Valid() {
-		return fmt.Errorf("%w: invalid relationship seed preset", ErrInvalidArgument)
-	}
-	for name, value := range seed.RelationshipSeed.Dimensions {
-		if !validDimensionName(name) || !finite(value) || value < 0 || value > 1 {
-			return fmt.Errorf("%w: relationship seed dimension %q is invalid", ErrInvalidArgument, name)
-		}
-	}
-	if utf8.RuneCountInString(strings.TrimSpace(seed.RelationshipSeed.Summary)) > PersonalizationTextMaxRunes || strings.ContainsRune(seed.RelationshipSeed.Summary, '\x00') {
-		return fmt.Errorf("%w: relationship seed summary is invalid", ErrInvalidArgument)
+	if err := seed.RelationshipSeed.Validate(); err != nil {
+		return err
 	}
 	if err := validateEmotionalLists(seed.EmotionalDynamics); err != nil {
 		return err

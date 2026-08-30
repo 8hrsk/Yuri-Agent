@@ -106,9 +106,10 @@ func TestCreateAgentWithPersonalizationDefaultsIsAtomic(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	profile, _ := domain.NewAgentProfileWithBackstory("agent-personalized", "Эми", 22, "female", "Мягкая.", "История Эми.", now)
 	persona, _ := domain.NewMutablePersona(profile.ID, map[string]float64{"warmth": .7}, "initial", now)
-	relationship, _ := domain.NewRelationshipState(profile.ID, map[string]float64{"trust": .2}, "initial", now)
+	relationshipDimensions := map[string]float64{"trust": .2}
 	affect, _ := domain.NewAffectiveState(profile.ID, map[string]float64{"joy": .1}, "initial", now)
-	seed, _ := domain.NewPersonalizationSeed(profile, persona.Traits, relationship.Dimensions, now)
+	seed, _ := domain.NewPersonalizationSeed(profile, persona.Traits, relationshipDimensions, now)
+	relationship, _ := domain.NewOwnerRelationshipState(seed, now)
 	if err := repositories.CreateAgentWithPersonalizationDefaults(ctx, profile, persona, relationship, affect, seed); err != nil {
 		t.Fatal(err)
 	}

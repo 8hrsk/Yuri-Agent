@@ -141,6 +141,20 @@ export interface RelationshipDimension {
   value: number
 }
 
+export interface RelationshipVersion {
+  id: string
+  version: number
+  parentId?: string
+  operation: 'create' | 'update' | 'rollback' | 'reset' | string
+  summary: string
+  dimensions: Record<string, number>
+  diff?: Record<string, number>
+  reason: string
+  evidence: PersonaEvidence[]
+  authorRunId?: string
+  createdAt: string
+}
+
 export interface RelationshipState {
   id: string
   version: number
@@ -150,6 +164,7 @@ export interface RelationshipState {
   affect: AffectiveState
   reason?: string
   evidence?: PersonaEvidence[]
+  versions: RelationshipVersion[]
   updatedAt?: string
 }
 
