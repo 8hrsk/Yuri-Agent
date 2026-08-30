@@ -358,7 +358,15 @@ func (b *Bridge) scheduleFromInput(input ScheduleInput, current domain.Schedule)
 	return schedule, payload, nil
 }
 
-func (b *Bridge) executeScheduledJob(ctx context.Context, job schedulerpkg.ScheduledJob) error {
+func (b *Bridge) executeScheduledJob(ctx context.Context, job schedulerpkg.ScheduledJob) (jobErr error) {
+	// This is the bridge's only entry point into the scheduler's worker
+	// goroutines, so the guard belongs here rather than at any one call site: a
+	// panic becomes this job's error return, which the scheduler records as a
+	// failed job run and retries under its own policy.
+	defer b.recoverBridgeGoroutine("scheduled_job", func(recovered error) {
+		jobErr = recovered
+		_ = b.appendScheduleAudit(context.Background(), domain.ActorSystem, "job.failed", job.Schedule.ID, job.Run.ID)
+	})
 	payload, err := decodeScheduledPayload(job.Schedule.PayloadJSON)
 	if err != nil {
 		return err
@@ -376,8 +384,13 @@ func (b *Bridge) executeScheduledJob(ctx context.Context, job schedulerpkg.Sched
 	if maxSteps < 2 {
 		maxSteps = 2
 	}
+	agentID := b.personaProfileID()
+	if agentID.Empty() {
+		return fmt.Errorf("%w: active agent is required", domain.ErrInvalidArgument)
+	}
+	conversationID := b.scheduleConversationID(ctx, job.Schedule.ID, agentID)
 	result, runErr := b.sendMessageContextWithBudget(ctx, ChatRequest{
-		ConversationID: "schedule_" + string(job.Schedule.ID), Text: payload.Prompt,
+		ConversationID: string(conversationID), Text: payload.Prompt,
 	}, domain.RunKindBackground, domain.RunBudget{
 		MaxSteps: maxSteps, MaxTokens: job.Schedule.Budget.MaxTokens, MaxToolCalls: job.Schedule.Budget.MaxToolCalls,
 		MaxToolOutputBytes: 256 * 1024, MaxDurationSeconds: job.Schedule.Budget.MaxDurationSeconds,
@@ -396,7 +409,7 @@ func (b *Bridge) executeScheduledJob(ctx context.Context, job schedulerpkg.Sched
 			ID: notificationID, Type: domain.NotificationTypeTaskCompleted,
 			Title: "Yuri завершила задачу", Body: job.Schedule.Name,
 			Source:    domain.NotificationSource{Kind: domain.NotificationSourceSchedule, ID: string(job.Schedule.ID), Label: job.Schedule.Name, Reason: "scheduled background task completed"},
-			CreatedAt: time.Now().UTC(), ConversationID: domain.ID("schedule_" + string(job.Schedule.ID)), DeepLink: "yuri://tasks/" + string(job.Schedule.ID),
+			CreatedAt: time.Now().UTC(), ConversationID: conversationID, DeepLink: "yuri://tasks/" + string(job.Schedule.ID),
 		}
 		// The agent task has already completed. A notification adapter failure
 		// must not retry the model/tool run and duplicate its side effects.
@@ -408,6 +421,26 @@ func (b *Bridge) executeScheduledJob(ctx context.Context, job schedulerpkg.Sched
 		}
 	}
 	return nil
+}
+
+// scheduleConversationID resolves the conversation a scheduled agent task
+// writes into. Conversations are owned by exactly one agent, and a run always
+// executes under the currently active agent, so the historical agent-agnostic
+// ID ("schedule_<schedule>") permanently broke a schedule once the owner
+// switched agents: the ownership check in ensureConversation rejected the
+// foreign conversation on every later occurrence. Namespacing the ID by the
+// executing agent keeps each agent's scheduled history separate and makes the
+// failure impossible. A pre-existing legacy conversation is reused while it
+// still belongs to the executing agent so no visible history is orphaned.
+func (b *Bridge) scheduleConversationID(ctx context.Context, scheduleID, agentID domain.ID) domain.ID {
+	legacyID := domain.ID("schedule_" + string(scheduleID))
+	if agentID.Empty() || b.repositories == nil || b.repositories.Conversations == nil {
+		return legacyID
+	}
+	if conversation, err := b.repositories.Conversations.Get(ctx, legacyID); err == nil && conversation.AgentID == agentID {
+		return legacyID
+	}
+	return domain.ID("schedule_" + string(agentID) + "_" + string(scheduleID))
 }
 
 func (b *Bridge) executeNotificationJob(ctx context.Context, job schedulerpkg.ScheduledJob, notification domain.Notification) error {
@@ -470,6 +503,12 @@ func (b *Bridge) runSchedulerSoon() {
 	b.mu.Unlock()
 	go func() {
 		defer b.background.Done()
+		// Job execution itself is already guarded in executeScheduledJob, which
+		// fails the individual job run. What is left here is a panic in the
+		// scheduler's own claim/lease bookkeeping: it owns no bridge-side run to
+		// fail, and any claim it left behind is reclaimed by RecoverExpiredLeases
+		// on the next cycle, so this guard reports through the log.
+		defer b.recoverBridgeGoroutine("scheduler_run_due", nil)
 		_, _ = worker.RunDue(backgroundCtx)
 	}()
 }

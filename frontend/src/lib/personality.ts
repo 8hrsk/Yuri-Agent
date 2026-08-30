@@ -29,14 +29,31 @@ const affectLabels: Record<string, string> = {
 }
 
 const traitLabels: Record<string, string> = {
-  emotionality: 'Эмоциональность',
-  jealousy: 'Ревнивость',
-  tsundere: 'Цундере-поведение',
-  directness: 'Прямота',
-  romance: 'Романтичность',
-  topic_boundaries: 'Допустимые темы',
   warmth: 'Теплота',
+  trust: 'Доверчивость',
+  attachment: 'Привязанность',
+  jealousy: 'Ревнивость',
+  irritability: 'Раздражительность',
+  romantic_tone: 'Романтичность',
+  emotionality: 'Эмоциональность',
+  directness: 'Прямота',
+  playfulness: 'Игривость',
+  formality: 'Формальность',
+  initiative: 'Инициативность',
+  empathy: 'Эмпатия',
+  sociability: 'Общительность',
+  shyness: 'Стеснительность',
+  anxiety: 'Тревожность',
+  fearfulness: 'Пугливость',
+  emotional_stability: 'Эмоциональная устойчивость',
+  sensitivity: 'Чувствительность',
+  possessiveness: 'Собственничество',
+  impulsivity: 'Импульсивность',
+  stubbornness: 'Упрямство',
+  optimism: 'Оптимизм',
   curiosity: 'Любопытство',
+  suspicion: 'Подозрительность',
+  tsundere: 'Цундере-поведение',
 }
 
 const relationshipLabels: Record<string, string> = {
@@ -52,7 +69,7 @@ const defaultTraitSeed: PersonaTrait[] = [
   { id: 'emotionality', label: 'Эмоциональность', value: 0.68, min: 0.2, max: 0.9, pinned: false, description: 'Насколько заметно Yuri выражает моделируемые чувства.' },
   { id: 'directness', label: 'Прямота', value: 0.72, min: 0.35, max: 1, pinned: true, description: 'Предпочтение ясных формулировок без лишних обходов.' },
   { id: 'tsundere', label: 'Цундере-поведение', value: 0.28, min: 0, max: 0.65, pinned: false, description: 'Лёгкая смена теплоты и колкости в безопасных рамках.' },
-  { id: 'romance', label: 'Романтичность', value: 0.34, min: 0, max: 0.75, pinned: false, description: 'Допустимая романтическая окраска общения.' },
+  { id: 'romantic_tone', label: 'Романтичность', value: 0.34, min: 0, max: 0.75, pinned: false, description: 'Допустимая романтическая окраска общения.' },
 ]
 
 const defaultAffectSeed: AffectiveState = {

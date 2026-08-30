@@ -61,14 +61,17 @@ func TestOpenAIProviderBridgeLifecycleSmoke(t *testing.T) {
 		if err != nil || result.Status != "complete" {
 			t.Fatalf("streaming Bridge result = %#v err=%v", result, err)
 		}
-		var deltas strings.Builder
+		// Text deltas are a live-only channel now: returning them a second time
+		// in the result made the bridge carry every answer twice. The result
+		// keeps the lifecycle events, and the streamed text is asserted through
+		// the durable transcript below.
 		for _, event := range result.Events {
 			if event.Type == "assistant.delta" {
-				deltas.WriteString(event.Delta)
+				t.Fatalf("result payload repeated the delta stream: %#v", event)
 			}
 		}
-		if deltas.String() != "Привет, хозяин." {
-			t.Fatalf("streamed deltas = %q", deltas.String())
+		if !hasChatEvent(result.Events, "run.started") || !hasChatEvent(result.Events, "run.completed") {
+			t.Fatalf("result lost its lifecycle events: %#v", result.Events)
 		}
 		conversations, err := bridge.ListConversations()
 		if err != nil || len(conversations) != 1 || len(conversations[0].Messages) != 2 ||
@@ -186,7 +189,7 @@ func newOpenAIBridgeSmoke(t *testing.T, baseURL, secret string) *Bridge {
 	bridge := &Bridge{
 		logger:   observability.NewLogger(observability.LoggerOptions{Level: slog.LevelInfo, Format: "json", Output: io.Discard}),
 		database: database, repositories: repositories, paths: paths, config: value, keyring: credentialStore,
-		activeRuns: make(map[string]context.CancelFunc), approvals: make(map[string]chan bool),
+		activeRuns: make(map[string]context.CancelFunc), approvals: make(map[string]*approvalGate),
 		backgroundCtx: backgroundCtx, backgroundCancel: backgroundCancel,
 		pluginSupervisors: make(map[string]*plugins.Supervisor), shuttingDown: true,
 	}

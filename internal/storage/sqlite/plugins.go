@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -138,7 +139,7 @@ func (repository *PluginRepository) List(ctx context.Context) ([]PluginRecord, e
 }
 
 func (repository *PluginRepository) SetEnabled(ctx context.Context, id domain.ID, enabled bool, updatedAt time.Time) error {
-	return repository.update(ctx, id, "enabled = ?, updated_at = ?", enabled, updatedAt.UTC().Format(time.RFC3339Nano))
+	return repository.update(ctx, id, "enabled = ?, updated_at = ?", enabled, formatTime(updatedAt))
 }
 
 func (repository *PluginRepository) SetRuntimeStatus(ctx context.Context, id domain.ID, status, lastError string, updatedAt time.Time) error {
@@ -146,7 +147,7 @@ func (repository *PluginRepository) SetRuntimeStatus(ctx context.Context, id dom
 	if status == "" {
 		return fmt.Errorf("%w: runtime status is required", domain.ErrInvalidArgument)
 	}
-	return repository.update(ctx, id, "runtime_status = ?, last_error = ?, updated_at = ?", status, lastError, updatedAt.UTC().Format(time.RFC3339Nano))
+	return repository.update(ctx, id, "runtime_status = ?, last_error = ?, updated_at = ?", status, lastError, formatTime(updatedAt))
 }
 
 func (repository *PluginRepository) Delete(ctx context.Context, id domain.ID) error {
@@ -248,7 +249,7 @@ func scanPlugin(row rowScanner) (PluginRecord, error) {
 		&plugin.ProtocolVersion, &enabled, &plugin.InstallPath, &plugin.ManifestJSON,
 		&plugin.SignatureStatus, &plugin.Checksum, &plugin.RuntimeStatus,
 		&plugin.LastError, &installedAt, &updatedAt); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return PluginRecord{}, domain.ErrNotFound
 		}
 		return PluginRecord{}, fmt.Errorf("scan plugin: %w", err)

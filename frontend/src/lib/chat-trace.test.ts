@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   aggregateChatEvent,
+  buildChatTimeline,
+  mergeStreamingMessages,
   normalizeRunTrace,
   splitRunTraceForTimeline,
   sortRunTraces,
 } from './chat-trace'
-import type { RunTrace } from './contracts'
+import type { ChatEvent, ChatMessage, RunTrace } from './contracts'
 
 describe('chat execution trace', () => {
   it('aggregates thinking, tools, approval, and completion into one timeline', () => {
@@ -100,6 +102,212 @@ describe('chat execution trace', () => {
     expect(fragments.map((fragment) => fragment.steps.some((step) => step.kind === 'tool'))).toEqual([false, true, true])
     expect(fragments.map((fragment) => fragment.startedAt)).toEqual([
       '2026-08-29T03:00:00Z', '2026-08-29T03:00:02Z', '2026-08-29T03:00:04Z',
+    ])
+  })
+})
+
+function message(id: string, role: ChatMessage['role'], createdAt: string, status: ChatMessage['status'] = 'complete'): ChatMessage {
+  return { id, role, content: id, status, createdAt }
+}
+
+describe('chat timeline assembly', () => {
+  const history: ChatMessage[] = [
+    message('user-1', 'user', '2026-08-29T10:00:00Z'),
+    message('assistant-1', 'assistant', '2026-08-29T10:00:05Z'),
+    message('user-2', 'user', '2026-08-29T10:00:06Z'),
+    // A tool message never becomes its own row; it is shown inside the trace.
+    message('tool-1', 'tool', '2026-08-29T10:00:07Z'),
+  ]
+
+  function traceFor(runId: string, startedAt: string, toolAt = '2026-08-29T10:00:08Z'): RunTrace {
+    return normalizeRunTrace({
+      id: `trace-${runId}`, runId, status: 'completed',
+      startedAt, finishedAt: toolAt,
+      toolCalls: [{ id: `call-${runId}`, name: 'filesystem.read', status: 'completed', startedAt: toolAt, finishedAt: toolAt }],
+    })!
+  }
+
+  it('orders messages and trace blocks chronologically and drops tool messages', () => {
+    const timeline = buildChatTimeline(history, [traceFor('run-1', '2026-08-29T10:00:01Z')])
+    expect(timeline.map((entry) => entry.key)).toEqual([
+      'user-1',
+      'trace-trace-run-1:thinking',
+      'assistant-1',
+      'user-2',
+      'trace-trace-run-1:tool:call-run-1',
+    ])
+  })
+
+  it('places a trace between the question and the answer that share its timestamp', () => {
+    const sameSecond = [
+      message('user-3', 'user', '2026-08-29T11:00:00Z'),
+      message('assistant-3', 'assistant', '2026-08-29T11:00:00Z'),
+    ]
+    const timeline = buildChatTimeline(sameSecond, [traceFor('run-2', '2026-08-29T11:00:00Z', '2026-08-29T11:00:02Z')])
+    expect(timeline.map((entry) => entry.key)).toEqual([
+      'user-3',
+      'trace-trace-run-2:thinking',
+      'assistant-3',
+      'trace-trace-run-2:tool:call-run-2',
+    ])
+  })
+
+  it('merges a streaming answer exactly where a full rebuild would place it', () => {
+    const traces = [traceFor('run-3', '2026-08-29T10:00:01Z')]
+    const streaming = [message('assistant-live', 'assistant', '2026-08-29T10:00:06Z', 'streaming')]
+
+    const merged = mergeStreamingMessages(buildChatTimeline(history, traces), streaming)
+    const rebuilt = buildChatTimeline([...history, ...streaming], traces)
+
+    expect(merged.map((entry) => entry.key)).toEqual(rebuilt.map((entry) => entry.key))
+  })
+
+  it('merges a late-arriving streaming answer after everything already shown', () => {
+    const traces = [traceFor('run-4', '2026-08-29T10:00:01Z')]
+    const streaming = [message('assistant-live', 'assistant', '2026-08-29T12:00:00Z', 'streaming')]
+    const merged = mergeStreamingMessages(buildChatTimeline(history, traces), streaming)
+    expect(merged.at(-1)?.key).toBe('assistant-live')
+    expect(merged).toHaveLength(buildChatTimeline(history, traces).length + 1)
+  })
+
+  it('returns the very same timeline when nothing is streaming', () => {
+    const base = buildChatTimeline(history, [])
+    expect(mergeStreamingMessages(base, [])).toBe(base)
+  })
+
+  it('keeps untouched traces and their split blocks referentially stable', () => {
+    const first = aggregateChatEvent([], { type: 'run.started', runId: 'run-a', createdAt: '2026-08-29T10:00:00Z' })
+    const withSecond = aggregateChatEvent(first, { type: 'run.started', runId: 'run-b', createdAt: '2026-08-29T10:00:10Z' })
+    const fragmentsBefore = splitRunTraceForTimeline(withSecond[0]!)
+
+    const afterEvent = aggregateChatEvent(withSecond, { type: 'run.completed', runId: 'run-b', status: 'complete', createdAt: '2026-08-29T10:00:11Z' })
+
+    // Only the trace the event belongs to may be replaced, and the fragments of
+    // the other one must survive identity comparison so `React.memo` can skip
+    // re-rendering it.
+    expect(afterEvent[0]).toBe(withSecond[0])
+    expect(afterEvent[1]).not.toBe(withSecond[1])
+    expect(splitRunTraceForTimeline(afterEvent[0]!)).toBe(fragmentsBefore)
+  })
+})
+
+/**
+ * Golden pin for M-43.
+ *
+ * The aggregation was optimized (memoized time keys, ordered fast paths, one
+ * normalization pass instead of a full `cloneStep` map per event). The whole
+ * point of that work is that it is *output-identical*, so the exact tree — step
+ * order, ids, derived statuses, derived labels, and the timestamps carried onto
+ * each step — is pinned here rather than left to be re-derived by whatever the
+ * implementation happens to do next. A faster reduction that changes any of
+ * this is a regression, not an optimization.
+ */
+describe('trace reduction golden shape (M-43)', () => {
+  const events = [
+    { type: 'run.started', runId: 'run-1', createdAt: '2026-08-29T10:00:00.000Z' },
+    { type: 'run.status', runId: 'run-1', status: 'thinking', createdAt: '2026-08-29T10:00:01.000Z' },
+    {
+      type: 'tool.started',
+      runId: 'run-1',
+      createdAt: '2026-08-29T10:00:02.000Z',
+      toolCall: { id: 'call-1', name: 'fs_write', status: 'running', args: { path: '/tmp/a.txt' }, startedAt: '2026-08-29T10:00:02.000Z' },
+    },
+    {
+      type: 'approval.required',
+      runId: 'run-1',
+      createdAt: '2026-08-29T10:00:03.000Z',
+      approval: { id: 'appr-1', toolCallId: 'call-1', title: 'Записать файл', explanation: 'детали', risk: 'high', scope: 'filesystem.write /tmp/a.txt' },
+    },
+    {
+      type: 'tool.updated',
+      runId: 'run-1',
+      createdAt: '2026-08-29T10:00:04.000Z',
+      toolCall: { id: 'call-1', name: 'fs_write', status: 'completed', args: { path: '/tmp/a.txt' }, result: 'ok', startedAt: '2026-08-29T10:00:02.000Z', finishedAt: '2026-08-29T10:00:04.000Z' },
+    },
+    { type: 'run.completed', runId: 'run-1', status: 'complete', createdAt: '2026-08-29T10:00:05.000Z' },
+  ] as ChatEvent[]
+
+  function reduceAll(): RunTrace[] {
+    let traces: RunTrace[] = []
+    for (const event of events) traces = aggregateChatEvent(traces, event)
+    return traces
+  }
+
+  it('reduces a tool run with approval into exactly this tree', () => {
+    const traces = reduceAll()
+    expect(traces).toHaveLength(1)
+    const trace = traces[0]!
+    expect({ runId: trace.runId, status: trace.status, startedAt: trace.startedAt, updatedAt: trace.updatedAt, finishedAt: trace.finishedAt }).toEqual({
+      runId: 'run-1',
+      status: 'complete',
+      startedAt: '2026-08-29T10:00:00.000Z',
+      updatedAt: '2026-08-29T10:00:05.000Z',
+      finishedAt: '2026-08-29T10:00:05.000Z',
+    })
+    expect(trace.steps.map((step) => ({
+      id: step.id,
+      kind: step.kind,
+      status: step.status,
+      label: (step as { label?: string }).label,
+      createdAt: step.createdAt,
+      finishedAt: step.finishedAt,
+    }))).toEqual([
+      // Thinking closes when the first tool starts, not when the run ends.
+      { id: 'run-1:thinking', kind: 'thinking', status: 'completed', label: 'Обработка завершена', createdAt: '2026-08-29T10:00:00.000Z', finishedAt: '2026-08-29T10:00:02.000Z' },
+      // The tool keeps its original createdAt across the update.
+      { id: 'run-1:tool:call-1', kind: 'tool', status: 'completed', label: undefined, createdAt: '2026-08-29T10:00:02.000Z', finishedAt: '2026-08-29T10:00:04.000Z' },
+      // A completed tool call resolves its approval to `approved`.
+      { id: 'run-1:approval:appr-1', kind: 'approval', status: 'approved', label: undefined, createdAt: '2026-08-29T10:00:03.000Z', finishedAt: '2026-08-29T10:00:04.000Z' },
+      { id: 'run-1:completion', kind: 'completion', status: 'complete', label: 'Запуск завершён', createdAt: '2026-08-29T10:00:05.000Z', finishedAt: '2026-08-29T10:00:05.000Z' },
+    ])
+  })
+
+  it('carries the tool payload through unchanged', () => {
+    const step = reduceAll()[0]!.steps.find((candidate) => candidate.kind === 'tool')
+    expect(step?.kind).toBe('tool')
+    if (step?.kind !== 'tool') return
+    expect(step.toolCall).toEqual({
+      id: 'call-1',
+      name: 'fs_write',
+      status: 'completed',
+      args: { path: '/tmp/a.txt' },
+      result: 'ok',
+      startedAt: '2026-08-29T10:00:02.000Z',
+      finishedAt: '2026-08-29T10:00:04.000Z',
+    })
+  })
+
+  it('splits into exactly these rendered blocks', () => {
+    const fragments = reduceAll().flatMap(splitRunTraceForTimeline)
+    expect(fragments.map((fragment) => ({ id: fragment.id, steps: fragment.steps.map((step) => step.id) }))).toEqual([
+      { id: 'trace:run-1:thinking', steps: ['run-1:thinking'] },
+      // The tool block reopens a thinking step of its own before the call.
+      { id: 'trace:run-1:tool:call-1', steps: ['run-1:thinking:call-1', 'run-1:tool:call-1', 'run-1:approval:appr-1'] },
+    ])
+  })
+
+  it('never writes through the traces it was handed', () => {
+    // Dropping the defensive `steps.map(cloneStep)` on every event is only safe
+    // while nothing mutates a step in place. Freezing makes an in-place write
+    // throw in strict mode rather than silently corrupting shared state.
+    const deepFreeze = (value: unknown): void => {
+      if (!value || typeof value !== 'object' || Object.isFrozen(value)) return
+      Object.freeze(value)
+      for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested)
+    }
+
+    let traces: RunTrace[] = []
+    for (const event of events) {
+      deepFreeze(traces)
+      traces = aggregateChatEvent(traces, event)
+    }
+
+    // The frozen inputs still produced the golden tree.
+    expect(traces[0]?.steps.map((step) => step.id)).toEqual([
+      'run-1:thinking',
+      'run-1:tool:call-1',
+      'run-1:approval:appr-1',
+      'run-1:completion',
     ])
   })
 })

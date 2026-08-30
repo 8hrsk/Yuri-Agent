@@ -18,11 +18,11 @@ func TestAgentRepositoryCreateGetAndList(t *testing.T) {
 	defer database.Close()
 	repository := NewAgentRepository(database)
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	first, err := domain.NewAgentProfile("agent_yuri", "Юри", 21, "female", "Любит лаконичность.", now)
+	first, err := domain.NewAgentProfileWithBackstory("agent_yuri", "Юри", 21, "female", "Любит лаконичность.", "Когда-то я жила среди старых книг.", now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := domain.NewAgentProfile("agent_mira", "Мира", 24, "female", "Предпочитает анализ.", now.Add(time.Second))
+	second, err := domain.NewAgentProfileWithBackstory("agent_mira", "Мира", 24, "female", "Предпочитает анализ.", "", now.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestAgentRepositoryCreateGetAndList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Name != first.Name || got.Preferences != first.Preferences || !got.CreatedAt.Equal(first.CreatedAt) {
+	if got.Name != first.Name || got.Preferences != first.Preferences || got.Backstory != first.Backstory || !got.CreatedAt.Equal(first.CreatedAt) {
 		t.Fatalf("Get() = %#v, want %#v", got, first)
 	}
 	profiles, err := repository.List(context.Background())
@@ -48,6 +48,9 @@ func TestAgentRepositoryCreateGetAndList(t *testing.T) {
 	}
 	if len(profiles) != 2 || profiles[0].ID != first.ID || profiles[1].ID != second.ID {
 		t.Fatalf("List() = %#v", profiles)
+	}
+	if profiles[0].Backstory != first.Backstory || profiles[1].Backstory != "" {
+		t.Fatalf("List() backstories = %#v", profiles)
 	}
 }
 

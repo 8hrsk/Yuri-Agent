@@ -19,6 +19,10 @@ const (
 	ErrorKindDecode        ErrorKind = "decode"
 	ErrorKindStream        ErrorKind = "stream"
 	ErrorKindResponseLimit ErrorKind = "response_limit"
+	// ErrorKindTimeout marks an abort by one of the adapter's own budgets:
+	// the first-byte deadline or the stream idle deadline. It is distinct from
+	// a caller cancellation, which keeps its context error.
+	ErrorKindTimeout ErrorKind = "timeout"
 )
 
 // ProviderError deliberately contains status and a short sanitized message,

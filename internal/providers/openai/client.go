@@ -90,19 +90,26 @@ func (c *Client) Start(ctx context.Context, request agent.ModelRequest) (agent.M
 		return nil, providerError(ErrorKindRequest, "start", 0, fmt.Sprintf("request exceeds %d bytes", c.config.MaxRequestBytes), false, 0)
 	}
 
-	var streamCtx context.Context
-	var cancel context.CancelFunc
-	if c.config.Timeout > 0 {
-		streamCtx, cancel = context.WithTimeout(ctx, c.config.Timeout)
-	} else {
-		streamCtx, cancel = context.WithCancel(ctx)
-	}
+	// The request context must outlive the request itself because the SSE body
+	// is read through it. A plain deadline would therefore kill a healthy long
+	// generation mid-stream, so the budget is split: Timeout covers connect,
+	// request, and first byte; StreamIdleTimeout covers the silence between
+	// chunks afterwards and is re-armed by every byte received.
+	streamCtx, cancel := context.WithCancel(ctx)
+	deadline := newStreamDeadline(cancel, c.config.Timeout, c.config.StreamIdleTimeout)
 	response, err := c.do(streamCtx, style, body)
 	if err != nil {
+		deadline.stop()
 		cancel()
+		// A caller-side cancellation keeps its context error so the runtime can
+		// still tell an interrupted run from a provider timeout.
+		if contextError(ctx) == nil && deadline.expired() {
+			return nil, deadline.err()
+		}
 		return nil, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		deadline.stop()
 		cancel()
 		defer response.Body.Close()
 		message, readErr := readErrorBody(response.Body, c.config.MaxResponseBytes)
@@ -113,13 +120,17 @@ func (c *Client) Start(ctx context.Context, request agent.ModelRequest) (agent.M
 		return nil, providerError(ErrorKindHTTP, "start", response.StatusCode, message, isRetryableStatus(response.StatusCode), retryAfter, c.config.APIKey)
 	}
 
+	// From here the deadline owns the context: every byte read re-arms the idle
+	// budget, and stream.Close calls release, which both disarms the watchdog
+	// and cancels the context on every exit path.
+	response.Body = &activityBody{body: response.Body, deadline: deadline}
 	if isEventStream(response.Header.Get("Content-Type")) {
-		return newSSEStream(response, cancel, style, c.config.MaxResponseBytes, c.config.MaxEvents, c.config.MaxLineBytes, c.config.APIKey), nil
+		return newSSEStream(response, deadline.release, style, c.config.MaxResponseBytes, c.config.MaxEvents, c.config.MaxLineBytes, c.config.APIKey), nil
 	}
 	// A number of OpenAI-compatible gateways ignore stream=true and return a
 	// normal JSON response. Convert it to the same normalized stream contract
 	// instead of leaking a decoder detail to the runtime.
-	return newJSONStream(response, cancel, style, c.config.MaxResponseBytes, c.config.APIKey), nil
+	return newJSONStream(response, deadline.release, style, c.config.MaxResponseBytes, c.config.APIKey), nil
 }
 
 func (c *Client) marshalRequest(request agent.ModelRequest) ([]byte, APIStyle, error) {
@@ -205,9 +216,12 @@ func (c *Client) do(ctx context.Context, style APIStyle, body []byte) (*http.Res
 }
 
 func waitBackoff(ctx context.Context, attempt int, config Config, retryAfter time.Duration) error {
+	// An explicit Retry-After is a server instruction, not adapter policy: it is
+	// capped by MaxRetryAfter rather than by MaxBackoff, because retrying before
+	// the server allowed guarantees another rejection and burns an attempt.
 	delay := retryAfter
-	if delay > config.MaxBackoff {
-		delay = config.MaxBackoff
+	if ceiling := config.MaxRetryAfter; ceiling > 0 && delay > ceiling {
+		delay = ceiling
 	}
 	if delay <= 0 {
 		delay = config.InitialBackoff

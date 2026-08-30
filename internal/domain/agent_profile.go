@@ -11,6 +11,7 @@ const (
 	AgentNameMaxRunes        = 64
 	AgentGenderMaxRunes      = 64
 	AgentPreferencesMaxRunes = 2000
+	AgentBackstoryMaxRunes   = 12000
 	AgentMinimumAge          = 1
 	AgentMaximumAge          = 200
 )
@@ -25,14 +26,23 @@ type AgentProfile struct {
 	Age         int       `json:"age"`
 	Gender      string    `json:"gender"`
 	Preferences string    `json:"preferences,omitempty"`
+	Backstory   string    `json:"backstory,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func NewAgentProfile(id ID, name string, age int, gender, preferences string, now time.Time) (AgentProfile, error) {
+	return NewAgentProfileWithBackstory(id, name, age, gender, preferences, "", now)
+}
+
+// NewAgentProfileWithBackstory creates an owner-controlled agent identity with
+// an optional fictional autobiographical seed. The old constructor remains a
+// compatibility wrapper for callers that do not provide a backstory.
+func NewAgentProfileWithBackstory(id ID, name string, age int, gender, preferences, backstory string, now time.Time) (AgentProfile, error) {
 	profile := AgentProfile{
 		ID: id, Name: strings.TrimSpace(name), Age: age, Gender: strings.TrimSpace(gender),
-		Preferences: strings.TrimSpace(preferences), CreatedAt: now.UTC(), UpdatedAt: now.UTC(),
+		Preferences: strings.TrimSpace(preferences), Backstory: strings.TrimSpace(backstory),
+		CreatedAt: now.UTC(), UpdatedAt: now.UTC(),
 	}
 	if err := profile.Validate(); err != nil {
 		return AgentProfile{}, err
@@ -59,6 +69,10 @@ func (p AgentProfile) Validate() error {
 	preferences := strings.TrimSpace(p.Preferences)
 	if utf8.RuneCountInString(preferences) > AgentPreferencesMaxRunes || strings.ContainsRune(preferences, '\x00') {
 		return fmt.Errorf("%w: agent preferences exceed %d characters", ErrInvalidArgument, AgentPreferencesMaxRunes)
+	}
+	backstory := strings.TrimSpace(p.Backstory)
+	if utf8.RuneCountInString(backstory) > AgentBackstoryMaxRunes || strings.ContainsRune(backstory, '\x00') {
+		return fmt.Errorf("%w: agent backstory exceeds %d characters", ErrInvalidArgument, AgentBackstoryMaxRunes)
 	}
 	if p.CreatedAt.IsZero() || p.UpdatedAt.IsZero() || p.UpdatedAt.Before(p.CreatedAt) {
 		return fmt.Errorf("%w: invalid agent profile timestamps", ErrInvalidArgument)

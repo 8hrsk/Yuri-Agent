@@ -1,0 +1,38 @@
+:root {
+  color: #f5f4fb;
+  background: var(--canvas);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizelegibility;
+  -webkit-font-smoothing: antialiased;
+
+  --canvas: #0e0f18;
+  --surface: #151624;
+  --surface-strong: #1b1b2c;
+  --surface-soft: #202035;
+  --line: rgba(232, 230, 255, 0.1);
+  --line-strong: rgba(232, 230, 255, 0.18);
+  --text: #f4f2fb;
+  --muted: #9b99ad;
+  --quiet: #68677a;
+  --accent: rgb(var(--accent-rgb));
+  --accent-light: #d5c8ff;
+  --mint: rgb(var(--mint-rgb));
+  --rose: rgb(var(--rose-rgb));
+
+  /*
+   * Channel triplets for the three brand hues. Every translucent tint in the
+   * sheet is one of these hues at some alpha, and the alpha deliberately stays
+   * at the call site: the sheet uses 41 distinct accent alphas, 26 rose and 23
+   * mint, and collapsing them onto a shared scale would change colours rather
+   * than name them. --accent / --mint / --rose above are derived from these so
+   * a hue has exactly one definition.
+   */
+  --accent-rgb: 185, 165, 255;
+  --mint-rgb: 147, 231, 200;
+  --rose-rgb: 255, 159, 185;
+
+  /* The near-invisible neutral fill used for inset cards and panels. */
+  --surface-wash: rgba(255, 255, 255, 0.018);
+}
+

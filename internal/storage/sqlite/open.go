@@ -47,7 +47,14 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("ping sqlite: %w", err)
 	}
 	if existing {
-		if err := IntegrityCheck(ctx, database); err != nil {
+		// quick_check, not integrity_check: the full check reads and verifies
+		// every index entry and grows with the size of the database, so it
+		// turned every start into a multi-second scan. quick_check finds the
+		// page-level corruption that makes a database unusable, which is what
+		// startup has to refuse to open. The full check stays available to
+		// callers through IntegrityCheck/InspectIntegrity for an explicit
+		// repair or verify run.
+		if err := startupIntegrityCheck(ctx, database); err != nil {
 			database.Close()
 			return nil, fmt.Errorf("startup sqlite integrity check: %w", err)
 		}
@@ -117,6 +124,16 @@ func sqliteFileDSN(path string, readOnly bool) string {
 		query.Add("_pragma", "busy_timeout(5000)")
 		query.Add("_pragma", "foreign_keys(1)")
 		query.Add("_pragma", "journal_mode(WAL)")
+		// synchronous is set explicitly because the SQLite default in WAL mode
+		// is FULL, which fsyncs on every commit. This database commits on
+		// paths that are not user-visible writes at all - the recall "touch",
+		// every scheduler lease renewal - so FULL is the write-throughput
+		// ceiling of the whole storage layer. NORMAL keeps commits durable
+		// across a process or application crash and risks only the most recent
+		// transactions on an OS crash or power loss, which is the accepted
+		// trade-off for a local-first desktop app that also keeps
+		// pre-migration snapshots and user backups.
+		query.Add("_pragma", "synchronous(NORMAL)")
 	}
 	databaseURL.RawQuery = query.Encode()
 	return databaseURL.String()

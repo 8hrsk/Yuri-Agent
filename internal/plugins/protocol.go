@@ -29,6 +29,9 @@ const (
 	MessageShutdown        MessageType = "shutdown"
 	MessageShutdownResult  MessageType = "shutdown_result"
 	MessageError           MessageType = "error"
+	// MessageCancel is a notification: the host asks the plugin to abandon one
+	// in-flight request. It is never answered and never carries reply_to.
+	MessageCancel MessageType = "request.cancel"
 )
 
 // Method names are retained for the host API while mapping to the SDK's
@@ -38,7 +41,7 @@ const (
 	MethodHealth    = string(MessageHealth)
 	MethodToolCall  = string(MessageToolInvoke)
 	MethodShutdown  = string(MessageShutdown)
-	MethodCancel    = "request.cancel"
+	MethodCancel    = string(MessageCancel)
 )
 
 func (t MessageType) Valid() bool {
@@ -47,7 +50,7 @@ func (t MessageType) Valid() bool {
 		MessageHealth, MessageHealthResult,
 		MessageToolInvoke, MessageToolResult,
 		MessageEvent, MessageShutdown, MessageShutdownResult,
-		MessageError:
+		MessageError, MessageCancel:
 		return true
 	default:
 		return false
@@ -178,6 +181,8 @@ func requestType(method string) (MessageType, bool) {
 		return MessageToolInvoke, true
 	case MethodShutdown:
 		return MessageShutdown, true
+	case MethodCancel:
+		return MessageCancel, true
 	default:
 		return "", false
 	}
@@ -218,7 +223,7 @@ func (e Envelope) Validate() error {
 		return fmt.Errorf("%w: error code and message are required", ErrInvalidProtocol)
 	}
 	switch e.Type {
-	case MessageHandshake, MessageHealth, MessageToolInvoke, MessageShutdown:
+	case MessageHandshake, MessageHealth, MessageToolInvoke, MessageShutdown, MessageCancel:
 		if e.ReplyTo != "" || e.Error != nil {
 			return fmt.Errorf("%w: request cannot contain reply_to or error", ErrInvalidProtocol)
 		}

@@ -80,7 +80,7 @@ func TestFilesystemWriteApprovalAuditFlow(t *testing.T) {
 				t.Fatal(err)
 			}
 			bridge := &Bridge{
-				database: database, repositories: repositories, approvals: make(map[string]chan bool),
+				database: database, repositories: repositories, approvals: make(map[string]*approvalGate),
 				pluginSupervisors: make(map[string]*plugins.Supervisor),
 				config:            config.Config{AllowedDirectories: []string{root}},
 			}

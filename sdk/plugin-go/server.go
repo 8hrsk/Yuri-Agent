@@ -24,12 +24,20 @@ func (f ToolHandlerFunc) Invoke(ctx context.Context, request ToolInvokeRequest, 
 	return f(ctx, request, grants)
 }
 
+// DefaultMaxConcurrentTools bounds how many tool invocations a plugin runs at
+// once. Tools are dispatched asynchronously so the read loop stays free to
+// accept request.cancel while a handler is still running; the bound keeps an
+// abusive host from spawning unbounded goroutines.
+const DefaultMaxConcurrentTools = 16
+
 type ServerOptions struct {
 	MaxFrameBytes    int
 	ToolTimeout      time.Duration
 	HandshakeTimeout time.Duration
-	Now              func() time.Time
-	Logger           func(string, ...any)
+	// MaxConcurrentTools bounds concurrent tool invocations.
+	MaxConcurrentTools int
+	Now                func() time.Time
+	Logger             func(string, ...any)
 }
 
 func (o ServerOptions) withDefaults() ServerOptions {
@@ -41,6 +49,9 @@ func (o ServerOptions) withDefaults() ServerOptions {
 	}
 	if o.HandshakeTimeout <= 0 {
 		o.HandshakeTimeout = DefaultHandshakeTimeout
+	}
+	if o.MaxConcurrentTools <= 0 {
+		o.MaxConcurrentTools = DefaultMaxConcurrentTools
 	}
 	if o.Now == nil {
 		o.Now = time.Now
@@ -60,11 +71,14 @@ type Server struct {
 	handler  ToolHandler
 	options  ServerOptions
 
-	mu      sync.RWMutex
-	writer  *LockedWriter
-	ready   bool
-	stopped bool
-	grants  []PermissionGrant
+	mu       sync.RWMutex
+	writer   *LockedWriter
+	ready    bool
+	stopped  bool
+	grants   []PermissionGrant
+	inflight map[string]context.CancelFunc
+
+	running sync.WaitGroup
 }
 
 func NewServer(manifest Manifest, handler ToolHandler, options ServerOptions) (*Server, error) {
@@ -94,6 +108,10 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	}
 	s.writer = NewLockedWriter(out)
 	s.mu.Unlock()
+
+	// Every in-flight handler is cancelled and awaited before Serve returns,
+	// so no goroutine can write to out after the session has ended.
+	defer s.stopInflight()
 
 	reader := NewFrameReader(in, s.options.MaxFrameBytes)
 	for {
@@ -137,6 +155,11 @@ func (s *Server) handle(parent context.Context, message Envelope) (bool, error) 
 			return false, s.writeError(message.ID, "not_ready", ErrNotReady.Error(), false)
 		}
 		return false, s.handleTool(parent, message)
+	case MessageCancel:
+		// A cancel is a notification: it is never answered, and an unknown
+		// request id is not an error (the response may already be on the wire).
+		s.handleCancel(message)
+		return false, nil
 	case MessageShutdown:
 		if !ready {
 			return false, s.writeError(message.ID, "not_ready", ErrNotReady.Error(), false)
@@ -190,6 +213,68 @@ func (s *Server) handleHealth(message Envelope) error {
 	})
 }
 
+func (s *Server) handleCancel(message Envelope) {
+	var request CancelRequest
+	if err := DecodePayload(message, &request); err != nil {
+		s.options.Logger("plugin server: malformed cancel: %v", err)
+		return
+	}
+	if err := ValidateID(request.RequestID); err != nil {
+		s.options.Logger("plugin server: invalid cancel request_id: %v", err)
+		return
+	}
+	s.mu.Lock()
+	cancel := s.inflight[request.RequestID]
+	s.mu.Unlock()
+	if cancel == nil {
+		return
+	}
+	s.options.Logger("plugin server: cancelling request %s", request.RequestID)
+	cancel()
+}
+
+// registerInflight records the cancel function for a request. It reports false
+// when the id is already in flight or the concurrency bound is reached.
+func (s *Server) registerInflight(id string, cancel context.CancelFunc) (bool, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.inflight == nil {
+		s.inflight = make(map[string]context.CancelFunc)
+	}
+	if _, exists := s.inflight[id]; exists {
+		return false, "duplicate_request"
+	}
+	if len(s.inflight) >= s.options.MaxConcurrentTools {
+		return false, "too_many_requests"
+	}
+	s.inflight[id] = cancel
+	return true, ""
+}
+
+func (s *Server) releaseInflight(id string) {
+	s.mu.Lock()
+	cancel := s.inflight[id]
+	delete(s.inflight, id)
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// stopInflight cancels every running handler and waits for it to return.
+func (s *Server) stopInflight() {
+	s.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.inflight))
+	for _, cancel := range s.inflight {
+		cancels = append(cancels, cancel)
+	}
+	s.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	s.running.Wait()
+}
+
 func (s *Server) handleTool(parent context.Context, message Envelope) error {
 	var request ToolInvokeRequest
 	if err := DecodePayload(message, &request); err != nil {
@@ -215,21 +300,55 @@ func (s *Server) handleTool(parent context.Context, message Envelope) error {
 		}
 	}
 	ctx, cancel := context.WithTimeout(parent, deadline)
-	defer cancel()
+	accepted, reason := s.registerInflight(message.ID, cancel)
+	if !accepted {
+		cancel()
+		return s.writeError(message.ID, reason, "the plugin cannot accept this request right now", reason == "too_many_requests")
+	}
 	s.mu.RLock()
 	grants := cloneGrants(s.grants)
 	s.mu.RUnlock()
-	result, err := s.handler.Invoke(ctx, request, grants)
-	if err != nil {
-		result = ToolResult{OK: false, Error: &RPCError{Code: "tool_failed", Message: redactError(err.Error()), Retryable: false}}
+
+	// The handler runs off the read loop so a long tool call cannot stop the
+	// plugin from observing request.cancel, health or shutdown.
+	s.running.Add(1)
+	go func() {
+		defer s.running.Done()
+		defer s.releaseInflight(message.ID)
+		result, err := s.handler.Invoke(ctx, request, grants)
+		if err != nil {
+			result = toolFailure(err)
+		}
+		if err := validateToolResult(result); err != nil {
+			if writeErr := s.writeError(message.ID, "invalid_tool_result", err.Error(), false); writeErr != nil {
+				s.options.Logger("plugin server: write tool error: %v", writeErr)
+			}
+			return
+		}
+		if writeErr := s.writeResponse(MessageToolResult, message.ID, result); writeErr != nil {
+			s.options.Logger("plugin server: write tool result: %v", writeErr)
+		}
+	}()
+	return nil
+}
+
+func toolFailure(err error) ToolResult {
+	code := "tool_failed"
+	retryable := false
+	switch {
+	case errors.Is(err, context.Canceled):
+		code = "cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		code = "deadline_exceeded"
+		retryable = true
 	}
-	if err := validateToolResult(result); err != nil {
-		return s.writeError(message.ID, "invalid_tool_result", err.Error(), false)
-	}
-	return s.writeResponse(MessageToolResult, message.ID, result)
+	return ToolResult{OK: false, Error: &RPCError{Code: code, Message: redactError(err.Error()), Retryable: retryable}}
 }
 
 func (s *Server) handleShutdown(message Envelope) error {
+	// Every in-flight handler is cancelled and awaited first, so shutdown_result
+	// is the last frame the host sees on this session.
+	s.stopInflight()
 	s.mu.Lock()
 	s.stopped = true
 	s.ready = false

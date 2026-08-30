@@ -205,6 +205,12 @@ func (b *Bridge) startPeerDialogue(dialogue domain.PeerDialogue, backend agent.M
 			delete(b.peerDialogueRuns, string(dialogue.ID))
 			b.mu.Unlock()
 		}()
+		// Registered last so it unwinds first: a panic inside the dialogue
+		// fails that one dialogue and still releases the cancel func, the
+		// registry slot and the shutdown wait group below.
+		defer b.recoverBridgeGoroutine("peer_dialogue", func(err error) {
+			b.failPeerDialogueByID(dialogue.ID, dialogue, err)
+		})
 		b.executePeerDialogue(runCtx, dialogue, backend, model)
 	}()
 	return nil
@@ -226,6 +232,13 @@ func (b *Bridge) executePeerDialogue(ctx context.Context, dialogue domain.PeerDi
 		messages, err := b.repositories.PeerDialogueMessages.ListByDialogue(ctx, dialogue.ID, dialogue.InitiatorAgentID)
 		if err != nil {
 			b.failPeerDialogue(dialogue, err)
+			return
+		}
+		// The dialogue and its opening message are written in one transaction,
+		// so an empty list means the durable state was damaged out from under
+		// this run. Fail the one dialogue rather than indexing into nothing.
+		if len(messages) == 0 {
+			b.failPeerDialogue(dialogue, errors.New("peer dialogue has no messages"))
 			return
 		}
 		last := messages[len(messages)-1]
@@ -380,6 +393,20 @@ func (b *Bridge) finishCancelledOrFailedPeerDialogue(dialogue domain.PeerDialogu
 	b.failPeerDialogue(dialogue, cause)
 }
 
+// failPeerDialogueByID reloads the dialogue before failing it. A recovery path
+// only holds the snapshot the goroutine started from; the durable row has since
+// advanced to running, and saving the stale copy would lose the failure to an
+// optimistic-version conflict, leaving the dialogue running forever.
+func (b *Bridge) failPeerDialogueByID(id domain.ID, fallback domain.PeerDialogue, cause error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	current := fallback
+	if fresh, err := b.repositories.PeerDialogues.Get(ctx, id); err == nil {
+		current = fresh
+	}
+	b.failPeerDialogue(current, cause)
+}
+
 func (b *Bridge) failPeerDialogue(dialogue domain.PeerDialogue, cause error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -421,9 +448,37 @@ func (b *Bridge) ListPeerDialogues(input PeerDialogueListInput) ([]PeerDialogueV
 	if err != nil {
 		return nil, err
 	}
+	// Three queries for the whole page, not three per dialogue.
+	//
+	// This loop used to cost 1 + 3N: a turn read for each dialogue and an agent
+	// read for each of its two participants. At the page limit of 50 that was
+	// 151 round-trips to render 50 rows, every one of them serialized against
+	// every writer in the process — the pool is deliberately a single
+	// connection, so an N+1 here is not just slow, it blocks writes.
+	dialogueIDs := make([]domain.ID, 0, len(dialogues))
+	agentIDs := make([]domain.ID, 0, 2*len(dialogues))
+	for _, dialogue := range dialogues {
+		dialogueIDs = append(dialogueIDs, dialogue.ID)
+		agentIDs = append(agentIDs, dialogue.InitiatorAgentID, dialogue.PeerAgentID)
+	}
+	messagesByDialogue, err := b.repositories.PeerDialogueMessages.ListByDialogues(ctx, dialogueIDs, participantID)
+	if err != nil {
+		return nil, err
+	}
+	agents, err := b.repositories.Agents.ListByIDs(ctx, agentIDs)
+	if err != nil {
+		return nil, err
+	}
 	views := make([]PeerDialogueView, 0, len(dialogues))
 	for _, dialogue := range dialogues {
-		view, err := b.peerDialogueView(ctx, participantID, dialogue)
+		// Absent, rather than present-and-empty, is "you are not a party to
+		// this dialogue" — the outcome the scoped read refuses to conflate with
+		// a dialogue that has lost its turns.
+		messages, scoped := messagesByDialogue[dialogue.ID]
+		if !scoped {
+			return nil, fmt.Errorf("%w: peer dialogue %s is not visible to the active agent", domain.ErrNotFound, dialogue.ID)
+		}
+		view, err := peerDialogueView(dialogue, agents, messages)
 		if err != nil {
 			return nil, err
 		}
@@ -432,18 +487,17 @@ func (b *Bridge) ListPeerDialogues(input PeerDialogueListInput) ([]PeerDialogueV
 	return views, nil
 }
 
-func (b *Bridge) peerDialogueView(ctx context.Context, participantID domain.ID, dialogue domain.PeerDialogue) (PeerDialogueView, error) {
-	initiator, err := b.repositories.Agents.Get(ctx, dialogue.InitiatorAgentID)
-	if err != nil {
-		return PeerDialogueView{}, err
+// peerDialogueView projects one dialogue against already-read agents and turns.
+// It takes them rather than reading them so the list above can fetch a whole
+// page's worth in one statement each instead of three per dialogue.
+func peerDialogueView(dialogue domain.PeerDialogue, agents map[domain.ID]domain.AgentProfile, messages []domain.PeerDialogueMessage) (PeerDialogueView, error) {
+	initiator, ok := agents[dialogue.InitiatorAgentID]
+	if !ok {
+		return PeerDialogueView{}, fmt.Errorf("%w: agent profile %s", domain.ErrNotFound, dialogue.InitiatorAgentID)
 	}
-	peer, err := b.repositories.Agents.Get(ctx, dialogue.PeerAgentID)
-	if err != nil {
-		return PeerDialogueView{}, err
-	}
-	messages, err := b.repositories.PeerDialogueMessages.ListByDialogue(ctx, dialogue.ID, participantID)
-	if err != nil {
-		return PeerDialogueView{}, err
+	peer, ok := agents[dialogue.PeerAgentID]
+	if !ok {
+		return PeerDialogueView{}, fmt.Errorf("%w: agent profile %s", domain.ErrNotFound, dialogue.PeerAgentID)
 	}
 	names := map[domain.ID]string{initiator.ID: initiator.Name, peer.ID: peer.Name}
 	view := PeerDialogueView{

@@ -1,0 +1,49 @@
+{
+  "format": "yuri-encrypted-backup",
+  "version": 1,
+  "created_at": "2026-08-30T00:23:43.860126Z",
+  "database": {
+    "path": "database.sqlite3",
+    "size": 8192,
+    "sha256": "7724497d4ecce4445252850694046b02b8270dd01265411e8b8023dfb40c885f"
+  },
+  "config": {
+    "path": "config.json",
+    "size": 30,
+    "sha256": "88c99931fba17f86dcc61b8baa12a41f45984d8f5703ae57006ea348b599f4e8"
+  },
+  "blobs": [
+    {
+      "path": "blobs/note.bin",
+      "size": 19,
+      "sha256": "465a05bbcf9f9513fee2d750596c44d5d0810d5f5e8ec075931b3bb32f420245"
+    },
+    {
+      "path": "blobs/second.bin",
+      "size": 18,
+      "sha256": "25f1d922131b244321dabdd26b4c2f9be206db6aad61b900c24bc80e8c6937db"
+    }
+  ],
+  "files": [
+    {
+      "path": "blobs/note.bin",
+      "size": 19,
+      "sha256": "465a05bbcf9f9513fee2d750596c44d5d0810d5f5e8ec075931b3bb32f420245"
+    },
+    {
+      "path": "blobs/second.bin",
+      "size": 18,
+      "sha256": "25f1d922131b244321dabdd26b4c2f9be206db6aad61b900c24bc80e8c6937db"
+    },
+    {
+      "path": "config.json",
+      "size": 30,
+      "sha256": "88c99931fba17f86dcc61b8baa12a41f45984d8f5703ae57006ea348b599f4e8"
+    },
+    {
+      "path": "database.sqlite3",
+      "size": 8192,
+      "sha256": "7724497d4ecce4445252850694046b02b8270dd01265411e8b8023dfb40c885f"
+    }
+  ]
+}

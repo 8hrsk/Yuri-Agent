@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -128,5 +129,87 @@ func TestRejectsOversizedMessageAndRedactsProtocolErrorData(t *testing.T) {
 	err := (&rpcError{Code: -1, Message: "denied", Data: json.RawMessage(`{"token":"secret"}`)}).Error()
 	if strings.Contains(err, "secret") {
 		t.Fatalf("protocol error leaked data: %s", err)
+	}
+}
+
+// TestReadLoopSurvivesUnconsumedNotifications pins the M-18 fix: between turns
+// nothing drains the shared event channel, and a blocking send would stall the
+// single read loop that also resolves RPC replies.
+func TestReadLoopSurvivesUnconsumedNotifications(t *testing.T) {
+	serverInput, clientInput := io.Pipe()
+	clientOutput, serverOutput := io.Pipe()
+	client := newClient(clientInput, clientOutput, 0)
+	t.Cleanup(func() {
+		_ = serverInput.Close()
+		_ = serverOutput.Close()
+		_ = client.Close()
+	})
+
+	var declines atomic.Int64
+	go func() {
+		scanner := bufio.NewScanner(serverInput)
+		scanner.Buffer(make([]byte, 64*1024), 1<<20)
+		for scanner.Scan() {
+			var message map[string]any
+			if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
+				return
+			}
+			if result, ok := message["result"].(map[string]any); ok && result["decision"] == "decline" {
+				declines.Add(1)
+				continue
+			}
+			method, _ := message["method"].(string)
+			if _, hasID := message["id"]; !hasID || method == "" {
+				continue
+			}
+			encoded, _ := json.Marshal(map[string]any{"id": message["id"], "result": map[string]any{}})
+			if _, err := serverOutput.Write(append(encoded, '\n')); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Far more events than the 128-slot buffer, with no consumer attached.
+	const flood = 512
+	flooded := make(chan error, 1)
+	go func() {
+		for index := 0; index < flood; index++ {
+			line := "{\"method\":\"item/agentMessage/delta\",\"params\":{\"delta\":\"x\"}}\n"
+			if index%2 == 0 {
+				line = "{\"id\":" + strconv.Itoa(1000+index) + ",\"method\":\"item/commandExecution/requestApproval\",\"params\":{}}\n"
+			}
+			if _, err := io.WriteString(serverOutput, line); err != nil {
+				flooded <- err
+				return
+			}
+		}
+		flooded <- nil
+	}()
+	select {
+	case err := <-flooded:
+		if err != nil {
+			t.Fatalf("flood write: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("read loop blocked on an unconsumed event channel")
+	}
+
+	// The read loop must still be parsing responses after the flood.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := client.Request(ctx, "account/read", nil, nil); err != nil {
+		t.Fatalf("request after unconsumed flood: %v", err)
+	}
+	if dropped := client.DroppedEvents(); dropped == 0 {
+		t.Fatal("expected dropped notifications to be reported")
+	}
+	// Dropped server-initiated requests are declined so the app server is never
+	// left waiting for a response nobody will produce.
+	deadline := time.Now().Add(2 * time.Second)
+	for declines.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if declines.Load() == 0 {
+		t.Fatal("dropped server requests were not declined")
 	}
 }

@@ -15,12 +15,18 @@ import (
 // Conversation is the durable transcript container.  The transcript remains
 // authoritative even when a later context snapshot summarizes it.
 type Conversation struct {
-	ID         domain.ID  `json:"id"`
-	AgentID    domain.ID  `json:"agent_id"`
-	Title      string     `json:"title"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	ArchivedAt *time.Time `json:"archived_at,omitempty"`
+	ID      domain.ID `json:"id"`
+	AgentID domain.ID `json:"agent_id"`
+	Title   string    `json:"title"`
+	// TitleSource records who owns the current title. The repository treats an
+	// empty value as a legacy row and normalizes it before writing. A generated
+	// title is replaceable only while the source is "default"; an owner rename
+	// is an explicit "user" source and is therefore never overwritten by the
+	// asynchronous title worker.
+	TitleSource string     `json:"title_source"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	ArchivedAt  *time.Time `json:"archived_at,omitempty"`
 }
 
 // Message is an immutable transcript entry. ProviderMeta is redacted provider
@@ -145,18 +151,41 @@ func requireDatabase(database *sql.DB) error {
 	return nil
 }
 
+// sqliteTimeLayout is the canonical on-disk timestamp encoding. SQLite compares
+// and orders TEXT timestamps byte by byte, so the encoding has to be
+// order-preserving: every field fixed width, always UTC, always the same
+// trailing 'Z'. time.RFC3339Nano is not — it drops trailing zeros from the
+// fractional part, so "12:00:00Z" sorts after "12:00:00.5Z" ('Z' > '.') and
+// ".5Z" sorts after ".55Z". A whole-second next_run_at was therefore invisible
+// to "next_run_at <= ?" for the entire remainder of that second, and
+// ORDER BY created_at inverted any run of prefix fractions.
+//
+// The layout stays a superset-compatible RFC 3339 string, so scanTime's
+// time.RFC3339Nano parse still reads it, SQLite's julianday()/strftime() still
+// understand it, and every existing TEXT index stays usable and correctly
+// ordered. Migration 000013 normalizes rows written before this change.
+const sqliteTimeLayout = "2006-01-02T15:04:05.000000000Z"
+
+// formatTime encodes an instant in the canonical on-disk layout. Every write of
+// a timestamp column in this package must go through it: a single writer left
+// on the old encoding would make comparisons straddle two formats, which is
+// worse than leaving both on the old one.
+func formatTime(value time.Time) string {
+	return value.UTC().Format(sqliteTimeLayout)
+}
+
 func timeValue(value time.Time) (any, error) {
 	if value.IsZero() {
 		return nil, fmt.Errorf("%w: timestamp is required", domain.ErrInvalidArgument)
 	}
-	return value.UTC().Format(time.RFC3339Nano), nil
+	return formatTime(value), nil
 }
 
 func nullableTimeValue(value time.Time) any {
 	if value.IsZero() {
 		return nil
 	}
-	return value.UTC().Format(time.RFC3339Nano)
+	return formatTime(value)
 }
 
 func scanTime(value string) (time.Time, error) {

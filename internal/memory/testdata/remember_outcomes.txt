@@ -1,0 +1,7 @@
+exact_duplicate op=merge changed=true created=false id=memory-00042 version=2 reason="duplicate evidence consolidated" content="Пользователь избегает старый отпуск в контексте задачи номер 42"
+punctuation_duplicate op=merge changed=true created=false id=memory-00042 version=2 reason="duplicate evidence consolidated" content="Пользователь избегает старый отпуск в контексте задачи номер 42"
+content_duplicate_custom_key op=merge changed=true created=false id=memory-00099 version=2 reason="duplicate evidence consolidated" content="Пользователь планирует важный чай в контексте задачи номер 99"
+different_kind_same_content op=create changed=true created=true id=memory_a version=1 reason="" content="Пользователь избегает старый отпуск в контексте задачи номер 42"
+dedup_key op=merge changed=true created=false id=memory-00042 version=2 reason="higher-confidence evidence replaced conflicting claim" content="Совсем другой текст"
+new_fact op=create changed=true created=true id=memory_a version=1 reason="" content="Совершенно новый факт, которого нет в корпусе"
+explicit_match op=update changed=true created=false id=memory-00007 version=2 reason="explicit memory update" content="Обновлённый текст"

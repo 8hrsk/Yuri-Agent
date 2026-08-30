@@ -44,7 +44,7 @@ func TestPluginPackageLifecycleSmoke(t *testing.T) {
 		stopBridge()
 		_ = database.Close()
 	}()
-	installed, err := bridge.InstallPlugin(PluginPathRequest{Path: packageDirectory, DevMode: true})
+	installed, err := bridge.InstallPlugin(PluginPathRequest{Path: packageDirectory})
 	if err != nil {
 		stopBridge()
 		_ = database.Close()
@@ -53,7 +53,9 @@ func TestPluginPackageLifecycleSmoke(t *testing.T) {
 	if installed.Enabled || installed.RuntimeStatus != "stopped" || installed.SignatureStatus != "dev" {
 		t.Fatalf("unexpected installed plugin state: %#v", installed)
 	}
-	enabled, err := bridge.EnablePlugin(PluginIDRequest{ID: installed.ID})
+	enabled, err := bridge.EnablePlugin(PluginEnableRequest{ID: installed.ID, Capabilities: []PluginCapabilityConsent{{
+		Capability: string(domain.CapabilityNotificationsSend), AllowUnrestricted: true,
+	}}})
 	if err != nil || !enabled.Enabled || len(enabled.Permissions) != 1 {
 		stopBridge()
 		_ = database.Close()
@@ -169,7 +171,7 @@ func newPluginSmokeBridge(repositories *storage.Repositories, pluginDirectory, d
 	bridge := &Bridge{
 		logger:       observability.NewLogger(observability.LoggerOptions{Level: slog.LevelInfo, Format: "json", Output: io.Discard}),
 		repositories: repositories, paths: config.Paths{PluginDirectory: pluginDirectory},
-		config: config.Config{Version: 1, Locale: "ru-RU", LogLevel: "info", DataDirectory: dataDirectory},
+		config: config.Config{Version: 1, Locale: "ru-RU", LogLevel: "info", DataDirectory: dataDirectory, PluginDevMode: true},
 		appCtx: context.Background(), backgroundCtx: backgroundCtx, backgroundCancel: backgroundCancel,
 		pluginSupervisors: make(map[string]*plugins.Supervisor),
 	}

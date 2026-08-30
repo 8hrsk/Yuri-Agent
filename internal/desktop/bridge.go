@@ -33,12 +33,17 @@ type Bridge struct {
 	keyring           *securitykeyring.Store
 	appCtx            context.Context
 	codex             *codexapp.Client
+	codexLaunch       *codexLaunch
+	codexGeneration   uint64
+	codexStart        codexStartFunc
+	codexStartTimeout time.Duration
 	activeRuns        map[string]context.CancelFunc
 	peerDialogueRuns  map[string]context.CancelFunc
-	approvals         map[string]chan bool
+	approvals         map[string]*approvalGate
 	backgroundCtx     context.Context
 	backgroundCancel  context.CancelFunc
 	background        sync.WaitGroup
+	titleRuns         map[string]struct{}
 	modelTurns        chan struct{}
 	reflectionRuns    *reflection.Coordinator
 	reflectionGate    chan struct{}
@@ -98,7 +103,8 @@ func NewBridge(ctx context.Context) (*Bridge, error) {
 	bridge := &Bridge{
 		logger: logger, database: database, repositories: repositories, paths: paths,
 		config: value, keyring: securitykeyring.New(), activeRuns: make(map[string]context.CancelFunc), peerDialogueRuns: make(map[string]context.CancelFunc),
-		approvals: make(map[string]chan bool), backgroundCtx: backgroundCtx, backgroundCancel: backgroundCancel,
+		approvals: make(map[string]*approvalGate), backgroundCtx: backgroundCtx, backgroundCancel: backgroundCancel,
+		titleRuns:  make(map[string]struct{}),
 		modelTurns: make(chan struct{}, 1), reflectionRuns: reflection.NewCoordinator(), reflectionGate: make(chan struct{}, 1), pluginSupervisors: make(map[string]*plugins.Supervisor),
 	}
 	if err := bridge.reconcileAgentRoster(ctx); err != nil {
@@ -143,6 +149,9 @@ func (b *Bridge) Shutdown(ctx context.Context) {
 	b.mu.Lock()
 	client := b.codex
 	b.codex = nil
+	// A Codex launch may still be in flight; the bump plus shuttingDown makes it
+	// close its client instead of publishing it after shutdown.
+	b.codexGeneration++
 	b.shuttingDown = true
 	backgroundCancel := b.backgroundCancel
 	supervisors := make([]*plugins.Supervisor, 0, len(b.pluginSupervisors))

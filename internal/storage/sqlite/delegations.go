@@ -276,17 +276,25 @@ func (r *DelegationRepository) GetForPrincipal(ctx context.Context, principalAge
 	return delegation, nil
 }
 
+// delegationSelect lists the full record so Get and list share one scanner and
+// one round-trip per query.
+const delegationSelect = `
+	SELECT id, child_run_id, principal_agent_id, parent_run_id, scope_json, depth, status,
+	       max_steps, max_tokens, max_tool_calls, max_tool_output_bytes, max_duration_seconds,
+	       idempotency_key, request_hash, result_text, failure, version, created_at, updated_at, started_at, finished_at
+	FROM delegations`
+
 func (r *DelegationRepository) get(ctx context.Context, id string) (domain.Delegation, error) {
+	return scanDelegation(r.db.QueryRowContext(ctx, delegationSelect+` WHERE id = ?`, id))
+}
+
+func scanDelegation(row rowScanner) (domain.Delegation, error) {
 	var (
 		delegation                                             domain.Delegation
 		idValue, childID, principalID, parentID, scope, status string
 		createdAt, updatedAt, startedAt, finishedAt            sql.NullString
 	)
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, child_run_id, principal_agent_id, parent_run_id, scope_json, depth, status,
-		       max_steps, max_tokens, max_tool_calls, max_tool_output_bytes, max_duration_seconds,
-		idempotency_key, request_hash, result_text, failure, version, created_at, updated_at, started_at, finished_at
-		FROM delegations WHERE id = ?`, id).Scan(
+	err := row.Scan(
 		&idValue, &childID, &principalID, &parentID, &scope, &delegation.Depth, &status,
 		&delegation.Budget.MaxSteps, &delegation.Budget.MaxTokens, &delegation.Budget.MaxToolCalls,
 		&delegation.Budget.MaxToolOutputBytes, &delegation.Budget.MaxDurationSeconds, &delegation.IdempotencyKey, &delegation.RequestHash,
@@ -372,68 +380,56 @@ func (r *DelegationRepository) FindByIdempotencyKey(ctx context.Context, princip
 	if principalAgentID.Empty() || parentRunID.Empty() || strings.TrimSpace(key) == "" {
 		return domain.Delegation{}, fmt.Errorf("%w: delegation idempotency scope is required", domain.ErrInvalidArgument)
 	}
-	var id string
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id FROM delegations
-		WHERE principal_agent_id = ? AND parent_run_id = ? AND idempotency_key = ?`,
-		string(principalAgentID), string(parentRunID), strings.TrimSpace(key)).Scan(&id)
-	if err != nil {
-		return domain.Delegation{}, wrappedSQLError("find delegation idempotency key", err)
-	}
-	return r.Get(ctx, domain.ID(id))
+	return scanDelegation(r.db.QueryRowContext(ctx,
+		delegationSelect+` WHERE principal_agent_id = ? AND parent_run_id = ? AND idempotency_key = ?`,
+		string(principalAgentID), string(parentRunID), strings.TrimSpace(key)))
 }
 
-func (r *DelegationRepository) ListByParent(ctx context.Context, principalAgentID, parentRunID domain.ID, limit ...int) ([]domain.Delegation, error) {
+func (r *DelegationRepository) ListByParent(ctx context.Context, principalAgentID, parentRunID domain.ID, window ...int) ([]domain.Delegation, error) {
 	if principalAgentID.Empty() || parentRunID.Empty() {
 		return nil, fmt.Errorf("%w: delegation ownership ids are required", domain.ErrInvalidArgument)
 	}
-	return r.list(ctx, "principal_agent_id = ? AND parent_run_id = ?", []any{string(principalAgentID), string(parentRunID)}, limit...)
+	return r.list(ctx, "principal_agent_id = ? AND parent_run_id = ?", []any{string(principalAgentID), string(parentRunID)}, window...)
 }
 
-func (r *DelegationRepository) ListByPrincipal(ctx context.Context, principalAgentID domain.ID, limit ...int) ([]domain.Delegation, error) {
+func (r *DelegationRepository) ListByPrincipal(ctx context.Context, principalAgentID domain.ID, window ...int) ([]domain.Delegation, error) {
 	if principalAgentID.Empty() {
 		return nil, fmt.Errorf("%w: principal agent id is required", domain.ErrInvalidArgument)
 	}
-	return r.list(ctx, "principal_agent_id = ?", []any{string(principalAgentID)}, limit...)
+	return r.list(ctx, "principal_agent_id = ?", []any{string(principalAgentID)}, window...)
 }
 
-func (r *DelegationRepository) list(ctx context.Context, predicate string, args []any, limit ...int) ([]domain.Delegation, error) {
+// list reads the matching delegations in one query. The deferred Close is what
+// keeps a Scan error from stranding the pool's single connection, which would
+// hang every other database caller in the process.
+func (r *DelegationRepository) list(ctx context.Context, predicate string, args []any, window ...int) ([]domain.Delegation, error) {
 	if err := requireDatabase(r.db); err != nil {
 		return nil, err
 	}
 	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
-	query := `SELECT id FROM delegations WHERE ` + predicate + ` ORDER BY created_at ASC, id ASC`
-	if len(limit) > 0 && limit[0] > 0 {
-		query += " LIMIT ?"
-		args = append(args, limit[0])
+	limit, offset, err := listWindow("delegation", window)
+	if err != nil {
+		return nil, err
 	}
+	query := delegationSelect + ` WHERE ` + predicate + ` ORDER BY created_at ASC, id ASC`
+	query, args = appendWindow(query, args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, wrappedSQLError("list delegations", err)
 	}
-	ids := make([]string, 0)
+	defer rows.Close()
+	result := make([]domain.Delegation, 0)
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, wrappedSQLError("scan delegation id", err)
+		item, scanErr := scanDelegation(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		ids = append(ids, id)
+		result = append(result, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, wrappedSQLError("iterate delegations", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, wrappedSQLError("close delegations", err)
-	}
-	result := make([]domain.Delegation, 0, len(ids))
-	for _, id := range ids {
-		item, err := r.Get(ctx, domain.ID(id))
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, item)
 	}
 	return result, nil
 }

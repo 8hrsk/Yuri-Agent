@@ -64,17 +64,25 @@ func (r *ApprovalRepository) Get(ctx context.Context, id domain.ID) (domain.Appr
 	return r.get(ctx, string(id))
 }
 
+// approvalSelect lists the full record so Get and ListByRun share one scanner
+// and one round-trip per query.
+const approvalSelect = `
+	SELECT id, run_id, action_hash, action, tool_id, risk, scope_json, decision,
+	       requested_at, expires_at, decided_at, decided_by, reason, version
+	FROM approvals`
+
 func (r *ApprovalRepository) get(ctx context.Context, id string) (domain.Approval, error) {
+	return scanApproval(r.db.QueryRowContext(ctx, approvalSelect+` WHERE id = ?`, id))
+}
+
+func scanApproval(row rowScanner) (domain.Approval, error) {
 	var (
 		approval                                   domain.Approval
 		idValue, runID, scopeJSON, requestedAt     string
 		toolID, risk, decision, actionHash, action string
 		expiresAt, decidedAt, decidedBy, reason    sql.NullString
 	)
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, run_id, action_hash, action, tool_id, risk, scope_json, decision,
-		       requested_at, expires_at, decided_at, decided_by, reason, version
-		FROM approvals WHERE id = ?`, id).Scan(
+	err := row.Scan(
 		&idValue, &runID, &actionHash, &action, &toolID, &risk, &scopeJSON, &decision,
 		&requestedAt, &expiresAt, &decidedAt, &decidedBy, &reason, &approval.Version)
 	if err != nil {
@@ -149,6 +157,9 @@ func (r *ApprovalRepository) Save(ctx context.Context, approval domain.Approval)
 	return domain.ErrConflict
 }
 
+// ListByRun reads the run's approvals in one query. The result is bounded by
+// the run's own tool-call budget, and domain.ApprovalRepository fixes the
+// signature, so no window is accepted here.
 func (r *ApprovalRepository) ListByRun(ctx context.Context, runID domain.ID) ([]domain.Approval, error) {
 	if err := requireDatabase(r.db); err != nil {
 		return nil, err
@@ -159,35 +170,22 @@ func (r *ApprovalRepository) ListByRun(ctx context.Context, runID domain.ID) ([]
 	if runID.Empty() {
 		return nil, fmt.Errorf("%w: run id is required", domain.ErrInvalidArgument)
 	}
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id FROM approvals WHERE run_id = ?
+	rows, err := r.db.QueryContext(ctx, approvalSelect+` WHERE run_id = ?
 		ORDER BY requested_at ASC, id ASC`, string(runID))
 	if err != nil {
 		return nil, wrappedSQLError("list approvals", err)
 	}
-	ids := make([]string, 0)
+	defer rows.Close()
+	result := make([]domain.Approval, 0)
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, wrappedSQLError("scan approval id", err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, wrappedSQLError("iterate approvals", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, wrappedSQLError("close approvals", err)
-	}
-	result := make([]domain.Approval, 0, len(ids))
-	for _, id := range ids {
-		item, err := r.get(ctx, id)
-		if err != nil {
-			return nil, err
+		item, scanErr := scanApproval(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
 		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrappedSQLError("iterate approvals", err)
 	}
 	return result, nil
 }

@@ -5,7 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
+
+	"github.com/OrdoAI/yuri-agent/internal/domain"
 )
 
 // RankWeights make the retrieval policy explicit and tunable.  All input
@@ -76,7 +77,22 @@ func (r HybridRanker) Rank(candidates []RankCandidate, now time.Time) []RecallRe
 		}
 	}
 	weights := r.Weights.normalize()
-	byID := make(map[string]RecallResult, len(candidates))
+	// Results are accumulated in the slice that is returned, and the map holds
+	// only the index of the winning result for an id.  Keeping RecallResult as
+	// the map's value type made every insert a heap allocation: the struct is
+	// far larger than the 128-byte threshold above which Go stores map values
+	// indirectly, so ranking N candidates cost N allocations of a full result
+	// before the result slice had been built at all.
+	//
+	// The map is still a deduplication, not an accounting detail.  Both live
+	// callers already guarantee one candidate per memory id — Recall keys its
+	// candidates through candidateAt, and CoreSnapshot appends one candidate
+	// per Store.ListMemories row, which the memory_heads primary key makes
+	// unique — but Rank is exported and must not silently return the same
+	// memory twice for a caller that has no such guarantee.  Highest score
+	// wins, and the first occurrence wins a tie, exactly as before.
+	results := make([]RecallResult, 0, len(candidates))
+	indexByID := make(map[domain.ID]int, len(candidates))
 	for _, candidate := range candidates {
 		memory := candidate.Memory
 		if memory.ID.Empty() {
@@ -95,22 +111,53 @@ func (r HybridRanker) Rank(candidates []RankCandidate, now time.Time) []RecallRe
 			AffectiveScore: affective, Dormant: memory.Lifecycle == StateDormant,
 			Evidence: candidate.Evidence,
 		}
-		key := memory.ID.String()
-		if previous, exists := byID[key]; !exists || result.Score > previous.Score {
-			byID[key] = result
+		if at, exists := indexByID[memory.ID]; exists {
+			if result.Score > results[at].Score {
+				results[at] = result
+			}
+			continue
 		}
-	}
-	results := make([]RecallResult, 0, len(byID))
-	for _, result := range byID {
+		indexByID[memory.ID] = len(results)
 		results = append(results, result)
 	}
-	sort.Slice(results, func(a, b int) bool {
-		if math.Abs(results[a].Score-results[b].Score) > 1e-12 {
-			return results[a].Score > results[b].Score
-		}
-		return results[a].Memory.ID.String() < results[b].Memory.ID.String()
-	})
+	sort.Slice(results, func(a, b int) bool { return rankLess(results[a], results[b]) })
 	return results
+}
+
+// rankLess is the ranking order: score descending, ties broken by memory id
+// ascending.  Ids are unique here — the loop above deduplicates by id — so the
+// relation is a strict total order and Rank's output depends only on the set of
+// candidates, never on the order they arrived in.
+//
+// N-17.  This used to treat scores within 1e-12 of each other as tied.  That
+// tolerance is not an equivalence relation: with a≈b and b≈c but a≉c the
+// comparator admits a 3-cycle (a<b by id, b<c by id, c<a by score), and a
+// non-transitive comparator lets sort.Slice return whatever its input order
+// happens to produce — so recall results could be reordered by an unrelated
+// change to how candidates are gathered.
+//
+// Dropping the tolerance costs nothing it was buying.  Every score is the same
+// fixed five-term expression, so two candidates that are conceptually tied
+// produce bit-identical results and still fall through to the id tie-break;
+// float addition is commutative, so even a tie reached through a different mix
+// of the same signals lands on the same bits.  A difference the tolerance used
+// to swallow was therefore a real difference in the inputs, and ordering by it
+// is more faithful than ordering by id.
+//
+// NaN is ranked last rather than compared, because a NaN score would otherwise
+// be neither greater nor less than anything and reintroduce exactly the
+// intransitivity this function exists to remove.  Rank clamps its own signals
+// but cannot stop an exported caller from handing one in.
+func rankLess(a, b RecallResult) bool {
+	aNaN, bNaN := math.IsNaN(a.Score), math.IsNaN(b.Score)
+	switch {
+	case aNaN != bNaN:
+		return bNaN
+	case !aNaN && a.Score != b.Score:
+		return a.Score > b.Score
+	default:
+		return a.Memory.ID.String() < b.Memory.ID.String()
+	}
 }
 
 func recencyScore(memory Memory, now time.Time) float64 {
@@ -131,32 +178,13 @@ func recencyScore(memory Memory, now time.Time) float64 {
 
 // LexicalScore is a small portable fallback for adapters without FTS5.  It
 // rewards token coverage and exact phrase matches while remaining bounded.
+//
+// Scoring a whole store against one query goes through lexicalQuery instead,
+// which prepares the query side once; this entry point keeps the one-shot
+// signature for adapters and tests. Both share a single implementation so the
+// two can never drift apart.
 func LexicalScore(content, query string) float64 {
-	query = strings.TrimSpace(query)
-	if query == "" || strings.TrimSpace(content) == "" {
-		return 0
-	}
-	queryTokens := tokenize(query)
-	contentTokens := tokenize(content)
-	if len(queryTokens) == 0 || len(contentTokens) == 0 {
-		return 0
-	}
-	contentSet := make(map[string]struct{}, len(contentTokens))
-	for _, token := range contentTokens {
-		contentSet[token] = struct{}{}
-	}
-	matched := 0
-	for _, token := range queryTokens {
-		if _, ok := contentSet[token]; ok {
-			matched++
-		}
-	}
-	coverage := float64(matched) / float64(len(queryTokens))
-	phrase := 0.0
-	if strings.Contains(strings.ToLower(content), strings.ToLower(query)) {
-		phrase = 0.25
-	}
-	return clamp01(coverage*0.75 + phrase)
+	return newLexicalQuery(query).score(content)
 }
 
 func tokenize(value string) []string {
@@ -169,7 +197,7 @@ func tokenize(value string) []string {
 		}
 	}
 	for _, runeValue := range value {
-		if unicode.IsLetter(runeValue) || unicode.IsDigit(runeValue) || runeValue == '_' {
+		if isTokenRune(runeValue) {
 			builder.WriteRune(runeValue)
 		} else {
 			flush()

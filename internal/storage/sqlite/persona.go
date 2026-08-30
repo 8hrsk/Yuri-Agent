@@ -268,7 +268,9 @@ func (r *PersonaRepository) GetVersionRecord(ctx context.Context, id domain.ID, 
 	return personaVersionRecord(persona), nil
 }
 
-func (r *PersonaRepository) ListVersions(ctx context.Context, id domain.ID, limit ...int) ([]PersonaVersionRecord, error) {
+// ListVersions reads each revision in full in one query. window is the
+// optional (limit, offset) tail.
+func (r *PersonaRepository) ListVersions(ctx context.Context, id domain.ID, window ...int) ([]PersonaVersionRecord, error) {
 	if err := requireDatabase(r.db); err != nil {
 		return nil, err
 	}
@@ -278,44 +280,34 @@ func (r *PersonaRepository) ListVersions(ctx context.Context, id domain.ID, limi
 	if id.Empty() {
 		return nil, fmt.Errorf("%w: persona id is required", domain.ErrInvalidArgument)
 	}
-	if len(limit) > 0 && limit[0] < 0 {
-		return nil, fmt.Errorf("%w: persona history limit cannot be negative", domain.ErrInvalidArgument)
+	limit, offset, err := listWindow("persona history", window)
+	if err != nil {
+		return nil, err
 	}
-	query := `SELECT version FROM persona_versions WHERE persona_id = ? ORDER BY version DESC`
+	query := personaSelect + ` FROM persona_versions AS pv WHERE pv.persona_id = ? ORDER BY pv.version DESC`
 	args := []any{string(id)}
-	if len(limit) > 0 && limit[0] > 0 {
-		query += " LIMIT ?"
-		args = append(args, limit[0])
-	}
+	query, args = appendWindow(query, args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, wrappedSQLError("list persona versions", err)
 	}
 	defer rows.Close()
-	versions := make([]uint64, 0)
+	result := make([]PersonaVersionRecord, 0)
 	for rows.Next() {
-		var version uint64
-		if err := rows.Scan(&version); err != nil {
-			return nil, wrappedSQLError("scan persona version", err)
+		persona, scanErr := scanPersona(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		versions = append(versions, version)
+		result = append(result, personaVersionRecord(persona))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, wrappedSQLError("iterate persona versions", err)
 	}
-	result := make([]PersonaVersionRecord, 0, len(versions))
-	for _, version := range versions {
-		item, err := r.GetVersionRecord(ctx, id, version)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, item)
-	}
 	return result, nil
 }
 
-func (r *PersonaRepository) ListHistory(ctx context.Context, id domain.ID, limit ...int) ([]PersonaVersionRecord, error) {
-	return r.ListVersions(ctx, id, limit...)
+func (r *PersonaRepository) ListHistory(ctx context.Context, id domain.ID, window ...int) ([]PersonaVersionRecord, error) {
+	return r.ListVersions(ctx, id, window...)
 }
 
 // Rollback appends a new revision copied from targetVersion. To support both

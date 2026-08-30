@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { ChatView } from './components/ChatView'
 import { ActivityView } from './components/ActivityView'
@@ -27,6 +27,10 @@ function App() {
   const client = useMemo(() => createYuriClient(), [])
   const [onboardingStatus, setOnboardingStatus] = useState<'loading' | 'required' | 'ready'>('loading')
   const [activeAgent, setActiveAgent] = useState<AgentProfile>()
+  // The active agent keys the workspace views, so rendering them before it is
+  // known mounts every one of them twice: once under a placeholder key and once
+  // under the real one (M-37).
+  const [agentsStatus, setAgentsStatus] = useState<'loading' | 'ready'>('loading')
   const [agents, setAgents] = useState<AgentProfile[]>([])
   const [agentFormOpen, setAgentFormOpen] = useState(false)
   const [agentDraft, setAgentDraft] = useState<AgentProfileInput>(() => ({ ...defaultAgentDraft, name: '', preferences: '', traits: { ...defaultAgentDraft.traits } }))
@@ -55,7 +59,11 @@ function App() {
         : listedAgents
       setActiveAgent(current)
       setAgents(nextAgents.map((agent) => ({ ...agent, active: agent.id === current?.id })))
-    }).catch(() => undefined)
+    }).catch(() => undefined).finally(() => {
+      // A roster that cannot be loaded still resolves the key: the workspace
+      // falls back to the placeholder agent instead of never mounting.
+      if (mounted) setAgentsStatus('ready')
+    })
     return () => { mounted = false }
   }, [client, onboardingStatus])
 
@@ -73,6 +81,11 @@ function App() {
       setAgentBusy(false)
     }
   }
+
+  // Handed to the always-mounted chat surface, so they must not change identity
+  // on every App render.
+  const openSettingsTab = useCallback(() => setActiveId('settings'), [])
+  const openChatTab = useCallback(() => setActiveId('chat'), [])
 
   const openAgentForm = () => {
     setAgentDraft({ ...defaultAgentDraft, name: '', preferences: '', traits: { ...defaultAgentDraft.traits } })
@@ -125,24 +138,47 @@ function App() {
           onReconnect={backend.refresh}
         />
         <div className="main-panel__scroll">
-          {activeId === 'chat' ? (
-            <ChatView key={activeAgent?.id ?? 'no-active-agent'} agentName={activeAgent?.name ?? 'Агент'} backend={backend} onOpenSettings={() => setActiveId('settings')} />
-          ) : activeId === 'tasks' ? (
-            <TasksView />
-          ) : activeId === 'memory' ? (
-            <MemoryView key={activeAgent?.id ?? 'no-active-agent'} />
-          ) : activeId === 'activity' ? (
-            <ActivityView />
-          ) : activeId === 'collaboration' ? (
-            <CollaborationView key={activeAgent?.id ?? 'no-active-agent'} activeAgentId={activeAgent?.id} />
-          ) : activeId === 'relationship' || activeId === 'personality' ? (
-            <PersonaRelationshipView key={`${activeId}:${activeAgent?.id ?? 'no-active-agent'}`} section={activeId} />
-          ) : activeId === 'plugins' ? (
-            <PluginView />
-          ) : activeId === 'settings' ? (
-            <ProviderSettingsView onBackToChat={() => setActiveId('chat')} />
+          {agentsStatus === 'loading' ? (
+            <div className="onboarding-loading" role="status"><span className="onboarding-loading__pulse" /> Загружаю профиль агента…</div>
           ) : (
-            <PlaceholderView item={activeItem} />
+            <>
+              {/*
+                * The chat surface is mounted for the whole session instead of
+                * being one branch of the tab switch. A run is a long-lived,
+                * cancellable operation with a pending approval attached to it;
+                * unmounting the view dropped its id, its status and its
+                * approval dialog, so the answer disappeared and a dangerous
+                * action could sit waiting for a decision nobody was ever shown
+                * (H-9). Hidden rather than unmounted, the run keeps streaming
+                * into the same state and the approval dialog escapes this
+                * subtree through a portal.
+                */}
+              <ChatView
+                agentName={activeAgent?.name ?? 'Агент'}
+                backend={backend}
+                hidden={activeId !== 'chat'}
+                key={activeAgent?.id ?? 'no-active-agent'}
+                onOpenChat={openChatTab}
+                onOpenSettings={openSettingsTab}
+              />
+              {activeId !== 'chat' && (activeId === 'tasks' ? (
+                <TasksView />
+              ) : activeId === 'memory' ? (
+                <MemoryView key={activeAgent?.id ?? 'no-active-agent'} />
+              ) : activeId === 'activity' ? (
+                <ActivityView />
+              ) : activeId === 'collaboration' ? (
+                <CollaborationView key={activeAgent?.id ?? 'no-active-agent'} activeAgentId={activeAgent?.id} />
+              ) : activeId === 'relationship' || activeId === 'personality' ? (
+                <PersonaRelationshipView key={`${activeId}:${activeAgent?.id ?? 'no-active-agent'}`} section={activeId} />
+              ) : activeId === 'plugins' ? (
+                <PluginView />
+              ) : activeId === 'settings' ? (
+                <ProviderSettingsView onBackToChat={openChatTab} />
+              ) : (
+                <PlaceholderView item={activeItem} />
+              ))}
+            </>
           )}
         </div>
         <footer className="statusbar">

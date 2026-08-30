@@ -1,0 +1,106 @@
+import type { ChatEvent, ChatTool } from '../contracts'
+import { normalizeApproval, normalizeRunTraceStep, normalizeToolCall } from '../chat-trace'
+import { normalizeStringList } from './normalize-plugins'
+import { normalizeBoolean, nowIso, optionalString } from './primitives'
+import type { UnknownRecord } from './primitives'
+
+function normalizeChatEvent(value: unknown): ChatEvent | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as UnknownRecord
+  const nested = source.data && typeof source.data === 'object' ? source.data as UnknownRecord : source
+  const rawType = String(nested.type ?? nested.eventType ?? nested.event_type ?? '').toLowerCase().replace(/[-\s]/g, '_')
+  const type = rawType === 'run_start' || rawType === 'run_started' ? 'run.started'
+    : rawType === 'run_finish' || rawType === 'run_finished' || rawType === 'run_complete' || rawType === 'run_completed' ? 'run.completed'
+      : rawType === 'tool_start' || rawType === 'tool_started' ? 'tool.started'
+        : rawType === 'tool_update' || rawType === 'tool_updated' ? 'tool.updated'
+          : rawType === 'tool_complete' || rawType === 'tool_completed' || rawType === 'tool_result' || rawType === 'tool_finished' ? 'tool.updated'
+      : rawType === 'approval_waiting' || rawType === 'approval_required' ? 'approval.required'
+          : rawType === 'run_step' || rawType === 'trace_step' ? 'trace.step'
+            : rawType === 'status' ? 'run.status'
+              : rawType === 'thinking' || rawType === 'thinking_started' ? 'run.status'
+                : rawType
+  const runId = String(nested.runId ?? nested.run_id ?? '')
+  if (!type || !runId) return undefined
+  const base: { runId: string; conversationId?: string; createdAt?: string; timestamp?: string } = { runId }
+  const conversationId = optionalString(nested, 'conversationId', 'conversation_id')
+  const createdAt = optionalString(nested, 'createdAt', 'created_at')
+  const timestamp = optionalString(nested, 'timestamp', 'at')
+  if (conversationId) base.conversationId = conversationId
+  if (createdAt) base.createdAt = createdAt
+  if (timestamp) base.timestamp = timestamp
+  switch (type) {
+    case 'run.started':
+      return { type, ...base }
+    case 'assistant.delta':
+      return { type, ...base, messageId: String(nested.messageId ?? nested.message_id ?? ''), delta: String(nested.delta ?? nested.text ?? '') }
+    case 'assistant.completed':
+      return { type, ...base, messageId: String(nested.messageId ?? nested.message_id ?? '') }
+    case 'tool.started':
+    case 'tool.updated': {
+      const rawTool = nested.toolCall ?? nested.tool_call ?? nested.call ?? nested
+      const toolCall = normalizeToolCall(rawTool, type === 'tool.updated' ? 'completed' : 'running')
+      if (!toolCall) return undefined
+      return { type, ...base, toolCall }
+    }
+    case 'approval.required': {
+      const approval = normalizeApproval(nested.approval ?? nested)
+      return approval ? { type, ...base, approval } : undefined
+    }
+    case 'run.status': {
+      const requestedStatus = type === 'run.status' && (rawType === 'thinking' || rawType === 'thinking_started') ? 'thinking' : nested.status
+      const status = requestedStatus
+      if (status !== 'thinking' && status !== 'tool_running' && status !== 'waiting_approval' && status !== 'speaking' && status !== 'idle' && status !== 'cancelled' && status !== 'error') return undefined
+      return { type, ...base, status, label: status === 'thinking' ? 'Обрабатывает запрос…' : String(nested.label ?? '') }
+    }
+    case 'run.completed': {
+      const rawStatus = String(nested.status ?? '').toLowerCase()
+      const status = rawStatus === 'cancelled' || rawStatus === 'canceled'
+        ? 'cancelled'
+        : rawStatus === 'error' || rawStatus === 'failed'
+          ? 'error'
+          : 'complete'
+      return { type, ...base, status, error: nested.error ? String(nested.error) : undefined }
+    }
+    case 'trace.step': {
+      const step = normalizeRunTraceStep(nested.step, 0, runId, createdAt ?? timestamp ?? nowIso())
+      return step ? { type, ...base, step } : undefined
+    }
+    default:
+      return undefined
+  }
+}
+
+function normalizeChatTool(value: unknown): ChatTool | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as UnknownRecord
+  const source = raw.tool && typeof raw.tool === 'object' ? raw.tool as UnknownRecord : raw
+  const name = optionalString(source, 'name', 'toolName', 'tool_name', 'id', 'toolId', 'tool_id')
+  if (!name) return undefined
+  const riskValue = String(source.risk ?? '').toLowerCase()
+  const risk = riskValue === 'medium' || riskValue === 'high' || riskValue === 'critical' ? riskValue : 'low'
+  const availability = source.available ?? source.enabled ?? source.isAvailable ?? source.is_available
+  const requiresApproval = source.requiresApproval ?? source.requires_approval
+  return {
+    id: optionalString(source, 'id', 'toolId', 'tool_id') ?? name,
+    name,
+    label: optionalString(source, 'label', 'displayName', 'display_name', 'title') ?? name,
+    description: optionalString(source, 'description', 'detail'),
+    risk,
+    available: availability === undefined ? true : normalizeBoolean(availability, true),
+    requiresApproval: requiresApproval === undefined ? risk === 'medium' || risk === 'high' || risk === 'critical' : normalizeBoolean(requiresApproval, false),
+    capabilities: normalizeStringList(source.capabilities),
+  }
+}
+
+function normalizeChatToolList(value: unknown): ChatTool[] {
+  const rawItems = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object'
+      ? ((value as UnknownRecord).tools ?? (value as UnknownRecord).items ?? (value as UnknownRecord).results)
+      : undefined
+  return Array.isArray(rawItems)
+    ? rawItems.map(normalizeChatTool).filter((tool): tool is ChatTool => Boolean(tool))
+    : []
+}
+
+export { normalizeChatEvent, normalizeChatToolList }

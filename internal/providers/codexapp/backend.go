@@ -15,14 +15,22 @@ import (
 )
 
 // Backend adapts the official Codex agent harness to Yuri's normalized model
-// event boundary. Stage 1 intentionally allows one active Codex turn per
-// process, matching the single-owner desktop interaction model.
+// event boundary.
+//
+// The backend deliberately owns no turn gate. Turn serialization belongs to the
+// layer that knows the run topology: a delegated subagent or a peer dialogue
+// turn executes as a tool call inside the parent run, so a provider-level
+// capacity-1 semaphore released only on stream Close made the child wait for a
+// slot only the parent could release, while the parent waited for the child's
+// tool result. That is the H-2 self-deadlock, one layer below the place it was
+// fixed. The desktop gate (gatedBackend plus a run-scoped reentrant lease)
+// serializes unrelated runs and exempts nested ones; this backend's job is
+// instead to stay correct when turns really do overlap, which it does by giving
+// every thread its own event subscription.
 type Backend struct {
 	Client        *Client
 	CWD           string
 	ReadableRoots []string
-
-	turns chan struct{}
 }
 
 func NewBackend(client *Client, cwd string, readableRoots []string) (*Backend, error) {
@@ -31,7 +39,6 @@ func NewBackend(client *Client, cwd string, readableRoots []string) (*Backend, e
 	}
 	return &Backend{
 		Client: client, CWD: cwd, ReadableRoots: append([]string(nil), readableRoots...),
-		turns: make(chan struct{}, 1),
 	}, nil
 }
 
@@ -39,12 +46,6 @@ func (backend *Backend) Start(ctx context.Context, request agent.ModelRequest) (
 	if err := request.Valid(); err != nil {
 		return nil, err
 	}
-	select {
-	case backend.turns <- struct{}{}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	release := func() { <-backend.turns }
 	model := request.Model
 	if model == "codex-default" || model == "gpt-5-codex" || model == "gpt-4o-mini" {
 		model = ""
@@ -55,41 +56,54 @@ func (backend *Backend) Start(ctx context.Context, request agent.ModelRequest) (
 		DynamicTools: dynamicTools,
 	})
 	if err != nil {
-		release()
 		return nil, fmt.Errorf("start Codex thread: %w", err)
 	}
+	// Subscribe before the turn exists: the app server emits events for a thread
+	// only in response to turn/start, so nothing can be missed here, and from now
+	// on this turn's events cannot be consumed by another concurrent turn.
+	subscription := backend.Client.SubscribeThread(thread.ID)
 	prompt, err := encodeConversation(request.Messages)
 	if err != nil {
-		release()
+		subscription.Close()
 		return nil, err
 	}
 	turn, err := backend.Client.StartTurnWithOptions(ctx, TurnOptions{
-		ThreadID: thread.ID, Text: prompt, CWD: backend.CWD, Model: model,
+		ThreadID: thread.ID, Text: prompt, Images: conversationImages(request.Messages), CWD: backend.CWD, Model: model,
 		ReadableRoots: backend.ReadableRoots,
 	})
 	if err != nil {
-		release()
+		subscription.Close()
 		return nil, fmt.Errorf("start Codex turn: %w", err)
 	}
 	return &codexModelStream{
-		client: backend.Client, events: backend.Client.Events(),
-		threadID: thread.ID, turnID: turn.ID, release: release,
+		client: backend.Client, subscription: subscription, events: subscription.Events(),
+		shared: backend.Client.Events(), threadID: thread.ID, turnID: turn.ID,
 		dynamicToolNames: dynamicToolNames,
 	}, nil
 }
 
 func encodeConversation(messages []agent.Message) (string, error) {
+	type attachment struct {
+		Type      agent.ContentPartType `json:"type"`
+		Name      string                `json:"name,omitempty"`
+		MediaType string                `json:"media_type"`
+	}
 	type transcriptMessage struct {
-		Role       agent.Role       `json:"role"`
-		Content    string           `json:"content,omitempty"`
-		Name       string           `json:"name,omitempty"`
-		ToolCallID string           `json:"tool_call_id,omitempty"`
-		ToolCalls  []agent.ToolCall `json:"tool_calls,omitempty"`
+		Role        agent.Role       `json:"role"`
+		Content     string           `json:"content,omitempty"`
+		Attachments []attachment     `json:"attachments,omitempty"`
+		Name        string           `json:"name,omitempty"`
+		ToolCallID  string           `json:"tool_call_id,omitempty"`
+		ToolCalls   []agent.ToolCall `json:"tool_calls,omitempty"`
 	}
 	transcript := make([]transcriptMessage, 0, len(messages))
 	for _, message := range messages {
+		attachments := make([]attachment, 0, len(message.Parts))
+		for _, part := range message.Parts {
+			attachments = append(attachments, attachment{Type: part.Type, Name: part.Name, MediaType: part.MediaType})
+		}
 		transcript = append(transcript, transcriptMessage{
-			Role: message.Role, Content: message.Content, Name: message.Name,
+			Role: message.Role, Content: message.Content, Attachments: attachments, Name: message.Name,
 			ToolCallID: message.ToolCallID, ToolCalls: message.ToolCalls,
 		})
 	}
@@ -106,12 +120,31 @@ func encodeConversation(messages []agent.Message) (string, error) {
 		"<conversation-json>" + string(encoded) + "</conversation-json>", nil
 }
 
+func conversationImages(messages []agent.Message) []string {
+	var images []string
+	for _, message := range messages {
+		if message.Role != agent.RoleUser {
+			continue
+		}
+		for _, part := range message.Parts {
+			if part.Type == agent.ContentPartImage {
+				images = append(images, "data:"+part.MediaType+";base64,"+part.Data)
+			}
+		}
+	}
+	return images
+}
+
 type codexModelStream struct {
-	client   *Client
-	events   <-chan Event
-	threadID string
-	turnID   string
-	release  func()
+	client *Client
+	// events is this turn's own feed. subscription owns it and is released on
+	// Close; shared carries connection-scoped events that belong to no turn and
+	// also signals a dead connection by being closed.
+	subscription *ThreadEvents
+	events       <-chan Event
+	shared       <-chan Event
+	threadID     string
+	turnID       string
 
 	mu        sync.Mutex
 	completed bool
@@ -135,90 +168,113 @@ func (stream *codexModelStream) Recv(ctx context.Context) (agent.ModelEvent, err
 	}
 	stream.mu.Unlock()
 	for {
+		var event Event
 		select {
 		case <-ctx.Done():
 			interruptCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			_ = stream.client.InterruptTurn(interruptCtx, stream.threadID, stream.turnID)
 			cancel()
 			return agent.ModelEvent{}, ctx.Err()
-		case event, ok := <-stream.events:
+		case received, ok := <-stream.events:
 			if !ok {
 				return agent.ModelEvent{}, ErrClosed
 			}
-			if event.IsServerRequest() {
-				if event.Method == "item/tool/call" {
-					modelEvent, err := stream.dynamicToolCall(event)
-					if err != nil {
-						return agent.ModelEvent{}, err
-					}
-					if modelEvent.Type == "" {
-						continue
-					}
-					return modelEvent, nil
-				}
-				// App-server requests other than dynamic Yuri tools are not part of
-				// the normalized approval boundary yet. Keep the existing fail-closed
-				// behavior for harness-owned side effects.
-				_ = stream.client.Respond(event.ID, map[string]string{"decision": "decline"}, nil)
-				continue
+			event = received
+		case received, ok := <-stream.shared:
+			// Connection-scoped events belong to no turn. They are still handled
+			// here so a harness-owned server request keeps being declined promptly
+			// instead of waiting for an answer nobody would send; the thread filter
+			// below discards anything addressed to a different turn.
+			if !ok {
+				return agent.ModelEvent{}, ErrClosed
 			}
-			switch event.Method {
-			case "item/agentMessage/delta":
-				var params struct {
-					ThreadID string `json:"threadId"`
-					TurnID   string `json:"turnId"`
-					ItemID   string `json:"itemId"`
-					Delta    string `json:"delta"`
-				}
-				if err := json.Unmarshal(event.Params, &params); err != nil {
-					return agent.ModelEvent{}, fmt.Errorf("decode Codex text delta: %w", err)
-				}
-				if !stream.matches(params.ThreadID, params.TurnID) || params.Delta == "" {
-					continue
-				}
-				return agent.ModelEvent{Type: agent.ModelEventTextDelta, ResponseID: params.ItemID, Delta: params.Delta}, nil
-			case "turn/completed":
-				var params struct {
-					ThreadID string `json:"threadId"`
-					Turn     struct {
-						ID     string          `json:"id"`
-						Status string          `json:"status"`
-						Error  *codexTurnError `json:"error"`
-					} `json:"turn"`
-				}
-				if err := json.Unmarshal(event.Params, &params); err != nil {
-					return agent.ModelEvent{}, fmt.Errorf("decode Codex completion: %w", err)
-				}
-				if !stream.matches(params.ThreadID, params.Turn.ID) {
-					continue
-				}
-				if params.Turn.Status == "failed" {
-					return agent.ModelEvent{}, safeCodexTurnError(params.Turn.Error)
-				}
-				if params.Turn.Status == "interrupted" {
-					return agent.ModelEvent{}, context.Canceled
-				}
-				stream.mu.Lock()
-				stream.completed = true
-				stream.mu.Unlock()
-				return agent.ModelEvent{Type: agent.ModelEventCompleted, FinishReason: params.Turn.Status}, nil
-			case "error":
-				var params struct {
-					ThreadID  string          `json:"threadId"`
-					TurnID    string          `json:"turnId"`
-					WillRetry bool            `json:"willRetry"`
-					Error     *codexTurnError `json:"error"`
-				}
-				if err := json.Unmarshal(event.Params, &params); err != nil {
-					return agent.ModelEvent{}, errors.New("Codex app server reported a turn error")
-				}
-				if !stream.matches(params.ThreadID, params.TurnID) || params.WillRetry {
-					continue
-				}
-				return agent.ModelEvent{}, safeCodexTurnError(params.Error)
-			}
+			event = received
 		}
+		modelEvent, emit, err := stream.translate(event)
+		if err != nil {
+			return agent.ModelEvent{}, err
+		}
+		if !emit {
+			continue
+		}
+		return modelEvent, nil
 	}
+}
+
+// translate normalizes one app-server event. It reports emit=false for events
+// this turn must ignore: another turn's leftovers, retryable errors, and
+// requests that were already answered inline.
+func (stream *codexModelStream) translate(event Event) (agent.ModelEvent, bool, error) {
+	if event.IsServerRequest() {
+		if event.Method == "item/tool/call" {
+			modelEvent, err := stream.dynamicToolCall(event)
+			if err != nil {
+				return agent.ModelEvent{}, false, err
+			}
+			return modelEvent, modelEvent.Type != "", nil
+		}
+		// App-server requests other than dynamic Yuri tools are not part of
+		// the normalized approval boundary yet. Keep the existing fail-closed
+		// behavior for harness-owned side effects.
+		_ = stream.client.Respond(event.ID, map[string]string{"decision": "decline"}, nil)
+		return agent.ModelEvent{}, false, nil
+	}
+	switch event.Method {
+	case "item/agentMessage/delta":
+		var params struct {
+			ThreadID string `json:"threadId"`
+			TurnID   string `json:"turnId"`
+			ItemID   string `json:"itemId"`
+			Delta    string `json:"delta"`
+		}
+		if err := json.Unmarshal(event.Params, &params); err != nil {
+			return agent.ModelEvent{}, false, fmt.Errorf("decode Codex text delta: %w", err)
+		}
+		if !stream.matches(params.ThreadID, params.TurnID) || params.Delta == "" {
+			return agent.ModelEvent{}, false, nil
+		}
+		return agent.ModelEvent{Type: agent.ModelEventTextDelta, ResponseID: params.ItemID, Delta: params.Delta}, true, nil
+	case "turn/completed":
+		var params struct {
+			ThreadID string `json:"threadId"`
+			Turn     struct {
+				ID     string          `json:"id"`
+				Status string          `json:"status"`
+				Error  *codexTurnError `json:"error"`
+			} `json:"turn"`
+		}
+		if err := json.Unmarshal(event.Params, &params); err != nil {
+			return agent.ModelEvent{}, false, fmt.Errorf("decode Codex completion: %w", err)
+		}
+		if !stream.matches(params.ThreadID, params.Turn.ID) {
+			return agent.ModelEvent{}, false, nil
+		}
+		if params.Turn.Status == "failed" {
+			return agent.ModelEvent{}, false, safeCodexTurnError(params.Turn.Error)
+		}
+		if params.Turn.Status == "interrupted" {
+			return agent.ModelEvent{}, false, context.Canceled
+		}
+		stream.mu.Lock()
+		stream.completed = true
+		stream.mu.Unlock()
+		return agent.ModelEvent{Type: agent.ModelEventCompleted, FinishReason: params.Turn.Status}, true, nil
+	case "error":
+		var params struct {
+			ThreadID  string          `json:"threadId"`
+			TurnID    string          `json:"turnId"`
+			WillRetry bool            `json:"willRetry"`
+			Error     *codexTurnError `json:"error"`
+		}
+		if err := json.Unmarshal(event.Params, &params); err != nil {
+			return agent.ModelEvent{}, false, errors.New("Codex app server reported a turn error")
+		}
+		if !stream.matches(params.ThreadID, params.TurnID) || params.WillRetry {
+			return agent.ModelEvent{}, false, nil
+		}
+		return agent.ModelEvent{}, false, safeCodexTurnError(params.Error)
+	}
+	return agent.ModelEvent{}, false, nil
 }
 
 type codexTurnError struct {
@@ -261,9 +317,10 @@ func (stream *codexModelStream) Close() error {
 				Content: "tool stream closed before the result was available", IsError: true,
 			}), nil)
 		}
-		if stream.release != nil {
-			stream.release()
-		}
+		// Releasing the subscription declines whatever this turn never read, so a
+		// finished turn stops claiming events and the app server is not left
+		// waiting on a queued request.
+		stream.subscription.Close()
 	})
 	return nil
 }

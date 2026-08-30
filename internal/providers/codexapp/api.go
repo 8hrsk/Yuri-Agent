@@ -3,6 +3,7 @@ package codexapp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 const (
@@ -132,6 +133,7 @@ func (client *Client) StartTurn(ctx context.Context, threadID, text string) (Tur
 type TurnOptions struct {
 	ThreadID      string
 	Text          string
+	Images        []string
 	CWD           string
 	Model         string
 	ReadableRoots []string
@@ -147,9 +149,16 @@ func (client *Client) StartTurnWithOptions(ctx context.Context, options TurnOpti
 }
 
 func turnStartParams(options TurnOptions) map[string]any {
+	input := make([]map[string]any, 0, 1+len(options.Images))
+	input = append(input, map[string]any{"type": "text", "text": options.Text})
+	for _, imageURL := range options.Images {
+		if strings.TrimSpace(imageURL) != "" {
+			input = append(input, map[string]any{"type": "image", "url": imageURL})
+		}
+	}
 	params := map[string]any{
 		"threadId":       options.ThreadID,
-		"input":          []map[string]string{{"type": "text", "text": options.Text}},
+		"input":          input,
 		"approvalPolicy": appServerApprovalPolicy,
 		"sandboxPolicy": map[string]any{
 			"type":          "readOnly",

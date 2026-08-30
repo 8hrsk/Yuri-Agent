@@ -11,6 +11,7 @@ import type {
   MemoryRecord,
   MemorySource,
 } from '../lib/contracts'
+import { formatDateTime } from '../lib/datetime'
 import { Icon } from './Icon'
 
 type MemoryViewMode = 'memory' | 'archive'
@@ -52,7 +53,7 @@ function formatDate(value?: string): string {
   if (!value) return 'дата не указана'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+  return formatDateTime(date)
 }
 
 function formatPercent(value: number): string {

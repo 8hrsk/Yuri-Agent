@@ -36,11 +36,12 @@ func (r Role) Valid() bool {
 // deliberately text for the first vertical slice; richer content parts can
 // be added without changing the backend or runtime contracts.
 type Message struct {
-	Role       Role       `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Role       Role          `json:"role"`
+	Content    string        `json:"content,omitempty"`
+	Parts      []ContentPart `json:"parts,omitempty"`
+	Name       string        `json:"name,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
 }
 
 func (m Message) Valid() bool {
@@ -50,7 +51,32 @@ func (m Message) Valid() bool {
 	if m.Role == RoleTool && strings.TrimSpace(m.ToolCallID) == "" {
 		return false
 	}
-	return strings.TrimSpace(m.Content) != "" || len(m.ToolCalls) > 0
+	for _, part := range m.Parts {
+		if !part.Valid() {
+			return false
+		}
+	}
+	return strings.TrimSpace(m.Content) != "" || len(m.Parts) > 0 || len(m.ToolCalls) > 0
+}
+
+type ContentPartType string
+
+const (
+	ContentPartImage ContentPartType = "image"
+)
+
+// ContentPart carries bounded non-text input without teaching the agent loop
+// about any provider's request schema. Data is standard base64 and is populated
+// only after the desktop boundary has validated and content-addressed the blob.
+type ContentPart struct {
+	Type      ContentPartType `json:"type"`
+	Name      string          `json:"name,omitempty"`
+	MediaType string          `json:"media_type"`
+	Data      string          `json:"data"`
+}
+
+func (part ContentPart) Valid() bool {
+	return part.Type == ContentPartImage && strings.HasPrefix(part.MediaType, "image/") && strings.TrimSpace(part.Data) != ""
 }
 
 // ToolCall is an intent emitted by a model. It is never an authorization to
@@ -267,12 +293,24 @@ const (
 	EventRunFailed          EventType = "run.failed"
 )
 
+// RunStatus qualifies a terminal run event. A cancelled run must never be
+// reported to a sink as a plain failure: the UI has to finalize the partial
+// assistant message differently for an interruption than for an error.
+type RunStatus string
+
+const (
+	RunStatusCompleted RunStatus = "completed"
+	RunStatusFailed    RunStatus = "failed"
+	RunStatusCancelled RunStatus = "cancelled"
+)
+
 type Event struct {
 	Type       EventType   `json:"type"`
 	RunID      domain.ID   `json:"run_id,omitempty"`
 	Step       int         `json:"step,omitempty"`
 	ResponseID string      `json:"response_id,omitempty"`
 	Text       string      `json:"text,omitempty"`
+	Status     RunStatus   `json:"status,omitempty"`
 	ToolCall   *ToolCall   `json:"tool_call,omitempty"`
 	ToolResult *ToolResult `json:"tool_result,omitempty"`
 	Usage      Usage       `json:"usage,omitempty"`

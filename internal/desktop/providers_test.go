@@ -11,11 +11,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/OrdoAI/yuri-agent/internal/config"
 	"github.com/OrdoAI/yuri-agent/internal/providers/antigravity"
+	"github.com/OrdoAI/yuri-agent/internal/providers/codexapp"
 	securitykeyring "github.com/OrdoAI/yuri-agent/internal/security/keyring"
 )
 
@@ -327,4 +330,198 @@ func newIPv4ProviderTestServer(t *testing.T, handler http.Handler) *httptest.Ser
 	server := &httptest.Server{Listener: listener, Config: &http.Server{Handler: handler}}
 	server.Start()
 	return server
+}
+
+// codexLaunchTestBridge builds a bridge whose only provider is an enabled
+// Codex app-server entry pointing at binary.
+func codexLaunchTestBridge(t *testing.T, binary string, timeout time.Duration) *Bridge {
+	t.Helper()
+	paths := providerTestPaths(t)
+	if err := os.MkdirAll(paths.DataDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	value := config.Default(paths)
+	value.Providers = []config.ProviderConfig{{
+		ID: "codex", Kind: config.ProviderCodexAppServer, DisplayName: "Codex",
+		Binary: binary, Enabled: true,
+	}}
+	return &Bridge{paths: paths, config: value, codexStartTimeout: timeout}
+}
+
+// TestEnsureCodexSingleFlightStartsOneClient pins the H-5 fix: concurrent
+// callers must not deadlock, must not spawn duplicate app-server processes,
+// and the rest of the bridge must stay responsive while the launch runs.
+func TestEnsureCodexSingleFlightStartsOneClient(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("YURI_TEST_CODEX_MARKER", filepath.Join(root, "codex-methods.log"))
+	binary := buildFakeCodexAppServer(t, root)
+	bridge := codexLaunchTestBridge(t, binary, 10*time.Second)
+	t.Cleanup(func() {
+		bridge.mu.Lock()
+		client := bridge.codex
+		bridge.codex = nil
+		bridge.mu.Unlock()
+		if client != nil {
+			_ = client.Close()
+		}
+	})
+
+	var starts atomic.Int64
+	release := make(chan struct{})
+	// started closes when the first caller reaches the start hook. That is the
+	// only point at which the launch is genuinely in flight, so every assertion
+	// below has to wait for it: otherwise it races the caller goroutines and can
+	// observe a start count of zero.
+	started := make(chan struct{})
+	var signalStarted sync.Once
+	bridge.codexStart = func(ctx context.Context, options codexapp.Options) (*codexapp.Client, error) {
+		starts.Add(1)
+		signalStarted.Do(func() { close(started) })
+		// Hold the launch open so every caller piles onto the single flight.
+		<-release
+		return codexapp.Start(ctx, options)
+	}
+
+	const callers = 16
+	clients := make([]*codexapp.Client, callers)
+	failures := make([]error, callers)
+	var group sync.WaitGroup
+	for index := 0; index < callers; index++ {
+		group.Add(1)
+		go func(index int) {
+			defer group.Done()
+			// A cancel-only context, exactly like a chat run.
+			clients[index], failures[index] = bridge.ensureCodex(context.Background())
+		}(index)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no ensureCodex caller reached the Codex start hook")
+	}
+
+	// The launch is now in flight and pinned open by release, so unrelated
+	// bridge methods must not block on b.mu: this is the deadlock the finding
+	// describes.
+	responsive := make(chan struct{})
+	go func() {
+		bridge.GetOnboardingState()
+		bridge.ListProviders()
+		bridge.Health()
+		close(responsive)
+	}()
+	select {
+	case <-responsive:
+	case <-time.After(5 * time.Second):
+		t.Fatal("bridge methods blocked while the Codex launch was in flight")
+	}
+	if got := starts.Load(); got != 1 {
+		t.Fatalf("concurrent ensureCodex started %d clients, want 1", got)
+	}
+
+	close(release)
+	waited := make(chan struct{})
+	go func() { group.Wait(); close(waited) }()
+	select {
+	case <-waited:
+	case <-time.After(20 * time.Second):
+		t.Fatal("concurrent ensureCodex callers deadlocked")
+	}
+	for index := range clients {
+		if failures[index] != nil {
+			t.Fatalf("ensureCodex caller %d: %v", index, failures[index])
+		}
+		if clients[index] == nil || clients[index] != clients[0] {
+			t.Fatalf("ensureCodex caller %d returned a different client", index)
+		}
+	}
+	if got := starts.Load(); got != 1 {
+		t.Fatalf("start count after the launch = %d, want 1", got)
+	}
+	again, err := bridge.ensureCodex(context.Background())
+	if err != nil || again != clients[0] {
+		t.Fatalf("cached ensureCodex = %p, %v", again, err)
+	}
+	if got := starts.Load(); got != 1 {
+		t.Fatalf("cached ensureCodex started another client: %d", got)
+	}
+}
+
+// TestEnsureCodexHangingStartTimesOut pins the second half of H-5: a codex
+// binary that never completes its handshake must surface a timeout instead of
+// freezing the caller and every other bridge method.
+func TestEnsureCodexHangingStartTimesOut(t *testing.T) {
+	bridge := codexLaunchTestBridge(t, "/nonexistent/codex", 200*time.Millisecond)
+	var starts atomic.Int64
+	hang := make(chan struct{})
+	t.Cleanup(func() { close(hang) })
+	bridge.codexStart = func(ctx context.Context, _ codexapp.Options) (*codexapp.Client, error) {
+		starts.Add(1)
+		// Deliberately ignores ctx: the caller must still be released.
+		<-hang
+		return nil, errors.New("released")
+	}
+
+	type outcome struct {
+		client *codexapp.Client
+		err    error
+	}
+	results := make(chan outcome, 1)
+	go func() {
+		// No deadline on the caller context, matching the chat run context.
+		client, err := bridge.ensureCodex(context.Background())
+		results <- outcome{client: client, err: err}
+	}()
+
+	// Other bridge methods stay responsive while the start hangs.
+	responsive := make(chan struct{})
+	go func() {
+		bridge.GetOnboardingState()
+		bridge.ListProviders()
+		bridge.Health()
+		close(responsive)
+	}()
+	select {
+	case <-responsive:
+	case <-time.After(5 * time.Second):
+		t.Fatal("bridge methods blocked while the Codex start hung")
+	}
+
+	select {
+	case result := <-results:
+		if result.client != nil {
+			t.Fatalf("hanging start returned a client: %p", result.client)
+		}
+		if !errors.Is(result.err, context.DeadlineExceeded) {
+			t.Fatalf("hanging start error = %v, want deadline exceeded", result.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ensureCodex blocked on a hanging Codex start")
+	}
+
+	// The in-flight launch is still owned by the single flight, so a caller that
+	// arrives during the hang joins it instead of spawning a second process.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := bridge.ensureCodex(ctx); err == nil {
+		t.Fatal("ensureCodex succeeded while the start was still hung")
+	}
+	if got := starts.Load(); got != 1 {
+		t.Fatalf("hanging start was retried %d times, want 1", got)
+	}
+}
+
+// TestEnsureCodexRequiresEnabledProvider keeps the configuration error on the
+// fast path, without spawning a launch goroutine.
+func TestEnsureCodexRequiresEnabledProvider(t *testing.T) {
+	paths := providerTestPaths(t)
+	bridge := &Bridge{paths: paths, config: config.Default(paths)}
+	bridge.codexStart = func(context.Context, codexapp.Options) (*codexapp.Client, error) {
+		t.Fatal("ensureCodex started a process without an enabled provider")
+		return nil, nil
+	}
+	if _, err := bridge.ensureCodex(context.Background()); err == nil {
+		t.Fatal("expected a configuration error")
+	}
 }

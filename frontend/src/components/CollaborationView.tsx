@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
 import type { PeerDialogue, PeerDialogueStatus } from '../lib/contracts'
+import { formatDateTime } from '../lib/datetime'
 import { Icon } from './Icon'
 
 type Feedback = { kind: 'success' | 'error'; text: string }
@@ -20,7 +21,7 @@ const statusLabels: Record<PeerDialogueStatus, string> = {
 function formatDate(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+  return formatDateTime(date)
 }
 
 function budgetLabel(used: number, max: number, unit: string): string {

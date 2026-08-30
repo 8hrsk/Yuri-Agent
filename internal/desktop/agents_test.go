@@ -75,12 +75,13 @@ func TestCreateAgentPersistsOwnerIdentityAndInitialPersona(t *testing.T) {
 	bridge := newAgentTestBridge(t)
 	created, err := bridge.CreateAgent(CreateAgentInput{
 		Name: "Аки", Age: 23, Gender: "female", Preferences: "Любит точность и сухой юмор.",
-		Traits: map[string]float64{"warmth": .31, "directness": .91},
+		Backstory: "В детстве Аки пряталась в старой библиотеке и мечтала стать хранительницей знаний.",
+		Traits:    map[string]float64{"warmth": .31, "directness": .91},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !created.Active || created.Name != "Аки" || created.Traits["warmth"] != .31 {
+	if !created.Active || created.Name != "Аки" || created.Backstory == "" || created.Traits["warmth"] != .31 {
 		t.Fatalf("created agent = %#v", created)
 	}
 	state := bridge.GetOnboardingState()
@@ -91,8 +92,15 @@ func TestCreateAgentPersistsOwnerIdentityAndInitialPersona(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persona.Traits["directness"] != .91 || !strings.Contains(persona.Prompt(), "Аки") || !strings.Contains(persona.Prompt(), "сухой юмор") {
+	if persona.Traits["directness"] != .91 || !strings.Contains(persona.Prompt(), "Аки") || !strings.Contains(persona.Prompt(), "сухой юмор") || strings.Contains(persona.Prompt(), "В детстве Аки") {
 		t.Fatalf("persona seed = %#v", persona)
+	}
+	profile, err := bridge.repositories.Agents.Get(context.Background(), domain.ID(created.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Backstory == "" {
+		t.Fatal("agent backstory was not persisted")
 	}
 	if _, err := bridge.repositories.Relationship.Get(context.Background(), domain.ID(created.ID)); err != nil {
 		t.Fatalf("relationship defaults missing: %v", err)
@@ -106,6 +114,23 @@ func TestCreateAgentPersistsOwnerIdentityAndInitialPersona(t *testing.T) {
 	}
 	if loaded.Persona.ProfileID != created.ID || !loaded.Onboarding.AgentConfigured {
 		t.Fatalf("persisted config = %#v", loaded)
+	}
+}
+
+func TestAgentIdentitySeedDeclaresBackstoryBoundaryWithoutEmbeddingRawText(t *testing.T) {
+	now := time.Now().UTC()
+	profile, err := domain.NewAgentProfileWithBackstory("agent_yuri", "Юри", 21, "female", "", "Секретная вымышленная история", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := agentIdentitySeed(profile, []domain.AgentProfile{profile})
+	for _, required := range []string{"вымышленная личная история", "subjective identity data", "не воспринимай её как факт", "разрешение"} {
+		if !strings.Contains(strings.ToLower(seed), strings.ToLower(required)) {
+			t.Fatalf("identity seed missing boundary %q: %s", required, seed)
+		}
+	}
+	if strings.Contains(seed, profile.Backstory) {
+		t.Fatalf("raw backstory leaked into privileged identity seed: %q", seed)
 	}
 }
 

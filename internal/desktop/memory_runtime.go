@@ -165,6 +165,12 @@ func (b *Bridge) reviewTurnInBackground(engine *memory.Engine, backend agent.Mod
 	b.mu.Unlock()
 	go func() {
 		defer b.background.Done()
+		// The chat run this pass belongs to has already completed and emitted
+		// its terminal event, and both the decay pass and the reflection engine
+		// persist through optimistic saves that simply do not land when this
+		// goroutine dies. There is no durable object left in a non-terminal
+		// state to fail, so the recovery reports through the log only.
+		defer b.recoverBridgeGoroutine("memory_review", nil)
 		ctx, cancel := context.WithTimeout(backgroundCtx, 3*time.Minute)
 		defer cancel()
 		decayed, decayErr := engine.ApplyDecay(ctx, turn.Now)

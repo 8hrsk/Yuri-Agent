@@ -1,0 +1,100 @@
+created_at=2026-08-28T12:00:00Z chars=1492 tokens=373 entries=24
+memory-00315 score=0.524377 sources=2 content="Пользователь планирует важный релиз в контексте задачи номер 315"
+memory-00078 score=0.511889 sources=2 content="Пользователь обсуждал утренний друг в контексте задачи номер 78"
+memory-00313 score=0.507948 sources=2 content="Пользователь предпочитает старый проект в контексте задачи номер 313"
+memory-00235 score=0.502765 sources=2 content="Пользователь планирует важный код в контексте задачи номер 235"
+memory-00234 score=0.502051 sources=2 content="Пользователь избегает важный код в контексте задачи номер 234"
+memory-00231 score=0.500268 sources=2 content="Пользователь отложил старый код в контексте задачи номер 231"
+memory-00312 score=0.497323 sources=2 content="Пользователь любит старый проект в контексте задачи номер 312"
+memory-00393 score=0.489506 sources=2 content="Пользователь предпочитает старый чай в контексте задачи номер 393"
+memory-00314 score=0.487036 sources=2 content="Пользователь избегает старый проект в контексте задачи номер 314"
+memory-00229 score=0.484379 sources=2 content="Пользователь начал новый тест в контексте задачи номер 229"
+memory-00157 score=0.482711 sources=2 content="Пользователь начал личный музыка в контексте задачи номер 157"
+memory-00076 score=0.481959 sources=2 content="Пользователь закончил личный дом в контексте задачи номер 76"
+memory-00156 score=0.481906 sources=2 content="Пользователь закончил личный музыка в контексте задачи номер 156"
+memory-00153 score=0.479853 sources=2 content="Пользователь предпочитает важный книга в контексте задачи номер 153"
+memory-00075 score=0.479567 sources=2 content="Пользователь планирует личный дом в контексте задачи номер 75"
+memory-00236 score=0.479130 sources=2 content="Пользователь закончил важный код в контексте задачи номер 236"
+memory-00151 score=0.478785 sources=2 content="Пользователь отложил старый книга в контексте задачи номер 151"
+memory-00150 score=0.478340 sources=2 content="Пользователь обсуждал старый книга в контексте задачи номер 150"
+memory-00147 score=0.477367 sources=2 content="Пользователь планирует новый книга в контексте задачи номер 147"
+memory-00232 score=0.476771 sources=2 content="Пользователь любит старый код в контексте задачи номер 232"
+memory-00228 score=0.474024 sources=2 content="Пользователь закончил новый тест в контексте задачи номер 228"
+memory-00230 score=0.470953 sources=2 content="Пользователь обсуждал новый тест в контексте задачи номер 230"
+memory-00391 score=0.468257 sources=2 content="Пользователь отложил новый здоровье в контексте задачи номер 391"
+memory-00309 score=0.465809 sources=2 content="Пользователь начал новый проект в контексте задачи номер 309"
+--- text ---
+<yuri-memory-context provenance="bounded-core-snapshot">
+  <memory id="memory-00315" kind="procedural" nature="inference" source="message-00315,run-00315">
+    Пользователь планирует важный релиз в контексте задачи номер 315
+  </memory>
+  <memory id="memory-00078" kind="core" nature="emotion" source="message-00078,run-00078">
+    Пользователь обсуждал утренний друг в контексте задачи номер 78
+  </memory>
+  <memory id="memory-00313" kind="user_model" nature="opinion" source="message-00313,run-00313">
+    Пользователь предпочитает старый проект в контексте задачи номер 313
+  </memory>
+  <memory id="memory-00235" kind="user_model" nature="inference" source="message-00235,run-00235">
+    Пользователь планирует важный код в контексте задачи номер 235
+  </memory>
+  <memory id="memory-00234" kind="core" nature="emotion" source="message-00234,run-00234">
+    Пользователь избегает важный код в контексте задачи номер 234
+  </memory>
+  <memory id="memory-00231" kind="procedural" nature="inference" source="message-00231,run-00231">
+    Пользователь отложил старый код в контексте задачи номер 231
+  </memory>
+  <memory id="memory-00312" kind="core" nature="fact" source="message-00312,run-00312">
+    Пользователь любит старый проект в контексте задачи номер 312
+  </memory>
+  <memory id="memory-00393" kind="procedural" nature="opinion" source="message-00393,run-00393">
+    Пользователь предпочитает старый чай в контексте задачи номер 393
+  </memory>
+  <memory id="memory-00314" kind="semantic" nature="emotion" source="message-00314,run-00314">
+    Пользователь избегает старый проект в контексте задачи номер 314
+  </memory>
+  <memory id="memory-00229" kind="user_model" nature="opinion" source="message-00229,run-00229">
+    Пользователь начал новый тест в контексте задачи номер 229
+  </memory>
+  <memory id="memory-00157" kind="user_model" nature="opinion" source="message-00157,run-00157">
+    Пользователь начал личный музыка в контексте задачи номер 157
+  </memory>
+  <memory id="memory-00076" kind="relationship" nature="fact" source="message-00076,run-00076">
+    Пользователь закончил личный дом в контексте задачи номер 76
+  </memory>
+  <memory id="memory-00156" kind="core" nature="fact" source="message-00156,run-00156">
+    Пользователь закончил личный музыка в контексте задачи номер 156
+  </memory>
+  <memory id="memory-00153" kind="procedural" nature="opinion" source="message-00153,run-00153">
+    Пользователь предпочитает важный книга в контексте задачи номер 153
+  </memory>
+  <memory id="memory-00075" kind="procedural" nature="inference" source="message-00075,run-00075">
+    Пользователь планирует личный дом в контексте задачи номер 75
+  </memory>
+  <memory id="memory-00236" kind="semantic" nature="fact" source="message-00236,run-00236">
+    Пользователь закончил важный код в контексте задачи номер 236
+  </memory>
+  <memory id="memory-00151" kind="user_model" nature="inference" source="message-00151,run-00151">
+    Пользователь отложил старый книга в контексте задачи номер 151
+  </memory>
+  <memory id="memory-00150" kind="core" nature="emotion" source="message-00150,run-00150">
+    Пользователь обсуждал старый книга в контексте задачи номер 150
+  </memory>
+  <memory id="memory-00147" kind="procedural" nature="inference" source="message-00147,run-00147">
+    Пользователь планирует новый книга в контексте задачи номер 147
+  </memory>
+  <memory id="memory-00232" kind="relationship" nature="fact" source="message-00232,run-00232">
+    Пользователь любит старый код в контексте задачи номер 232
+  </memory>
+  <memory id="memory-00228" kind="core" nature="fact" source="message-00228,run-00228">
+    Пользователь закончил новый тест в контексте задачи номер 228
+  </memory>
+  <memory id="memory-00230" kind="semantic" nature="emotion" source="message-00230,run-00230">
+    Пользователь обсуждал новый тест в контексте задачи номер 230
+  </memory>
+  <memory id="memory-00391" kind="user_model" nature="inference" source="message-00391,run-00391">
+    Пользователь отложил новый здоровье в контексте задачи номер 391
+  </memory>
+  <memory id="memory-00309" kind="procedural" nature="opinion" source="message-00309,run-00309">
+    Пользователь начал новый проект в контексте задачи номер 309
+  </memory>
+</yuri-memory-context>

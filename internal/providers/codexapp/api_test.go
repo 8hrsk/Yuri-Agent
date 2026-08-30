@@ -83,6 +83,17 @@ func TestThreadStartParamsIncludesDynamicToolsInAppServerShape(t *testing.T) {
 	}
 }
 
+func TestTurnStartParamsIncludesNativeImageInput(t *testing.T) {
+	params := turnStartParams(TurnOptions{ThreadID: "thread-test", Text: "prompt", Images: []string{"data:image/png;base64,iVBORw0KGgo="}})
+	input, ok := params["input"].([]map[string]any)
+	if !ok || len(input) != 2 {
+		t.Fatalf("turn input = %#v", params["input"])
+	}
+	if input[0]["type"] != "text" || input[1]["type"] != "image" || input[1]["url"] != "data:image/png;base64,iVBORw0KGgo=" {
+		t.Fatalf("turn input = %#v", input)
+	}
+}
+
 func assertRuntimeRoots(t *testing.T, params map[string]any, want []string) {
 	t.Helper()
 	got, ok := params["runtimeWorkspaceRoots"].([]string)

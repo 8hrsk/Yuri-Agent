@@ -57,3 +57,16 @@ func TestAffectiveEventDecayAndApplication(t *testing.T) {
 		t.Fatalf("applied affect = %#v", updated)
 	}
 }
+
+func TestCommonPersonaTraitsIncludeExpandedIdentityControls(t *testing.T) {
+	for _, trait := range []PersonaTraitName{
+		TraitEmpathy, TraitSociability, TraitShyness, TraitAnxiety, TraitFearfulness,
+		TraitEmotionalStability, TraitSensitivity, TraitPossessiveness, TraitInitiative,
+		TraitImpulsivity, TraitStubbornness, TraitOptimism, TraitCuriosity, TraitSuspicion,
+		TraitRomanticTone, TraitTrust, TraitAttachment, TraitFormality, TraitTsundere,
+	} {
+		if _, ok := CommonPersonaTraits[trait]; !ok {
+			t.Fatalf("CommonPersonaTraits missing %q", trait)
+		}
+	}
+}

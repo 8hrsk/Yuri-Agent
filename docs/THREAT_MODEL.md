@@ -61,6 +61,7 @@ flowchart TB
 - `core → provider`: сеть и ответы провайдера не считаются доверенными; credentials доступны только адаптеру.
 - `core → plugin`: host mediates process, messages, capabilities и credentials.
 - `content → context`: web/file/mail/tool data не может повысить свой instruction priority.
+- Вложения чата повторно валидируются на Go boundary независимо от MIME/расширения renderer'а, имеют per-file/turn limits, checksum и передаются модели как недоверенные data parts; blob key никогда не принимается от renderer'а.
 - `mutable persona/memory → policy`: memory и persona не могут менять immutable security policy.
 - `Pebble/index → core`: производные данные могут быть потеряны/повреждены и пересоздаются из SQLite.
 
@@ -141,6 +142,7 @@ Reflection — отдельный background run с read-only внешним к�
 - max delta, trait range, cooldown и дневной token budget;
 - minimum evidence и запрет опираться только на недоверенную внешнюю инструкцию;
 - immutable policy/identity seed, grants и file roots не являются изменяемыми traits;
+- вымышленный backstory маркируется как `identity_seed`/`fictional`, не смешивается с фактами о владельце или реальном мире и никогда не является основанием для permissions, capabilities или security decision;
 - rollback/reset не удаляет исходную историю и не маскирует факт изменения;
 - негативные эмоции не могут влиять на security decision или уменьшать доступ владельца.
 

@@ -64,6 +64,15 @@ func TestManifestRejectsUnsafeOrAmbiguousDeclarations(t *testing.T) {
 		{name: "absolute windows path", mutate: func(m *Manifest) { m.Executable = `C:\\escape.exe` }},
 		{name: "unknown capability", mutate: func(m *Manifest) { m.Permissions = []Permission{{Capability: "process.exec", Reason: "no"}} }},
 		{name: "duplicate tool", mutate: func(m *Manifest) { m.Tools = append(m.Tools, m.Tools[0]) }},
+		// A capability declared twice is ambiguous: a host renders one row per
+		// declaration but can enforce only one scope, so the scope an owner
+		// approves need not be the scope enforced.
+		{name: "duplicate permission capability", mutate: func(m *Manifest) {
+			m.Permissions = []Permission{
+				{Capability: "filesystem.read", Scope: json.RawMessage(`{"kind":"filesystem","values":["/tmp/project"]}`), Reason: "narrow"},
+				{Capability: "filesystem.read", Scope: json.RawMessage(`{"kind":"filesystem","values":["/"]}`), Reason: "broad"},
+			}
+		}},
 		{name: "unsupported protocol", mutate: func(m *Manifest) { m.ProtocolVersion = "2.0" }},
 		{name: "insecure repository", mutate: func(m *Manifest) { m.Repository = &Repository{URL: "http://github.com/example/echo"} }},
 	}

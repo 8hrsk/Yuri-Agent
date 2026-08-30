@@ -70,7 +70,18 @@ func (r *AuditRepository) Get(ctx context.Context, id domain.ID) (AuditEvent, er
 	return r.get(ctx, string(id))
 }
 
+// auditSelect lists the full record so Get and the list methods share one
+// scanner and one round-trip per query.
+const auditSelect = `
+	SELECT id, run_id, tool_call_id, approval_id, actor, action, target, decision,
+	       payload_redacted, duration_ms, created_at
+	FROM audit_events`
+
 func (r *AuditRepository) get(ctx context.Context, id string) (AuditEvent, error) {
+	return scanAuditEvent(r.db.QueryRowContext(ctx, auditSelect+` WHERE id = ?`, id))
+}
+
+func scanAuditEvent(row rowScanner) (AuditEvent, error) {
 	var (
 		event                                    AuditEvent
 		idValue, actor, action, target, decision string
@@ -78,10 +89,7 @@ func (r *AuditRepository) get(ctx context.Context, id string) (AuditEvent, error
 		runID, toolCallID, approvalID            sql.NullString
 		durationMS                               int64
 	)
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, run_id, tool_call_id, approval_id, actor, action, target, decision,
-		       payload_redacted, duration_ms, created_at
-		FROM audit_events WHERE id = ?`, id).Scan(
+	err := row.Scan(
 		&idValue, &runID, &toolCallID, &approvalID, &actor, &action, &target, &decision,
 		&payload, &durationMS, &createdAt)
 	if err != nil {
@@ -109,67 +117,54 @@ func (r *AuditRepository) get(ctx context.Context, id string) (AuditEvent, error
 	return event, nil
 }
 
-// List returns newest audit events first. The optional limit is an application
-// bound and is not allowed to be negative.
-func (r *AuditRepository) List(ctx context.Context, limit ...int) ([]AuditEvent, error) {
-	return r.list(ctx, "", nil, limit...)
+// List returns newest audit events first. The optional window is
+// (limit, offset); neither may be negative. The journal has no retention, so a
+// caller that supplies no limit is given the newest defaultListLimit events
+// rather than the whole history.
+func (r *AuditRepository) List(ctx context.Context, window ...int) ([]AuditEvent, error) {
+	return r.list(ctx, "", nil, window...)
 }
 
-func (r *AuditRepository) ListByRun(ctx context.Context, runID domain.ID, limit ...int) ([]AuditEvent, error) {
+// ListByRun is bounded exactly like List.
+func (r *AuditRepository) ListByRun(ctx context.Context, runID domain.ID, window ...int) ([]AuditEvent, error) {
 	if runID.Empty() {
 		return nil, fmt.Errorf("%w: run id is required", domain.ErrInvalidArgument)
 	}
-	return r.list(ctx, "run_id = ?", []any{string(runID)}, limit...)
+	return r.list(ctx, "run_id = ?", []any{string(runID)}, window...)
 }
 
-func (r *AuditRepository) list(ctx context.Context, predicate string, args []any, limit ...int) ([]AuditEvent, error) {
+func (r *AuditRepository) list(ctx context.Context, predicate string, args []any, window ...int) ([]AuditEvent, error) {
 	if err := requireDatabase(r.db); err != nil {
 		return nil, err
 	}
 	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
-	query := "SELECT id FROM audit_events"
+	limit, offset, err := boundedListWindow("audit", window)
+	if err != nil {
+		return nil, err
+	}
+	query := auditSelect
 	if predicate != "" {
 		query += " WHERE " + predicate
 	}
 	query += " ORDER BY created_at DESC, id DESC"
-	if len(limit) > 0 {
-		if limit[0] < 0 {
-			return nil, fmt.Errorf("%w: audit limit cannot be negative", domain.ErrInvalidArgument)
-		}
-		if limit[0] > 0 {
-			query += " LIMIT ?"
-			args = append(args, limit[0])
-		}
-	}
+	query, args = appendWindow(query, args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, wrappedSQLError("list audit events", err)
 	}
-	ids := make([]string, 0)
+	defer rows.Close()
+	result := make([]AuditEvent, 0)
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, wrappedSQLError("scan audit event id", err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, wrappedSQLError("iterate audit events", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, wrappedSQLError("close audit events", err)
-	}
-	result := make([]AuditEvent, 0, len(ids))
-	for _, id := range ids {
-		item, err := r.get(ctx, id)
-		if err != nil {
-			return nil, err
+		item, scanErr := scanAuditEvent(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
 		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrappedSQLError("iterate audit events", err)
 	}
 	return result, nil
 }
