@@ -50,6 +50,15 @@ type Options struct {
 	LeaseDuration     time.Duration
 	PollInterval      time.Duration
 	MaxClaimsPerCycle int
+	// MaxConcurrentRuns bounds how many claimed jobs execute at the same time
+	// within one cycle. Executing claims one after another lets a single long
+	// agent run hold back every other due schedule for as long as it lasts, so
+	// the limit is greater than one by default.
+	MaxConcurrentRuns int
+	// MaxRunDuration is the upper bound applied to a job whose schedule has no
+	// Budget.MaxDurationSeconds. Without it such a job runs under a context
+	// that never expires and can pin a pool slot indefinitely.
+	MaxRunDuration time.Duration
 	// StopTimeout bounds how long Stop waits for an executor and the current
 	// worker cycle to return. A timed-out worker remains in the stopping state,
 	// so a new worker cannot overlap it; a later Stop can be used to join it.
@@ -57,10 +66,12 @@ type Options struct {
 }
 
 const (
-	defaultLeaseDuration = 2 * time.Minute
-	defaultPollInterval  = 15 * time.Second
-	defaultMaxClaims     = 16
-	defaultStopTimeout   = 5 * time.Second
+	defaultLeaseDuration  = 2 * time.Minute
+	defaultPollInterval   = 15 * time.Second
+	defaultMaxClaims      = 16
+	defaultMaxConcurrency = 4
+	defaultMaxRunDuration = 30 * time.Minute
+	defaultStopTimeout    = 5 * time.Second
 )
 
 // RunDueResult summarizes one polling cycle. Executor failures are persisted
@@ -84,21 +95,23 @@ func NextOccurrence(schedule Schedule, after time.Time) (time.Time, error) {
 }
 
 type Scheduler struct {
-	repository  Repository
-	executor    Executor
-	clock       domain.Clock
-	workerID    string
-	lease       time.Duration
-	poll        time.Duration
-	maxClaims   int
-	stopTimeout time.Duration
-	startMu     sync.Mutex
-	workerDone  chan struct{}
-	workerStop  context.CancelFunc
-	workerState workerState
-	generation  uint64
-	activeMu    sync.Mutex
-	activeRuns  map[domain.ID]context.CancelFunc
+	repository     Repository
+	executor       Executor
+	clock          domain.Clock
+	workerID       string
+	lease          time.Duration
+	poll           time.Duration
+	maxClaims      int
+	maxConcurrency int
+	maxRunDuration time.Duration
+	stopTimeout    time.Duration
+	startMu        sync.Mutex
+	workerDone     chan struct{}
+	workerStop     context.CancelFunc
+	workerState    workerState
+	generation     uint64
+	activeMu       sync.Mutex
+	activeRuns     map[domain.ID]context.CancelFunc
 }
 
 // workerState is protected by startMu. A separate stopping state is needed so
@@ -142,11 +155,25 @@ func New(repository Repository, executor Executor, options Options) (*Scheduler,
 	if options.MaxClaimsPerCycle == 0 {
 		options.MaxClaimsPerCycle = defaultMaxClaims
 	}
+	if options.MaxConcurrentRuns == 0 {
+		options.MaxConcurrentRuns = defaultMaxConcurrency
+	}
+	// Running more jobs at once than a cycle may claim is meaningless, so the
+	// pool is clamped rather than rejected: a caller that lowers the claim
+	// budget should not have to restate the concurrency limit.
+	if options.MaxClaimsPerCycle > 0 && options.MaxConcurrentRuns > options.MaxClaimsPerCycle {
+		options.MaxConcurrentRuns = options.MaxClaimsPerCycle
+	}
+	if options.MaxRunDuration == 0 {
+		options.MaxRunDuration = defaultMaxRunDuration
+	}
 	if options.StopTimeout == 0 {
 		options.StopTimeout = defaultStopTimeout
 	}
 	if options.LeaseDuration <= 0 || options.LeaseDuration > 30*24*time.Hour ||
 		options.PollInterval <= 0 || options.MaxClaimsPerCycle < 1 || options.MaxClaimsPerCycle > 10000 ||
+		options.MaxConcurrentRuns < 1 || options.MaxConcurrentRuns > 10000 ||
+		options.MaxRunDuration <= 0 || options.MaxRunDuration > 30*24*time.Hour ||
 		options.StopTimeout <= 0 || options.StopTimeout > 30*24*time.Hour {
 		return nil, fmt.Errorf("%w: invalid scheduler worker options", domain.ErrInvalidArgument)
 	}
@@ -154,6 +181,7 @@ func New(repository Repository, executor Executor, options Options) (*Scheduler,
 		repository: repository, executor: executor, clock: options.Clock,
 		workerID: options.WorkerID, lease: options.LeaseDuration,
 		poll: options.PollInterval, maxClaims: options.MaxClaimsPerCycle,
+		maxConcurrency: options.MaxConcurrentRuns, maxRunDuration: options.MaxRunDuration,
 		activeRuns:  make(map[domain.ID]context.CancelFunc),
 		stopTimeout: options.StopTimeout,
 	}, nil
@@ -326,13 +354,83 @@ func (s *Scheduler) StopRun(ctx context.Context, id domain.ID) error {
 	return s.CancelRun(ctx, id)
 }
 
+// runBatch bounds how many claimed jobs execute at once and joins all of them
+// before the cycle returns. Joining inside the cycle is what keeps Stop's
+// contract intact: once the worker goroutine has returned, no executor is
+// still running and no further side effects are possible.
+type runBatch struct {
+	slots     chan struct{}
+	wait      sync.WaitGroup
+	mu        sync.Mutex
+	completed int
+	failed    int
+}
+
+func newRunBatch(limit int) *runBatch {
+	if limit < 1 {
+		limit = 1
+	}
+	return &runBatch{slots: make(chan struct{}, limit)}
+}
+
+// acquire reserves a pool slot before the caller claims a row, so a claimed
+// job never waits for a slot while holding a lease it is not yet renewing.
+func (b *runBatch) acquire(ctx context.Context) error {
+	select {
+	case b.slots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (b *runBatch) release() { <-b.slots }
+
+// start consumes the slot reserved by acquire and runs the job on its own
+// goroutine.
+func (b *runBatch) start(run func() bool) {
+	b.wait.Add(1)
+	go func() {
+		defer b.wait.Done()
+		defer b.release()
+		succeeded := run()
+		b.mu.Lock()
+		if succeeded {
+			b.completed++
+		} else {
+			b.failed++
+		}
+		b.mu.Unlock()
+	}()
+}
+
+func (b *runBatch) join() (int, int) {
+	b.wait.Wait()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.completed, b.failed
+}
+
 // RunDue performs one bounded worker cycle. It recovers expired leases, claims
 // due retry/manual rows first, then schedules newly due occurrences. A claim
 // conflict means another worker won the compare-and-set and is ignored.
+//
+// Claims are still made one at a time so their ordering and the optimistic
+// version checks are unchanged, but the claimed jobs execute on a bounded
+// pool: a schedule whose executor runs for minutes no longer blocks every
+// other schedule that came due in the same cycle. The cycle joins the pool
+// before it returns.
 func (s *Scheduler) RunDue(ctx context.Context) (RunDueResult, error) {
 	if err := contextError(ctx); err != nil {
 		return RunDueResult{}, err
 	}
+	batch := newRunBatch(s.maxConcurrency)
+	result, err := s.claimDue(ctx, batch)
+	result.Completed, result.Failed = batch.join()
+	return result, err
+}
+
+func (s *Scheduler) claimDue(ctx context.Context, batch *runBatch) (RunDueResult, error) {
 	now := s.clock.Now().UTC()
 	result := RunDueResult{}
 	recovered, err := s.repository.RecoverExpiredLeases(ctx, now)
@@ -348,22 +446,22 @@ func (s *Scheduler) RunDue(ctx context.Context) (RunDueResult, error) {
 			if remaining == 0 {
 				break
 			}
+			if err := batch.acquire(ctx); err != nil {
+				return result, err
+			}
 			job, err := s.repository.ClaimRetry(ctx, domain.RetryClaim{
 				RunID: queued.ID, Now: now, WorkerID: s.workerID, LeaseDuration: s.lease,
 			})
-			if errors.Is(err, domain.ErrConflict) {
-				continue
-			}
 			if err != nil {
+				batch.release()
+				if errors.Is(err, domain.ErrConflict) {
+					continue
+				}
 				return result, err
 			}
 			remaining--
 			result.Claimed++
-			if s.executeClaim(ctx, job) {
-				result.Completed++
-			} else {
-				result.Failed++
-			}
+			batch.start(func() bool { return s.executeClaim(ctx, job) })
 		}
 	}
 	if remaining == 0 {
@@ -411,24 +509,24 @@ func (s *Scheduler) RunDue(ctx context.Context) (RunDueResult, error) {
 				return result, err
 			}
 		}
+		if err := batch.acquire(ctx); err != nil {
+			return result, err
+		}
 		job, err := s.repository.ClaimScheduled(ctx, domain.ScheduledClaim{
 			ScheduleID: schedule.ID, ExpectedVersion: schedule.Version,
 			ScheduledFor: scheduledFor, NextRunAt: next, Now: now,
 			WorkerID: s.workerID, LeaseDuration: s.lease,
 		})
-		if errors.Is(err, domain.ErrConflict) {
-			continue
-		}
 		if err != nil {
+			batch.release()
+			if errors.Is(err, domain.ErrConflict) {
+				continue
+			}
 			return result, err
 		}
 		remaining--
 		result.Claimed++
-		if s.executeClaim(ctx, job) {
-			result.Completed++
-		} else {
-			result.Failed++
-		}
+		batch.start(func() bool { return s.executeClaim(ctx, job) })
 	}
 	return result, nil
 }
@@ -439,13 +537,17 @@ func (s *Scheduler) RunOnce(ctx context.Context) (RunDueResult, error) {
 }
 
 func (s *Scheduler) executeClaim(parent context.Context, job ScheduledJob) bool {
-	ctx := parent
-	var cancel context.CancelFunc
-	if job.Schedule.Budget.MaxDurationSeconds > 0 {
-		ctx, cancel = context.WithTimeout(parent, time.Duration(job.Schedule.Budget.MaxDurationSeconds)*time.Second)
-	} else {
-		ctx, cancel = context.WithCancel(parent)
+	// A schedule without an explicit duration budget still gets a deadline.
+	// Without one its executor holds a pool slot, a lease, and (at Stop time)
+	// the whole worker for as long as it wants to run.
+	maxDuration := s.maxRunDuration
+	if maxDuration <= 0 {
+		maxDuration = defaultMaxRunDuration
 	}
+	if job.Schedule.Budget.MaxDurationSeconds > 0 {
+		maxDuration = time.Duration(job.Schedule.Budget.MaxDurationSeconds) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(parent, maxDuration)
 	defer cancel()
 	s.activeMu.Lock()
 	s.activeRuns[job.Run.ID] = cancel

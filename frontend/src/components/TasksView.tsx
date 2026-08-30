@@ -10,6 +10,7 @@ import type {
   ScheduleInput,
   ScheduleType,
 } from '../lib/contracts'
+import { formatDateTime } from '../lib/datetime'
 import { Icon } from './Icon'
 
 type Feedback = { kind: 'success' | 'info' | 'error'; text: string }
@@ -80,7 +81,7 @@ function formatDate(value?: string): string {
   if (!value) return 'не запланировано'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+  return formatDateTime(date)
 }
 
 function formatDuration(durationMs?: number): string {
@@ -246,6 +247,26 @@ function RunHistory({ runs, busyIds, onCancel }: {
   </div>
 }
 
+/**
+ * The run log of one task, kept out of the DOM until it is asked for.
+ *
+ * `listJobRuns` is capped at 100, but every card rendered its whole share of
+ * them behind a collapsed `<details>` (H-18). The disclosure is controlled
+ * because `onToggle` fires only after the browser has already expanded the
+ * element.
+ */
+function RunHistoryDisclosure({ runs, busyIds, onCancelRun }: {
+  runs: JobRun[]
+  busyIds: Set<string>
+  onCancelRun: (run: JobRun) => void
+}) {
+  const [open, setOpen] = useState(false)
+  return <details className="task-card__history" open={open}>
+    <summary onClick={(event) => { event.preventDefault(); setOpen((current) => !current) }}><Icon name="chevron-right" width={13} height={13} /> История запусков <span>{runs.length}</span></summary>
+    {open && <RunHistory busyIds={busyIds} onCancel={onCancelRun} runs={runs} />}
+  </details>
+}
+
 function ScheduleCard({ schedule, runs, busy, busyIds, onToggle, onRun, onCancelRun, onEdit, onDelete }: {
   schedule: Schedule
   runs: JobRun[]
@@ -266,7 +287,7 @@ function ScheduleCard({ schedule, runs, busy, busyIds, onToggle, onRun, onCancel
     <div className="task-card__schedule"><span><Icon name="clock" width={13} height={13} /> {scheduleDescription(schedule)}</span><span><Icon name="relationship" width={13} height={13} /> {schedule.timezone}</span></div>
     <div className="task-card__next"><span className="section-heading__overline">NEXT RUN</span><strong>{schedule.enabled ? formatDate(schedule.nextRunAt) : 'на паузе'}</strong>{schedule.lastRunAt && <small>Последний: {formatDate(schedule.lastRunAt)}</small>}</div>
     {schedule.lastError && <div className="task-card__error"><Icon name="warning" width={13} height={13} /> {schedule.lastError}</div>}
-    <details className="task-card__history"><summary><Icon name="chevron-right" width={13} height={13} /> История запусков <span>{runs.length}</span></summary><RunHistory busyIds={busyIds} onCancel={onCancelRun} runs={runs} /></details>
+    <RunHistoryDisclosure busyIds={busyIds} onCancelRun={onCancelRun} runs={runs} />
     <footer className="task-card__actions"><button className="task-action task-action--accent" disabled={busy} onClick={() => onRun(schedule)} type="button"><Icon name="arrow-up" width={13} height={13} /> Запустить сейчас</button><button className="task-action" disabled={busy} onClick={() => onEdit(schedule)} type="button">Изменить</button><button className="task-action task-action--danger" disabled={busy} onClick={() => onDelete(schedule)} type="button">Удалить</button></footer>
   </article>
 }

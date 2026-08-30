@@ -267,12 +267,24 @@ const (
 	EventRunFailed          EventType = "run.failed"
 )
 
+// RunStatus qualifies a terminal run event. A cancelled run must never be
+// reported to a sink as a plain failure: the UI has to finalize the partial
+// assistant message differently for an interruption than for an error.
+type RunStatus string
+
+const (
+	RunStatusCompleted RunStatus = "completed"
+	RunStatusFailed    RunStatus = "failed"
+	RunStatusCancelled RunStatus = "cancelled"
+)
+
 type Event struct {
 	Type       EventType   `json:"type"`
 	RunID      domain.ID   `json:"run_id,omitempty"`
 	Step       int         `json:"step,omitempty"`
 	ResponseID string      `json:"response_id,omitempty"`
 	Text       string      `json:"text,omitempty"`
+	Status     RunStatus   `json:"status,omitempty"`
 	ToolCall   *ToolCall   `json:"tool_call,omitempty"`
 	ToolResult *ToolResult `json:"tool_result,omitempty"`
 	Usage      Usage       `json:"usage,omitempty"`

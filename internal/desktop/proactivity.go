@@ -178,13 +178,55 @@ func (b *Bridge) appendProactivityAuditPayload(ctx context.Context, action, targ
 	})
 }
 
+const (
+	// proactivityLedgerAction is the only audit action the startup ledger
+	// restore cares about.
+	proactivityLedgerAction = "notification.sent"
+
+	// proactivityLedgerWindow is how far back the startup restore reads the
+	// audit journal. The ledger it rebuilds holds exactly three horizons: the
+	// idempotency set (a notification is only re-suppressed while its own
+	// cooldown is live), the per-type cooldown (configured in minutes), and
+	// the per-day counter for the daily limit. The longest of those is one
+	// calendar day in the owner's timezone, so two days covers every entry
+	// that can still change a delivery decision at any UTC offset. Before this
+	// bound the restore read the entire audit journal - a table with no
+	// retention that is appended to on every tool call, notification, install
+	// and persona/relationship/affect revision - so both startup time and
+	// resident memory grew with the age of the installation.
+	proactivityLedgerWindow = 48 * time.Hour
+
+	// proactivityLedgerScanLimit additionally caps how many audit rows the
+	// restore inspects, so a burst of unrelated audit traffic inside the
+	// window cannot reintroduce unbounded startup work either. The journal is
+	// listed newest first, so the cap keeps the most recent rows.
+	proactivityLedgerScanLimit = 2000
+)
+
+// auditLedgerSource is the slice of the audit repository the ledger restore
+// uses. It exists so the bound on the read is testable without a live
+// database.
+type auditLedgerSource interface {
+	List(ctx context.Context, limit ...int) ([]storage.AuditEvent, error)
+}
+
 func (b *Bridge) restoreProactivityLedger(ctx context.Context) error {
-	events, err := b.repositories.Audit.List(ctx)
+	return restoreProactivityLedgerAt(ctx, b.repositories.Audit, b.proactivity.Policy(), time.Now().UTC())
+}
+
+func restoreProactivityLedgerAt(ctx context.Context, source auditLedgerSource, policy *proactivity.Policy, now time.Time) error {
+	events, err := source.List(ctx, proactivityLedgerScanLimit)
 	if err != nil {
 		return err
 	}
+	cutoff := now.Add(-proactivityLedgerWindow)
 	for _, event := range events {
-		if event.Action != "notification.sent" || strings.TrimSpace(event.Target) == "" {
+		// List returns newest first, so the first row older than the window
+		// ends the scan: everything behind it is older still.
+		if event.CreatedAt.Before(cutoff) {
+			break
+		}
+		if event.Action != proactivityLedgerAction || strings.TrimSpace(event.Target) == "" {
 			continue
 		}
 		var payload struct {
@@ -193,7 +235,7 @@ func (b *Bridge) restoreProactivityLedger(ctx context.Context) error {
 		if json.Unmarshal([]byte(event.PayloadRedacted), &payload) != nil || !payload.Type.Valid() {
 			continue
 		}
-		if err := b.proactivity.Policy().RestoreDelivered(domain.ID(event.Target), payload.Type, event.CreatedAt); err != nil {
+		if err := policy.RestoreDelivered(domain.ID(event.Target), payload.Type, event.CreatedAt); err != nil {
 			return err
 		}
 	}

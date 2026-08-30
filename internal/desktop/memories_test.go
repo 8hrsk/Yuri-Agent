@@ -2,6 +2,8 @@ package desktop
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -140,5 +142,79 @@ func TestStageTwoContextUsesCoreAndCrossSessionArchive(t *testing.T) {
 	}
 	if len(snapshot.RecalledMemoryIDs) != 1 {
 		t.Fatalf("snapshot lacks hybrid recall: %#v", snapshot)
+	}
+}
+
+// TestListMemoriesLifecyclePagesFullyThroughBridge is the bridge-level guard for
+// M-17. The lifecycle filter used to be applied in Go after SQL had already
+// applied LIMIT/OFFSET, so a page could come back short — or empty — while
+// matching records sat further down the unfiltered ordering, unreachable on any
+// page. Ordering is pinned/salience-first, so dormant records seeded with low
+// salience land behind the active ones and reproduce exactly that case.
+func TestListMemoriesLifecyclePagesFullyThroughBridge(t *testing.T) {
+	bridge := newMemoryTestBridge(t)
+	ctx := context.Background()
+	agentID := bridge.personaProfileID()
+	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+
+	dormantIDs := make(map[string]bool)
+	for index := 0; index < 12; index++ {
+		id := domain.ID(fmt.Sprintf("memory-lifecycle-%02d", index))
+		record := domain.Memory{
+			ID: id, AgentID: agentID, Scope: domain.MemoryScopeAgentPrivate,
+			Kind: domain.MemoryKindSemantic, Content: fmt.Sprintf("запись %02d", index),
+			Salience: 0.9, Confidence: 0.9, Lifecycle: domain.MemoryLifecycleActive,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		// Every third record becomes dormant, and is given a lower salience so
+		// the default ordering places it behind all the active ones.
+		if index%3 == 0 {
+			record.Salience = 0.1
+		}
+		if err := bridge.repositories.Memories.Create(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+		if index%3 == 0 {
+			if _, err := bridge.repositories.Memories.MarkDormant(ctx, id, 1, now, "test"); err != nil {
+				t.Fatal(err)
+			}
+			dormantIDs[string(id)] = true
+		}
+	}
+	if len(dormantIDs) != 4 {
+		t.Fatalf("expected 4 dormant records, seeded %d", len(dormantIDs))
+	}
+
+	seen := make(map[string]bool)
+	for offset := 0; offset < 12; offset += 3 {
+		views, err := bridge.ListMemories(MemoryListInput{
+			LifecycleState: "dormant", Limit: 3, Offset: offset,
+		})
+		if err != nil {
+			t.Fatalf("list dormant at offset %d: %v", offset, err)
+		}
+		for _, view := range views {
+			if !dormantIDs[view.ID] {
+				t.Fatalf("offset %d returned non-dormant record %q", offset, view.ID)
+			}
+			if seen[view.ID] {
+				t.Fatalf("record %q returned on more than one page", view.ID)
+			}
+			seen[view.ID] = true
+		}
+		// The first page must be full: four dormant records exist, so a page of
+		// three can be satisfied. A short first page is the M-17 symptom.
+		if offset == 0 && len(views) != 3 {
+			t.Fatalf("first dormant page was short: got %d views, want 3", len(views))
+		}
+	}
+	if len(seen) != len(dormantIDs) {
+		t.Fatalf("paging reached %d dormant records, want all %d", len(seen), len(dormantIDs))
+	}
+
+	// An unparseable lifecycle must be rejected rather than silently returning
+	// everything, which is what dropping the Go-side filter would otherwise do.
+	if _, err := bridge.ListMemories(MemoryListInput{LifecycleState: "not-a-state"}); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("invalid lifecycle: got %v, want ErrInvalidArgument", err)
 	}
 }

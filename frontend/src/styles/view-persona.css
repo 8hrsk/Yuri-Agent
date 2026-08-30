@@ -1,0 +1,990 @@
+/* Stage 5 personality, relationship and affect view */
+
+.persona-view {
+  position: relative;
+  width: min(100%, 1240px);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: clamp(28px, 4vw, 54px) clamp(18px, 4vw, 58px) 68px;
+}
+
+.persona-view__hero {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 23px;
+}
+
+.persona-view__hero h1 {
+  margin: 13px 0 0;
+  color: #f9f7ff;
+  font-size: clamp(38px, 5vw, 62px);
+  font-weight: 800;
+  letter-spacing: -0.065em;
+  line-height: 1;
+}
+
+.persona-view__hero p {
+  max-width: 655px;
+  margin: 17px 0 0;
+  color: #9691a6;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.persona-view__metric {
+  display: grid;
+  min-width: 150px;
+  justify-items: end;
+  gap: 5px;
+  padding-bottom: 3px;
+}
+
+.persona-view__metric strong {
+  color: #d8d2f0;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 31px;
+  font-weight: 400;
+}
+
+.persona-view__metric span,
+.persona-panel__count,
+.persona-evolution-toggle__status,
+.persona-trait__bounds,
+.persona-version__meta,
+.persona-profile-card__updated,
+.persona-controls__mode {
+  color: #706b80;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.persona-tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 4px;
+  margin-bottom: 13px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-wash);
+}
+
+.persona-tab {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #817c91;
+  cursor: pointer;
+  font-size: 10px;
+  background: transparent;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.persona-tab:hover,
+.persona-tab--active {
+  border-color: rgba(var(--accent-rgb), 0.19);
+  color: #e2ddf0;
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.persona-loading {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid rgba(var(--accent-rgb), 0.13);
+  border-radius: 8px;
+  color: #8c879c;
+  font-size: 9px;
+  background: rgba(var(--accent-rgb), 0.035);
+}
+
+.persona-loading .memory-spinner {
+  width: 12px;
+  height: 12px;
+}
+
+.persona-overview {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.34fr) minmax(270px, 0.76fr);
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.persona-profile-card,
+.persona-mood-card,
+.persona-panel,
+.persona-safety-note {
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface-wash);
+}
+
+.persona-profile-card,
+.persona-mood-card {
+  padding: 20px;
+}
+
+.persona-profile-card__heading,
+.persona-mood-card__heading,
+.persona-panel__heading,
+.persona-trait__heading,
+.persona-opinion__heading,
+.persona-version__heading,
+.persona-mood__bounds,
+.persona-relationship-panel__meta,
+.persona-affect__row > div:first-child,
+.relationship-signal > div:first-child {
+  display: flex;
+  align-items: center;
+}
+
+.persona-profile-card__heading,
+.persona-mood-card__heading,
+.persona-panel__heading {
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.persona-profile-card h2,
+.persona-mood-card h2,
+.persona-panel h2 {
+  margin: 0;
+  color: #e1deeb;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.persona-version-chip {
+  padding: 5px 8px;
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
+  border-radius: 6px;
+  color: var(--accent-light);
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 9px;
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.persona-profile-card__body {
+  display: flex;
+  min-height: 142px;
+  align-items: center;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.persona-profile-card__copy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.persona-profile-card__copy strong {
+  color: #d9d4e9;
+  font-size: 15px;
+}
+
+.persona-profile-card__copy p,
+.persona-mood-card > p,
+.persona-panel__lead,
+.persona-controls > p,
+.persona-safety-note p {
+  margin: 0;
+  color: #878397;
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.persona-profile-card__updated {
+  color: #5f5c71;
+  font-size: 8px;
+}
+
+.persona-evolution-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 15px;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.persona-evolution-toggle > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 3px;
+}
+
+.persona-evolution-toggle strong {
+  color: #cbc6d8;
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.persona-evolution-toggle small {
+  overflow: hidden;
+  color: #777286;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.persona-evolution-toggle__status {
+  color: #706b80;
+}
+
+.persona-evolution-toggle__status--on {
+  color: var(--mint);
+}
+
+/*
+ * Shared toggle switch (settings view + persona view). Declared once, here,
+ * because this is the position in the cascade the rules already occupied.
+ */
+.toggle {
+  position: relative;
+  display: inline-flex;
+  width: 33px;
+  height: 19px;
+  flex: 0 0 33px;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 100px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.08);
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.toggle i {
+  display: block;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #827c92;
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+.toggle--on {
+  border-color: rgba(var(--mint-rgb), 0.35);
+  background: rgba(var(--mint-rgb), 0.16);
+}
+
+.toggle--on i {
+  background: var(--mint);
+  transform: translateX(14px);
+  box-shadow: 0 0 8px rgba(var(--mint-rgb), 0.5);
+}
+
+.persona-mood-card__heading {
+  margin-bottom: 21px;
+}
+
+.persona-mood {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.persona-mood strong {
+  color: #d4d0df;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.persona-mood > span:last-child {
+  margin-left: auto;
+  color: #706b80;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+}
+
+.persona-mood__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.persona-mood--warm .persona-mood__dot { background: var(--mint); box-shadow: 0 0 8px var(--mint); }
+.persona-mood--cool .persona-mood__dot { background: #9ea9e9; box-shadow: 0 0 8px #9ea9e9; }
+.persona-mood--tense .persona-mood__dot { background: var(--rose); box-shadow: 0 0 8px var(--rose); }
+
+.persona-mood__scale,
+.persona-trait__scale,
+.persona-affect__scale,
+.relationship-signal__scale {
+  position: relative;
+  overflow: hidden;
+  border-radius: 100px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.persona-mood__scale {
+  height: 4px;
+  margin-top: 17px;
+  background: linear-gradient(90deg, rgba(var(--rose-rgb), 0.46), rgba(var(--accent-rgb), 0.32) 50%, rgba(var(--mint-rgb), 0.48));
+}
+
+.persona-mood__scale i {
+  position: absolute;
+  top: -2px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #f5f1ff;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 9px rgba(var(--accent-rgb), 0.8);
+  transform: translateX(-50%);
+}
+
+.persona-mood__bounds {
+  justify-content: space-between;
+  margin-top: 7px;
+  color: #686477;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.persona-mood-card > p {
+  margin-top: 22px;
+  color: #6f6b7c;
+}
+
+.persona-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.16fr) minmax(270px, 0.84fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.persona-main,
+.persona-side {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.persona-panel {
+  min-width: 0;
+  padding: 19px;
+}
+
+.persona-panel--selected {
+  border-color: rgba(var(--accent-rgb), 0.22);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.persona-panel__heading .section-heading__overline {
+  margin-bottom: 7px;
+}
+
+.persona-panel__count {
+  white-space: nowrap;
+}
+
+.persona-panel__lead {
+  max-width: 670px;
+  margin-top: 11px;
+  color: #7d788f;
+}
+
+.persona-traits {
+  display: grid;
+  gap: 17px;
+  margin-top: 20px;
+}
+
+.persona-trait {
+  display: grid;
+  gap: 8px;
+}
+
+.persona-trait__heading {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.persona-trait__heading > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.persona-trait__heading strong {
+  color: #cfc9dc;
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.persona-trait__heading small {
+  overflow: hidden;
+  color: #706c80;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.persona-trait__value {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.persona-trait__value > span {
+  color: #aaa4ba;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 9px;
+}
+
+.persona-pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 5px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #6e697e;
+  cursor: pointer;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  text-transform: uppercase;
+  background: transparent;
+}
+
+.persona-pin:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.25);
+  color: var(--accent-light);
+}
+
+.persona-pin--active {
+  border-color: rgba(var(--mint-rgb), 0.18);
+  color: var(--mint);
+  background: rgba(var(--mint-rgb), 0.06);
+}
+
+.persona-pin:disabled,
+.persona-version__rollback:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.persona-trait__scale {
+  height: 6px;
+}
+
+.persona-trait__bound {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 3px;
+  border-radius: inherit;
+  background: rgba(var(--accent-rgb), 0.25);
+}
+
+.persona-trait__scale i {
+  position: absolute;
+  top: -2px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #efebff;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.65);
+  transform: translateX(-50%);
+}
+
+.persona-trait__bounds {
+  justify-content: space-between;
+  color: #625e72;
+  font-size: 7px;
+}
+
+.persona-trait__bounds span:nth-child(2) {
+  color: #817b91;
+}
+
+.persona-opinions {
+  display: grid;
+  gap: 9px;
+  margin-top: 17px;
+}
+
+.persona-opinion {
+  padding: 12px;
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
+  border-radius: 10px;
+  background: rgba(var(--accent-rgb), 0.035);
+}
+
+.persona-opinion--inference {
+  border-color: rgba(var(--mint-rgb), 0.13);
+  background: rgba(var(--mint-rgb), 0.025);
+}
+
+.persona-opinion__heading {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.persona-opinion__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.persona-opinion__label--opinion { color: var(--accent-light); }
+.persona-opinion__label--inference { color: var(--mint); }
+
+.persona-opinion__confidence {
+  color: #6f6a7e;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+}
+
+.persona-opinion > p {
+  margin: 11px 0 0;
+  color: #c5c0d2;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.persona-opinion > p strong {
+  color: #e0dbeb;
+  font-weight: 620;
+}
+
+.persona-opinion__reason {
+  display: grid;
+  grid-template-columns: 47px minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  color: #777286;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.persona-opinion__reason > span:first-child {
+  color: #a09aaf;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  text-transform: uppercase;
+}
+
+.persona-evidence {
+  margin-top: 10px;
+  color: #777286;
+  font-size: 8px;
+}
+
+.persona-evidence summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.persona-evidence summary::-webkit-details-marker {
+  display: none;
+}
+
+.persona-evidence summary:hover {
+  color: var(--accent-light);
+}
+
+.persona-evidence__list {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+  padding-left: 17px;
+}
+
+.persona-evidence__item {
+  padding: 7px 8px;
+  border-left: 1px solid rgba(var(--accent-rgb), 0.28);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.persona-evidence__item > span {
+  color: #928ca3;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+}
+
+.persona-evidence__item p,
+.persona-evidence__empty {
+  margin: 4px 0 0;
+  color: #777286;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.persona-history {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  margin-top: 18px;
+}
+
+.persona-history::before {
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  left: 15px;
+  width: 1px;
+  background: rgba(var(--accent-rgb), 0.16);
+  content: '';
+}
+
+.persona-version {
+  position: relative;
+  display: grid;
+  grid-template-columns: 45px minmax(0, 1fr);
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.persona-version__marker {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  height: 31px;
+  align-content: center;
+  justify-items: center;
+  gap: 3px;
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
+  border-radius: 8px;
+  color: #8f88a7;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  background: #191829;
+}
+
+.persona-version__marker i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #79718f;
+}
+
+.persona-version--current .persona-version__marker {
+  border-color: rgba(var(--mint-rgb), 0.28);
+  color: var(--mint);
+}
+
+.persona-version--current .persona-version__marker i {
+  background: var(--mint);
+  box-shadow: 0 0 7px var(--mint);
+}
+
+.persona-version__body {
+  min-width: 0;
+  padding: 1px 0 2px;
+}
+
+.persona-version__heading {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.persona-version__heading strong {
+  color: #cfc9dc;
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.persona-version__heading time {
+  color: #696477;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+.persona-version__body > p {
+  margin: 6px 0 0;
+  color: #817b90;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.persona-version__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 7px;
+  color: #615d70;
+  font-size: 7px;
+}
+
+.persona-version__rollback {
+  min-height: 27px;
+  margin-top: 9px;
+  padding: 5px 8px;
+  font-size: 8px;
+}
+
+.relationship-signals,
+.persona-affect {
+  display: grid;
+  gap: 15px;
+  margin-top: 20px;
+}
+
+.relationship-signal,
+.persona-affect__row {
+  display: grid;
+  gap: 7px;
+}
+
+.relationship-signal > div:first-child,
+.persona-affect__row > div:first-child {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.relationship-signal span,
+.persona-affect__row span {
+  color: #aaa5b8;
+  font-size: 9px;
+}
+
+.relationship-signal strong,
+.persona-affect__row strong {
+  color: #8e889f;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  font-weight: 400;
+}
+
+.relationship-signal__scale,
+.persona-affect__scale {
+  height: 5px;
+}
+
+.relationship-signal__scale i,
+.persona-affect__scale i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.42), var(--accent));
+}
+
+.persona-affect__row--negative .persona-affect__scale i {
+  background: linear-gradient(90deg, rgba(var(--rose-rgb), 0.28), var(--rose));
+}
+
+.persona-relationship-panel__meta {
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 21px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+  color: #6a6578;
+  font-size: 8px;
+}
+
+.persona-relationship-panel__meta time {
+  color: #807a91;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+}
+
+.persona-safety-note {
+  display: flex;
+  align-items: start;
+  gap: 10px;
+  padding: 14px;
+  border-color: rgba(var(--mint-rgb), 0.13);
+  background: rgba(var(--mint-rgb), 0.025);
+}
+
+.persona-safety-note__icon {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--mint);
+  background: rgba(var(--mint-rgb), 0.08);
+}
+
+.persona-safety-note strong {
+  display: block;
+  margin-bottom: 5px;
+  color: #b8d8cc;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.persona-safety-note p {
+  color: #758e86;
+  font-size: 8px;
+}
+
+.persona-controls {
+  display: grid;
+  gap: 12px;
+}
+
+.persona-controls > .button {
+  width: max-content;
+}
+
+.persona-controls__mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #615d70;
+  font-size: 7px;
+}
+
+.persona-controls__mode i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--rose);
+}
+
+.persona-controls__mode:has(i) i {
+  box-shadow: 0 0 7px rgba(var(--rose-rgb), 0.35);
+}
+
+.persona-note {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 11px;
+  color: #676275;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.persona-note__icon {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  flex: 0 0 25px;
+  place-items: center;
+  border-radius: 8px;
+  color: #8677c6;
+  background: rgba(159, 133, 255, 0.08);
+}
+
+.persona-empty {
+  margin-top: 17px;
+  padding: 17px;
+  border: 1px dashed rgba(var(--accent-rgb), 0.15);
+  border-radius: 9px;
+  color: #777187;
+  font-size: 9px;
+  text-align: center;
+}
+
+@media (max-width: 960px) {
+  .persona-overview,
+  .persona-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .persona-side {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .persona-relationship-panel,
+  .persona-controls {
+    grid-column: span 1;
+  }
+
+  .persona-safety-note {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 650px) {
+  .persona-view {
+    padding: 25px 20px 45px;
+  }
+
+  .persona-view__hero {
+    align-items: start;
+    flex-direction: column;
+    gap: 17px;
+  }
+
+  .persona-view__metric {
+    justify-items: start;
+  }
+
+  .persona-profile-card__body {
+    min-height: 0;
+  }
+
+  .persona-profile-card__body .yuri-avatar--lg {
+    width: 105px;
+    height: 105px;
+    flex-basis: 105px;
+  }
+
+  .persona-side {
+    grid-template-columns: 1fr;
+  }
+
+  .persona-safety-note {
+    grid-column: span 1;
+  }
+
+  .persona-panel__heading,
+  .persona-trait__heading,
+  .persona-opinion__heading,
+  .persona-version__heading {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .persona-trait__heading > div:last-child {
+    align-self: stretch;
+    justify-content: space-between;
+  }
+
+  .persona-opinion__confidence {
+    margin-top: -5px;
+  }
+
+  .persona-note {
+    align-items: start;
+  }
+}
+

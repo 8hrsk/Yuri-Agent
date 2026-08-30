@@ -62,8 +62,23 @@ type IntegrityReport struct {
 
 // InspectIntegrity runs SQLite's read-only integrity_check pragma and
 // returns every diagnostic row. It does not create tables, change pragmas, or
-// otherwise mutate the database.
+// otherwise mutate the database. The full check verifies every index entry
+// against its table, so its cost grows with the size of the database; startup
+// uses InspectQuickIntegrity instead and this remains the explicit
+// repair/verify path.
 func InspectIntegrity(ctx context.Context, database *sql.DB) (IntegrityReport, error) {
+	return inspectIntegrityPragma(ctx, database, "integrity_check")
+}
+
+// InspectQuickIntegrity runs SQLite's read-only quick_check pragma. It skips
+// the index-content verification that dominates the cost of integrity_check
+// while still detecting the page-level corruption that makes a database
+// unusable, which is the condition startup must refuse to open on.
+func InspectQuickIntegrity(ctx context.Context, database *sql.DB) (IntegrityReport, error) {
+	return inspectIntegrityPragma(ctx, database, "quick_check")
+}
+
+func inspectIntegrityPragma(ctx context.Context, database *sql.DB, pragma string) (IntegrityReport, error) {
 	if err := checkContext(ctx); err != nil {
 		return IntegrityReport{}, err
 	}
@@ -71,12 +86,12 @@ func InspectIntegrity(ctx context.Context, database *sql.DB) (IntegrityReport, e
 		return IntegrityReport{}, errors.New("sqlite database is required")
 	}
 
-	rows, err := database.QueryContext(ctx, "PRAGMA integrity_check")
+	rows, err := database.QueryContext(ctx, "PRAGMA "+pragma)
 	if err != nil {
 		if contextErr := contextError(ctx); contextErr != nil {
 			return IntegrityReport{}, contextErr
 		}
-		return IntegrityReport{}, fmt.Errorf("%w: execute integrity_check: %v", ErrDatabaseIntegrity, err)
+		return IntegrityReport{}, fmt.Errorf("%w: execute %s: %v", ErrDatabaseIntegrity, pragma, err)
 	}
 	defer rows.Close()
 
@@ -87,7 +102,7 @@ func InspectIntegrity(ctx context.Context, database *sql.DB) (IntegrityReport, e
 		}
 		var result string
 		if err := rows.Scan(&result); err != nil {
-			return IntegrityReport{}, fmt.Errorf("%w: scan integrity_check: %v", ErrDatabaseIntegrity, err)
+			return IntegrityReport{}, fmt.Errorf("%w: scan %s: %v", ErrDatabaseIntegrity, pragma, err)
 		}
 		results = append(results, strings.TrimSpace(result))
 	}
@@ -95,13 +110,13 @@ func InspectIntegrity(ctx context.Context, database *sql.DB) (IntegrityReport, e
 		if contextErr := contextError(ctx); contextErr != nil {
 			return IntegrityReport{}, contextErr
 		}
-		return IntegrityReport{}, fmt.Errorf("%w: read integrity_check: %v", ErrDatabaseIntegrity, err)
+		return IntegrityReport{}, fmt.Errorf("%w: read %s: %v", ErrDatabaseIntegrity, pragma, err)
 	}
 	if err := checkContext(ctx); err != nil {
 		return IntegrityReport{}, err
 	}
 	if len(results) == 0 {
-		return IntegrityReport{}, fmt.Errorf("%w: integrity_check returned no result", ErrDatabaseIntegrity)
+		return IntegrityReport{}, fmt.Errorf("%w: %s returned no result", ErrDatabaseIntegrity, pragma)
 	}
 
 	allOK := true
@@ -131,6 +146,18 @@ func IntegrityCheck(ctx context.Context, database *sql.DB) error {
 func CheckIntegrity(ctx context.Context, database *sql.DB) error {
 	return IntegrityCheck(ctx, database)
 }
+
+// QuickIntegrityCheck is the cheap startup gate. It succeeds only when SQLite
+// returns "ok" for every quick_check row.
+func QuickIntegrityCheck(ctx context.Context, database *sql.DB) error {
+	_, err := InspectQuickIntegrity(ctx, database)
+	return err
+}
+
+// startupIntegrityCheck is the check Open runs against an existing database.
+// It is a variable so tests can observe that the normal open path takes the
+// cheap quick_check route rather than the full integrity_check.
+var startupIntegrityCheck = QuickIntegrityCheck
 
 // BackupMigration describes one migration that was pending when a snapshot
 // was taken.
@@ -247,6 +274,10 @@ func createBackup(ctx context.Context, database *sql.DB, databasePath string, pe
 	if err := checkContext(ctx); err != nil {
 		return BackupMetadata{}, err
 	}
+	// database is the caller's live handle. The snapshot itself is taken on a
+	// dedicated connection (see onlineBackup) so it does not occupy the single
+	// application connection, but an absent handle still means the caller has
+	// no open database to snapshot.
 	if database == nil {
 		return BackupMetadata{}, errors.New("sqlite database is required")
 	}
@@ -279,7 +310,7 @@ func createBackup(ctx context.Context, database *sql.DB, databasePath string, pe
 		return BackupMetadata{}, fmt.Errorf("close temporary sqlite backup: %w", err)
 	}
 
-	if err := onlineBackup(ctx, database, temporaryPath); err != nil {
+	if err := onlineBackup(ctx, databasePath, temporaryPath); err != nil {
 		return BackupMetadata{}, fmt.Errorf("create sqlite backup snapshot: %w", err)
 	}
 	if err := syncFile(temporaryPath); err != nil {
@@ -364,11 +395,32 @@ func ensureBackupDirectory(directory string) error {
 	return nil
 }
 
-func onlineBackup(ctx context.Context, database *sql.DB, destination string) (err error) {
+// onlineBackup copies sourcePath into destination through SQLite's online
+// backup API on a connection of its own.
+//
+// The application pool is deliberately a single connection
+// (SetMaxOpenConns(1)), so borrowing it for the whole backup.Step cycle froze
+// every reader and writer in the process for as long as the copy took - on a
+// multi-gigabyte database that is the entire UI hanging on a pre-migration
+// snapshot. A dedicated connection is what the backup API is designed for:
+// other connections keep reading and writing, and a concurrent write simply
+// makes the next Step restart the copy from the current snapshot.
+func onlineBackup(ctx context.Context, sourcePath, destination string) (err error) {
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
-	connection, err := database.Conn(ctx)
+	source, err := sql.Open("sqlite", sqliteFileDSN(sourcePath, false))
+	if err != nil {
+		return fmt.Errorf("open sqlite backup source: %w", err)
+	}
+	defer func() {
+		closeErr := source.Close()
+		if err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+	source.SetMaxOpenConns(1)
+	connection, err := source.Conn(ctx)
 	if err != nil {
 		if contextErr := contextError(ctx); contextErr != nil {
 			return contextErr

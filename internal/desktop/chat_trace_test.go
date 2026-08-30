@@ -97,11 +97,13 @@ func TestRunTraceViewRestoresRedactedToolHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bridge := &Bridge{database: database, repositories: repositories}
-	trace, err := bridge.runTraceView(ctx, run)
+	// The tool calls of a whole page of runs are now read set-based, so the
+	// projection takes the calls it was handed instead of querying per run.
+	callsByRun, err := repositories.ToolCalls.ListByRuns(ctx, []domain.ID{run.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
+	trace := runTraceView(run, callsByRun[run.ID])
 	if trace.Status != string(domain.RunStateCompleted) || len(trace.ToolCalls) != 1 {
 		t.Fatalf("trace = %#v", trace)
 	}

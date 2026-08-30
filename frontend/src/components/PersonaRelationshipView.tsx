@@ -9,6 +9,7 @@ import type {
   RelationshipDimension,
   SubjectiveOpinion,
 } from '../lib/contracts'
+import { formatDateTime } from '../lib/datetime'
 import { dominantAffectMood } from '../lib/personality'
 import { Icon } from './Icon'
 import { YuriAvatar } from './YuriAvatar'
@@ -26,7 +27,7 @@ function formatDate(value?: string): string {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+  return formatDateTime(date)
 }
 
 function percentage(value: number): string {

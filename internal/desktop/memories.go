@@ -123,6 +123,17 @@ func (b *Bridge) ListMemories(input MemoryListInput) ([]MemoryView, error) {
 		IncludeDormant: includeDormant, IncludeDeleted: includeDeleted,
 		Limit: input.Limit, Offset: input.Offset,
 	}
+	// Push an exact lifecycle filter into SQL so it is applied before
+	// LIMIT/OFFSET. Filtering after pagination returned short pages and made
+	// records past the first page unreachable entirely.
+	exactLifecycle := domain.MemoryLifecycle("")
+	if lifecycle != "" && lifecycle != "all" {
+		exactLifecycle = domain.MemoryLifecycle(lifecycle)
+		if !exactLifecycle.Valid() {
+			return nil, fmt.Errorf("%w: invalid memory lifecycle %q", domain.ErrInvalidArgument, lifecycle)
+		}
+		options.Lifecycle = exactLifecycle
+	}
 	if input.Kind != "" && input.Kind != "all" {
 		options.Kind = domain.MemoryKind(input.Kind)
 	}
@@ -139,7 +150,8 @@ func (b *Bridge) ListMemories(input MemoryListInput) ([]MemoryView, error) {
 		hits, err := b.repositories.Memories.Search(ctx, query, storage.MemorySearchOptions{
 			AgentID: b.personaProfileID(), Scope: domain.MemoryScopeAgentPrivate,
 			IncludeDormant: includeDormant, IncludeDeleted: includeDeleted, Kind: options.Kind,
-			Limit: input.Limit, Offset: input.Offset,
+			Lifecycle: exactLifecycle,
+			Limit:     input.Limit, Offset: input.Offset,
 		})
 		if err != nil {
 			return nil, err
@@ -151,9 +163,6 @@ func (b *Bridge) ListMemories(input MemoryListInput) ([]MemoryView, error) {
 	}
 	views := make([]MemoryView, 0, len(memories))
 	for _, item := range memories {
-		if lifecycle != "" && lifecycle != "all" && string(item.Lifecycle) != lifecycle {
-			continue
-		}
 		view, err := b.memoryView(ctx, item)
 		if err != nil {
 			return nil, err

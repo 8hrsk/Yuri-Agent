@@ -141,6 +141,7 @@ Reflection — отдельный background run с read-only внешним к�
 - max delta, trait range, cooldown и дневной token budget;
 - minimum evidence и запрет опираться только на недоверенную внешнюю инструкцию;
 - immutable policy/identity seed, grants и file roots не являются изменяемыми traits;
+- вымышленный backstory маркируется как `identity_seed`/`fictional`, не смешивается с фактами о владельце или реальном мире и никогда не является основанием для permissions, capabilities или security decision;
 - rollback/reset не удаляет исходную историю и не маскирует факт изменения;
 - негативные эмоции не могут влиять на security decision или уменьшать доступ владельца.
 

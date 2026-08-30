@@ -1,0 +1,7 @@
+exact_duplicate found=true id=memory-00042 content="Пользователь избегает старый отпуск в контексте задачи номер 42" key="core:emotion:пользователь избегает старый отпуск в контексте задачи номер 42"
+punctuation_duplicate found=true id=memory-00042 content="Пользователь избегает старый отпуск в контексте задачи номер 42" key="core:emotion:пользователь избегает старый отпуск в контексте задачи номер 42"
+content_duplicate_custom_key found=true id=memory-00099 content="Пользователь планирует важный чай в контексте задачи номер 99" key="extractor:supplied:key"
+different_kind_same_content found=false id= content="" key=""
+dedup_key found=true id=memory-00042 content="Пользователь избегает старый отпуск в контексте задачи номер 42" key="core:emotion:пользователь избегает старый отпуск в контексте задачи номер 42"
+new_fact found=false id= content="" key=""
+explicit_match found=true id=memory-00007 content="Пользователь отложил срочный кофе в контексте задачи номер 7" key="user_model:inference:пользователь отложил срочный кофе в контексте задачи номер 7"

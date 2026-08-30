@@ -97,6 +97,22 @@ func TestDecodeProposalRejectsUnknownTrailingAndDuplicateFields(t *testing.T) {
 	}
 }
 
+func TestExpandedPersonaTraitsUseNonNegativeRanges(t *testing.T) {
+	for _, name := range []string{
+		"empathy", "sociability", "shyness", "anxiety", "fearfulness",
+		"emotional_stability", "sensitivity", "possessiveness", "initiative",
+		"impulsivity", "stubbornness", "optimism", "curiosity", "suspicion",
+		"romantic_tone", "trust", "attachment", "formality", "tsundere",
+	} {
+		if got := defaultTraitRange(name); got != (ValueRange{Min: 0, Max: 1}) {
+			t.Fatalf("defaultTraitRange(%q) = %#v, want [0,1]", name, got)
+		}
+	}
+	if got := defaultTraitRange("adapter_custom_trait"); got != (ValueRange{Min: -1, Max: 1}) {
+		t.Fatalf("custom trait range = %#v, want signed fallback", got)
+	}
+}
+
 func TestEngineAppliesTypedDeltasAndDeterministicDecay(t *testing.T) {
 	now := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
 	snapshot := testSnapshot(now)

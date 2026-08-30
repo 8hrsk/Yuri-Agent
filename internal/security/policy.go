@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,7 +152,7 @@ func (evaluator *PolicyEvaluator) Evaluate(request domain.PermissionRequest) (do
 		if !grant.ExpiresAt.IsZero() && !now.Before(grant.ExpiresAt) {
 			continue
 		}
-		if !scopeCovers(grant.Scope, request.Scope) {
+		if !policyScopeCovers(grant.Scope, request.Scope) {
 			continue
 		}
 		if request.Risk == domain.RiskLow {
@@ -176,50 +175,43 @@ func (evaluator *PolicyEvaluator) Authorize(ctx context.Context, request domain.
 	return evaluator.Evaluate(request)
 }
 
-func scopeCovers(granted, requested domain.CapabilityScope) bool {
-	if !granted.Valid() || !requested.Valid() {
-		return false
-	}
-	if granted.Kind == domain.ScopeUnrestricted {
-		return true
-	}
-	if granted.Kind != requested.Kind {
-		return false
-	}
-	for _, requestedValue := range requested.Values {
-		covered := false
-		for _, grantedValue := range granted.Values {
-			if scopeValueCovers(granted.Kind, grantedValue, requestedValue) {
-				covered = true
-				break
-			}
-		}
-		if !covered {
+// policyScopeCovers applies the shared coverage rule from scope.go. The only
+// thing this evaluator adds is symlink-aware canonicalization of filesystem
+// values, which it must do because it authorizes real paths on this machine:
+// the shared rule is a lexical containment check and would otherwise accept a
+// symlink that points outside the granted root.
+//
+// Canonicalization mirrors the previous per-pair behaviour exactly. A granted
+// value that cannot be resolved is dropped (it could never have covered
+// anything), and a requested value that cannot be resolved fails the whole
+// check (no granted value could have covered it).
+func policyScopeCovers(granted, requested domain.CapabilityScope) bool {
+	if granted.Kind == domain.ScopeFilesystem && requested.Kind == domain.ScopeFilesystem {
+		canonicalGranted, grantedOK := canonicalScope(granted, true)
+		canonicalRequested, requestedOK := canonicalScope(requested, false)
+		if !grantedOK || !requestedOK {
 			return false
 		}
+		return ScopeCovers(canonicalGranted, canonicalRequested)
 	}
-	return true
+	return ScopeCovers(granted, requested)
 }
 
-func scopeValueCovers(kind domain.ScopeKind, granted, requested string) bool {
-	if strings.TrimSpace(granted) == "" || strings.TrimSpace(requested) == "" {
-		return false
-	}
-	switch kind {
-	case domain.ScopeFilesystem:
-		grantedPath, grantErr := canonicalForScope(granted)
-		requestedPath, requestErr := canonicalForScope(requested)
-		if grantErr != nil || requestErr != nil {
-			return false
+// canonicalScope resolves every filesystem value in a scope. When dropUnresolvable
+// is true an unresolvable value is skipped; otherwise it fails the whole scope.
+func canonicalScope(scope domain.CapabilityScope, dropUnresolvable bool) (domain.CapabilityScope, bool) {
+	values := make([]string, 0, len(scope.Values))
+	for _, value := range scope.Values {
+		canonical, err := canonicalForScope(strings.TrimSpace(value))
+		if err != nil {
+			if dropUnresolvable {
+				continue
+			}
+			return domain.CapabilityScope{}, false
 		}
-		return within(grantedPath, requestedPath)
-	case domain.ScopeNetwork:
-		return networkScopeCovers(granted, requested)
-	case domain.ScopeResource:
-		return granted == requested
-	default:
-		return false
+		values = append(values, canonical)
 	}
+	return domain.CapabilityScope{Kind: scope.Kind, Values: values}, true
 }
 
 func canonicalForScope(value string) (string, error) {
@@ -242,22 +234,4 @@ func canonicalForScope(value string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(parent, filepath.Base(cleaned)), nil
-}
-
-func networkScopeCovers(granted, requested string) bool {
-	grantHost := normalizeHost(granted)
-	requestHost := normalizeHost(requested)
-	if grantHost == "" || requestHost == "" {
-		return false
-	}
-	return requestHost == grantHost || strings.HasSuffix(requestHost, "."+grantHost)
-}
-
-func normalizeHost(value string) string {
-	value = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(value, ".")))
-	if parsed, err := url.Parse(value); err == nil && parsed.Hostname() != "" {
-		value = parsed.Hostname()
-	}
-	value = strings.TrimPrefix(value, "*.")
-	return strings.TrimSuffix(value, ".")
 }

@@ -1,0 +1,80 @@
+/* Cross-route in-app notification surface */
+
+.notification-center {
+  position: fixed;
+  z-index: 30;
+  top: 68px;
+  right: 22px;
+  display: grid;
+  width: min(360px, calc(100vw - 44px));
+  gap: 7px;
+  pointer-events: none;
+}
+
+.notification-toast {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 24px;
+  align-items: start;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid rgba(var(--accent-rgb), 0.27);
+  border-radius: 11px;
+  pointer-events: auto;
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.27);
+  background: rgba(25, 24, 42, 0.96);
+  backdrop-filter: blur(14px);
+}
+
+.notification-toast__icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid rgba(var(--accent-rgb), 0.24);
+  border-radius: 9px;
+  color: var(--accent-light);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.notification-toast__copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.notification-toast__copy strong {
+  overflow: hidden;
+  color: #e1dced;
+  font-size: 10px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notification-toast__copy p {
+  margin: 0;
+  color: #aaa4b7;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.notification-toast__copy small {
+  color: #777187;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  text-transform: uppercase;
+}
+
+.notification-toast .icon-button {
+  width: 24px;
+  height: 24px;
+}
+
+@media (max-width: 650px) {
+  .notification-center {
+    top: 59px;
+    right: 12px;
+    width: calc(100vw - 24px);
+  }
+}
+

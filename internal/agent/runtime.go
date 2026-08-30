@@ -65,13 +65,11 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 		input.ModelRequest.MaxOutputTokens = budget.MaxTokens
 	}
 
-	runCtx := ctx
-	var cancel context.CancelFunc
+	duration := defaultMaxDuration
 	if budget.MaxDurationSeconds > 0 {
-		runCtx, cancel = context.WithTimeout(ctx, time.Duration(budget.MaxDurationSeconds)*time.Second)
-	} else {
-		runCtx, cancel = context.WithTimeout(ctx, defaultMaxDuration)
+		duration = time.Duration(budget.MaxDurationSeconds) * time.Second
 	}
+	runCtx, cancel := context.WithTimeout(ctx, duration)
 	defer cancel()
 
 	if err := emit(runCtx, input.Sink, Event{Type: EventRunStarted, RunID: input.RunID}); err != nil {
@@ -117,7 +115,7 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 				return r.fail(runCtx, input, result, fmt.Errorf("%w: backend returned no assistant output", ErrBackend))
 			}
 			result.Message = assistant
-			if err := emit(runCtx, input.Sink, Event{Type: EventRunCompleted, RunID: input.RunID, Step: step, Text: turnText, Usage: result.Usage}); err != nil {
+			if err := emitTerminal(runCtx, input.Sink, Event{Type: EventRunCompleted, RunID: input.RunID, Step: step, Status: RunStatusCompleted, Text: turnText, Usage: result.Usage}); err != nil {
 				return RunResult{}, err
 			}
 			return result, nil
@@ -143,7 +141,7 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 		messages = append(messages, assistant)
 		if len(calls) == 0 {
 			result.Message = assistant
-			if err := emit(runCtx, input.Sink, Event{Type: EventRunCompleted, RunID: input.RunID, Step: step, Text: turnText, Usage: result.Usage}); err != nil {
+			if err := emitTerminal(runCtx, input.Sink, Event{Type: EventRunCompleted, RunID: input.RunID, Step: step, Status: RunStatusCompleted, Text: turnText, Usage: result.Usage}); err != nil {
 				return RunResult{}, err
 			}
 			return result, nil
@@ -576,6 +574,24 @@ func emit(ctx context.Context, sink EventSink, event Event) error {
 	return sink(ctx, event)
 }
 
+// emitTerminal delivers the last event of a run even when the run context is
+// already cancelled. Ordinary emit() short-circuits on cancellation, which used
+// to drop run.completed/run.failed exactly when the owner interrupts a run: the
+// sink never learned the run ended and the partial assistant message stayed in
+// a streaming state forever. The sink receives a context detached from
+// cancellation (but keeping its values) so its own persistence work can still
+// finish; deadlines and cancellation of the surrounding process are the sink's
+// responsibility from here on.
+func emitTerminal(ctx context.Context, sink EventSink, event Event) error {
+	if sink == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return sink(context.WithoutCancel(ctx), event)
+}
+
 func contextErr(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
@@ -590,7 +606,17 @@ func (r *Runtime) fail(ctx context.Context, input RunRequest, result RunResult, 
 		err = ErrBackend
 	}
 	message := redactRuntimeError(err)
-	if emitErr := emit(ctx, input.Sink, Event{Type: EventRunFailed, RunID: input.RunID, Step: result.Steps, Error: message, Usage: result.Usage}); emitErr != nil {
+	// Provider adapters flatten transport errors into a message, so a cancelled
+	// HTTP request no longer satisfies errors.Is(context.Canceled). The run
+	// context is the authoritative signal that the owner interrupted the run.
+	status := RunStatusFailed
+	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+		status = RunStatusCancelled
+	}
+	if emitErr := emitTerminal(ctx, input.Sink, Event{
+		Type: EventRunFailed, RunID: input.RunID, Step: result.Steps,
+		Status: status, Error: message, Usage: result.Usage,
+	}); emitErr != nil {
 		return result, emitErr
 	}
 	return result, err

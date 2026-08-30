@@ -90,18 +90,28 @@ func (r *RunRepository) Get(ctx context.Context, id domain.ID) (domain.AgentRun,
 	return r.get(ctx, string(id))
 }
 
+// runSelect lists the full record so that Get and the list methods share one
+// scanner and one round-trip per query.
+const runColumns = `id, agent_id, kind, conversation_id, parent_run_id, state,
+	       max_steps, max_tokens, max_tool_calls, max_tool_output_bytes, max_duration_seconds,
+	       failure, version, created_at, updated_at, started_at, finished_at`
+
+const runSelect = `
+	SELECT ` + runColumns + `
+	FROM agent_runs`
+
 func (r *RunRepository) get(ctx context.Context, id string) (domain.AgentRun, error) {
+	return scanRun(r.db.QueryRowContext(ctx, runSelect+` WHERE id = ?`, id))
+}
+
+func scanRun(row rowScanner) (domain.AgentRun, error) {
 	var (
 		run                                              domain.AgentRun
 		idValue, agentID, kind, conversationID, parentID string
 		state, failure, createdAt, updatedAt             string
 		startedAt, finishedAt                            sql.NullString
 	)
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, agent_id, kind, conversation_id, parent_run_id, state,
-		       max_steps, max_tokens, max_tool_calls, max_tool_output_bytes, max_duration_seconds,
-		       failure, version, created_at, updated_at, started_at, finished_at
-		FROM agent_runs WHERE id = ?`, id).Scan(
+	err := row.Scan(
 		&idValue, &agentID, &kind, &nullableString{Value: &conversationID}, &nullableString{Value: &parentID}, &state,
 		&run.Budget.MaxSteps, &run.Budget.MaxTokens, &run.Budget.MaxToolCalls, &run.Budget.MaxToolOutputBytes, &run.Budget.MaxDurationSeconds,
 		&nullableString{Value: &failure}, &run.Version, &createdAt, &updatedAt, &startedAt, &finishedAt)
@@ -182,71 +192,61 @@ func (r *RunRepository) Save(ctx context.Context, run domain.AgentRun) error {
 // ListByConversation returns runs in creation order. A nil/empty conversation
 // id is rejected because a run without a conversation is only valid for
 // explicitly background callers, which should use ListByKind or Get.
-func (r *RunRepository) ListByConversation(ctx context.Context, conversationID domain.ID, limit ...int) ([]domain.AgentRun, error) {
+func (r *RunRepository) ListByConversation(ctx context.Context, conversationID domain.ID, window ...int) ([]domain.AgentRun, error) {
 	if conversationID.Empty() {
 		return nil, fmt.Errorf("%w: conversation id is required", domain.ErrInvalidArgument)
 	}
-	return r.list(ctx, "conversation_id = ?", []any{string(conversationID)}, limit...)
+	return r.list(ctx, "conversation_id = ?", []any{string(conversationID)}, window...)
 }
 
-func (r *RunRepository) ListByKind(ctx context.Context, kind domain.RunKind, limit ...int) ([]domain.AgentRun, error) {
+func (r *RunRepository) ListByKind(ctx context.Context, kind domain.RunKind, window ...int) ([]domain.AgentRun, error) {
 	if !kind.Valid() {
 		return nil, fmt.Errorf("%w: invalid run kind %q", domain.ErrInvalidArgument, kind)
 	}
-	return r.list(ctx, "kind = ?", []any{string(kind)}, limit...)
+	return r.list(ctx, "kind = ?", []any{string(kind)}, window...)
 }
 
 // ListByAgent returns runs owned by one named top-level agent. The filter is
 // applied in SQLite so a caller cannot accidentally mix another agent's
 // execution history while assembling activity or recovery views.
-func (r *RunRepository) ListByAgent(ctx context.Context, agentID domain.ID, limit ...int) ([]domain.AgentRun, error) {
+func (r *RunRepository) ListByAgent(ctx context.Context, agentID domain.ID, window ...int) ([]domain.AgentRun, error) {
 	if agentID.Empty() {
 		return nil, fmt.Errorf("%w: agent id is required", domain.ErrInvalidArgument)
 	}
-	return r.list(ctx, "agent_id = ?", []any{strings.TrimSpace(string(agentID))}, limit...)
+	return r.list(ctx, "agent_id = ?", []any{strings.TrimSpace(string(agentID))}, window...)
 }
 
-func (r *RunRepository) list(ctx context.Context, predicate string, args []any, limit ...int) ([]domain.AgentRun, error) {
+// list reads the matching runs in one query. window is the optional
+// (limit, offset) tail forwarded by the exported list methods.
+func (r *RunRepository) list(ctx context.Context, predicate string, args []any, window ...int) ([]domain.AgentRun, error) {
 	if err := requireDatabase(r.db); err != nil {
 		return nil, err
 	}
 	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
-	query := `
-		SELECT id FROM agent_runs WHERE ` + predicate + `
-		ORDER BY created_at ASC, id ASC`
-	if len(limit) > 0 && limit[0] > 0 {
-		query += " LIMIT ?"
-		args = append(args, limit[0])
+	limit, offset, err := listWindow("run", window)
+	if err != nil {
+		return nil, err
 	}
+	query := runSelect + ` WHERE ` + predicate + `
+		ORDER BY created_at ASC, id ASC`
+	query, args = appendWindow(query, args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, wrappedSQLError("list runs", err)
 	}
-	ids := make([]string, 0)
+	defer rows.Close()
+	result := make([]domain.AgentRun, 0)
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, wrappedSQLError("scan run id", err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, wrappedSQLError("iterate runs", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, wrappedSQLError("close runs", err)
-	}
-	result := make([]domain.AgentRun, 0, len(ids))
-	for _, id := range ids {
-		item, err := r.get(ctx, id)
-		if err != nil {
-			return nil, err
+		item, scanErr := scanRun(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
 		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrappedSQLError("iterate runs", err)
 	}
 	return result, nil
 }

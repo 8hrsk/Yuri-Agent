@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +19,14 @@ import (
 const (
 	DefaultMaxMessageBytes = 1 << 20
 	DefaultCloseTimeout    = 2 * time.Second
+	// DefaultWriteTimeout bounds a single stdin frame. A plugin that stops
+	// reading its stdin must not be able to wedge the host forever.
+	DefaultWriteTimeout = 5 * time.Second
+	// DefaultMaxStderrBytes bounds the retained crash diagnostics per plugin.
+	DefaultMaxStderrBytes = 64 << 10
+
+	writeQueueDepth = 64
+	eventQueueDepth = 64
 )
 
 // ClientConfig controls a single plugin process. Stdout is reserved for the
@@ -30,6 +40,11 @@ type ClientConfig struct {
 	Stderr          io.Writer
 	MaxMessageBytes int
 	CloseTimeout    time.Duration
+	// WriteTimeout bounds one stdin frame write. It is the last line of
+	// defence when a plugin stops draining its stdin.
+	WriteTimeout time.Duration
+	// MaxStderrBytes bounds the retained (redacted) stderr tail.
+	MaxStderrBytes int
 }
 
 type response struct {
@@ -37,23 +52,37 @@ type response struct {
 	err      error
 }
 
+// writeRequest hands one framed message to the dedicated writer goroutine so
+// callers never block on the child process' stdin buffer.
+type writeRequest struct {
+	data []byte
+	done chan error
+}
+
 // Client is a concurrency-safe stdio JSON Lines client. It owns the child
 // process and never exposes its stdout pipe to callers.
 type Client struct {
-	cmd        *exec.Cmd
-	stdin      io.WriteCloser
-	config     ClientConfig
-	writeMu    sync.Mutex
+	cmd    *exec.Cmd
+	stdin  *os.File
+	stdout *os.File
+	config ClientConfig
+
+	writes chan writeRequest
+
 	mu         sync.Mutex
 	pending    map[string]chan response
 	events     chan Envelope
 	done       chan struct{}
+	stdoutDone chan struct{}
 	doneOnce   sync.Once
 	eventsOnce sync.Once
 	closeOnce  sync.Once
 	closing    bool
 	processErr error
 	sequence   atomic.Uint64
+
+	droppedEvents atomic.Uint64
+	stderr        *stderrCapture
 }
 
 func NewClient(ctx context.Context, config ClientConfig) (*Client, error) {
@@ -69,8 +98,11 @@ func NewClient(ctx context.Context, config ClientConfig) (*Client, error) {
 	if config.CloseTimeout <= 0 {
 		config.CloseTimeout = DefaultCloseTimeout
 	}
-	if config.Stderr == nil {
-		config.Stderr = io.Discard
+	if config.WriteTimeout <= 0 {
+		config.WriteTimeout = DefaultWriteTimeout
+	}
+	if config.MaxStderrBytes <= 0 {
+		config.MaxStderrBytes = DefaultMaxStderrBytes
 	}
 	cmd := exec.Command(config.Executable, config.Args...)
 	configureProcess(cmd)
@@ -82,41 +114,92 @@ func NewClient(ctx context.Context, config ClientConfig) (*Client, error) {
 		// process secrets must not be inherited by an untrusted plugin.
 		cmd.Env = append([]string{}, config.Env...)
 	}
-	stdin, err := cmd.StdinPipe()
+
+	// Both pipes are owned by this process rather than by os/exec. A pipe the
+	// host created is never closed by cmd.Wait, which removes the documented
+	// race between Wait and a reader that has not drained stdout yet, and it
+	// guarantees that stdin supports a write deadline.
+	stdinRead, stdinWrite, err := os.Pipe()
 	if err != nil {
 		return nil, fmt.Errorf("%w: stdin pipe: %v", ErrPluginExited, err)
 	}
-	stdout, err := cmd.StdoutPipe()
+	stdoutRead, stdoutWrite, err := os.Pipe()
 	if err != nil {
-		_ = stdin.Close()
+		_ = stdinRead.Close()
+		_ = stdinWrite.Close()
 		return nil, fmt.Errorf("%w: stdout pipe: %v", ErrPluginExited, err)
 	}
-	cmd.Stderr = config.Stderr
+	capture := newStderrCapture(config.MaxStderrBytes, config.Stderr)
+	cmd.Stdin = stdinRead
+	cmd.Stdout = stdoutWrite
+	cmd.Stderr = capture
 	if err := cmd.Start(); err != nil {
-		_ = stdin.Close()
+		_ = stdinRead.Close()
+		_ = stdinWrite.Close()
+		_ = stdoutRead.Close()
+		_ = stdoutWrite.Close()
 		return nil, fmt.Errorf("%w: start process: %v", ErrPluginExited, err)
 	}
+	// The child owns its ends now; keeping the host copies open would prevent
+	// EOF from ever being observed on stdout.
+	_ = stdinRead.Close()
+	_ = stdoutWrite.Close()
 
 	client := &Client{
-		cmd: cmd, stdin: stdin, config: config,
-		pending: make(map[string]chan response), events: make(chan Envelope, 64), done: make(chan struct{}),
+		cmd: cmd, stdin: stdinWrite, stdout: stdoutRead, config: config,
+		writes:  make(chan writeRequest, writeQueueDepth),
+		pending: make(map[string]chan response), events: make(chan Envelope, eventQueueDepth),
+		done: make(chan struct{}), stdoutDone: make(chan struct{}),
+		stderr: capture,
 	}
-	go client.readStdout(stdout)
+	go client.readStdout(stdoutRead)
 	go client.waitProcess()
+	go client.writeLoop()
+	// Not guarded by recoverPluginGoroutine: the body is one channel receive
+	// and two (*os.File).Close calls. It owns no durable state, blocks no
+	// caller, and by the time it runs the session is already terminal.
+	go func() {
+		<-client.done
+		// Releasing both descriptors unblocks a reader that is still parked on
+		// a pipe held open by a descendant of the plugin process.
+		_ = client.stdin.Close()
+		_ = client.stdout.Close()
+	}()
 	if done := ctx.Done(); done != nil {
-		go func() {
-			select {
-			case <-done:
-				_ = client.Close()
-			case <-client.done:
-			}
-		}()
+		go client.closeOnContext(done)
 	}
 	return client, nil
 }
 
+// closeOnContext is the only thing that turns "the owner's lifecycle context
+// was cancelled" into "the plugin process is gone". A panic here would leave a
+// third-party child alive holding the owner's granted capabilities, so the
+// recovery kills the process group directly instead of trusting Close.
+func (c *Client) closeOnContext(done <-chan struct{}) {
+	defer recoverPluginGoroutine("plugin_close_on_context", func(err error) {
+		_ = killProcess(c.cmd)
+		c.finish(fmt.Errorf("%w: %v", ErrPluginExited, err))
+	})
+	select {
+	case <-done:
+		fireFaultHook(faultCloseOnContext)
+		_ = c.Close()
+	case <-c.done:
+	}
+}
+
 func (c *Client) readStdout(reader io.Reader) {
+	defer close(c.stdoutDone)
 	defer c.eventsOnce.Do(func() { close(c.events) })
+	// This is the one goroutine in the package that parses bytes a hostile or
+	// merely buggy third-party process controls end to end. Without the guard a
+	// single fault in the decoder takes the owner's whole desktop application,
+	// UI included, down with it. The report terminates the session: nothing
+	// will read this stdout again, so leaving Done() open would park every
+	// in-flight caller and the supervisor's watcher forever.
+	defer recoverPluginGoroutine("plugin_read_stdout", func(err error) {
+		c.finish(fmt.Errorf("%w: %v", ErrInvalidProtocol, err))
+	})
 	scanner := bufio.NewScanner(reader)
 	bufferSize := c.config.MaxMessageBytes
 	if bufferSize > 64*1024 {
@@ -141,6 +224,7 @@ func (c *Client) readStdout(reader io.Reader) {
 			c.finish(err)
 			return
 		}
+		fireFaultHook(faultReadStdout)
 		if envelope.Type == MessageHandshakeResult || envelope.Type == MessageHealthResult || envelope.Type == MessageToolResult || envelope.Type == MessageShutdownResult || envelope.Type == MessageError {
 			c.deliverResponse(envelope)
 			continue
@@ -150,35 +234,83 @@ func (c *Client) readStdout(reader io.Reader) {
 		case <-c.done:
 			return
 		default:
-			c.finish(fmt.Errorf("%w: event buffer is full", ErrInvalidProtocol))
-			return
+			// A slow event consumer is a load problem, not a protocol
+			// violation: dropping the event keeps the session alive instead of
+			// turning a burst into a restart loop.
+			c.droppedEvents.Add(1)
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "token too long") {
+		// bufio.Scanner stores ErrTooLong on itself, so errors.Is identifies
+		// an oversized line exactly.  Matching the substring "token too long"
+		// instead also fired on any reader error whose own message happened to
+		// quote that phrase, mislabelling an unrelated read failure as a
+		// protocol size violation.
+		if errors.Is(err, bufio.ErrTooLong) {
 			c.finish(fmt.Errorf("%w: JSONL line is too long", ErrMessageTooLarge))
 			return
 		}
 		c.finish(fmt.Errorf("%w: read stdout: %v", ErrPluginExited, err))
 		return
 	}
-	c.finish(nil)
+	// A clean EOF is reported by waitProcess so the exit status is preserved.
+	// The fallback only matters for a plugin that closes stdout but keeps
+	// running: callers must still fail fast instead of blocking.
+	//
+	// Not guarded by recoverPluginGoroutine: the body is a two-way select and
+	// one call to finish, which is itself a sync.Once around map and channel
+	// operations that cannot panic. It owns no state of its own.
+	go func() {
+		select {
+		case <-c.done:
+		case <-time.After(c.config.CloseTimeout):
+			c.finish(nil)
+		}
+	}()
 }
 
 func (c *Client) deliverResponse(envelope Envelope) {
-	c.mu.Lock()
-	pending := c.pending[envelope.ReplyTo]
-	if pending != nil {
-		delete(c.pending, envelope.ReplyTo)
-	}
-	c.mu.Unlock()
+	pending := c.takePending(envelope.ReplyTo)
 	if pending != nil {
 		pending <- response{envelope: envelope}
 	}
 }
 
+// takePending removes and returns one waiter. The unlock is deferred so a
+// panic in the decoder above cannot leave c.mu held, which would wedge every
+// caller and the recovery reporter itself.
+func (c *Client) takePending(id string) chan response {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pending := c.pending[id]
+	if pending != nil {
+		delete(c.pending, id)
+	}
+	return pending
+}
+
 func (c *Client) waitProcess() {
+	// Nothing else reaps the child. If this goroutine dies before Wait has
+	// returned, the process is neither reaped nor killed and keeps running with
+	// the owner's granted capabilities, so the recovery kills the process group
+	// and terminates the session.
+	reaped := false
+	defer recoverPluginGoroutine("plugin_wait_process", func(err error) {
+		if !reaped {
+			_ = killProcess(c.cmd)
+		}
+		c.finish(fmt.Errorf("%w: %v", ErrPluginExited, err))
+	})
 	err := c.cmd.Wait()
+	reaped = true
+	fireFaultHook(faultWaitProcess)
+	// os/exec may report the exit before the last protocol frame has been read
+	// out of the pipe. Draining first keeps a short-lived plugin's tool_result
+	// from being replaced by ErrPluginExited.
+	select {
+	case <-c.stdoutDone:
+	case <-time.After(c.config.CloseTimeout):
+	}
 	c.mu.Lock()
 	closing := c.closing
 	c.mu.Unlock()
@@ -205,6 +337,7 @@ func (c *Client) finish(err error) {
 			c.mu.Unlock()
 		}
 		c.mu.Lock()
+		defer c.mu.Unlock()
 		c.processErr = err
 		for id, pending := range c.pending {
 			delete(c.pending, id)
@@ -215,7 +348,6 @@ func (c *Client) finish(err error) {
 			pending <- response{err: pendingErr}
 		}
 		close(c.done)
-		c.mu.Unlock()
 	})
 }
 
@@ -223,7 +355,100 @@ func (c *Client) nextID() string {
 	return fmt.Sprintf("req-%d", c.sequence.Add(1))
 }
 
-func (c *Client) writeEnvelope(envelope Envelope) error {
+// writeLoop is the single owner of the stdin descriptor. Serializing writes in
+// one goroutine lets every caller wait on its own context instead of on a
+// blocking pipe write.
+func (c *Client) writeLoop() {
+	// A panic here strands the frame that was already taken off the queue: its
+	// caller is parked on request.done, and nothing drains c.writes again. The
+	// report terminates the session first (which is what every writer's select
+	// is watching), then answers the in-flight request and anything already
+	// queued, so no caller is left waiting on a writer that no longer exists.
+	var inFlight chan error
+	defer recoverPluginGoroutine("plugin_write_loop", func(err error) {
+		// A half-written or unwritten frame desynchronizes the stream exactly
+		// as a write error does, so callers get the same classification.
+		failure := fmt.Errorf("%w: %v", ErrPluginExited, err)
+		c.finish(failure)
+		if inFlight != nil {
+			select {
+			case inFlight <- failure:
+			default:
+			}
+		}
+		c.drainWrites(failure)
+	})
+	for {
+		select {
+		case request := <-c.writes:
+			inFlight = request.done
+			fireFaultHook(faultWriteLoop)
+			err := c.writeFrame(request.data)
+			if err != nil {
+				// A failed or partial frame desynchronizes the stream; the
+				// session cannot be reused. Terminate the session *before*
+				// releasing the caller: otherwise the caller observes the
+				// write error while Done() is still open and Err() is still
+				// nil, and may reuse a client that is already doomed. The
+				// done channel is buffered, so ordering these two sends
+				// cannot deadlock.
+				c.finish(err)
+				request.done <- err
+				return
+			}
+			request.done <- nil
+			inFlight = nil
+		case <-c.done:
+			return
+		}
+	}
+}
+
+// drainWrites releases every frame still queued for a writer that will never
+// run again. Each done channel is buffered, so the non-blocking send only ever
+// skips a caller that has already given up.
+func (c *Client) drainWrites(err error) {
+	for {
+		select {
+		case request := <-c.writes:
+			select {
+			case request.done <- err:
+			default:
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (c *Client) writeFrame(data []byte) error {
+	if c.config.WriteTimeout > 0 {
+		_ = c.stdin.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
+	}
+	written, err := c.stdin.Write(data)
+	if err == nil && written != len(data) {
+		err = io.ErrShortWrite
+	}
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return fmt.Errorf("%w: stdin write timed out after %s; the plugin stopped reading its stdin", ErrPluginExited, c.config.WriteTimeout)
+	}
+	return fmt.Errorf("%w: write stdin: %v", ErrPluginExited, err)
+}
+
+func (c *Client) exitError() error {
+	if err := c.Err(); err != nil {
+		return err
+	}
+	return ErrPluginExited
+}
+
+func (c *Client) writeEnvelope(ctx context.Context, envelope Envelope) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := envelope.Validate(); err != nil {
 		return err
 	}
@@ -235,24 +460,25 @@ func (c *Client) writeEnvelope(envelope Envelope) error {
 		return fmt.Errorf("%w: got %d bytes", ErrMessageTooLarge, len(data))
 	}
 	data = append(data, '\n')
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	c.mu.Lock()
-	closed := isClosed(c.done)
-	err = c.processErr
-	c.mu.Unlock()
-	if closed {
-		if err == nil {
-			err = ErrPluginExited
-		}
+	if isClosed(c.done) {
+		return c.exitError()
+	}
+	request := writeRequest{data: data, done: make(chan error, 1)}
+	select {
+	case c.writes <- request:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.done:
+		return c.exitError()
+	}
+	select {
+	case err := <-request.done:
 		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.done:
+		return c.exitError()
 	}
-	if _, err := c.stdin.Write(data); err != nil {
-		wrapped := fmt.Errorf("%w: write stdin: %v", ErrPluginExited, err)
-		c.finish(wrapped)
-		return wrapped
-	}
-	return nil
 }
 
 func (c *Client) call(ctx context.Context, method string, params any, result any) error {
@@ -279,8 +505,12 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 	}
 	c.pending[id] = channel
 	c.mu.Unlock()
-	if err := c.writeEnvelope(envelope); err != nil {
+	if err := c.writeEnvelope(ctx, envelope); err != nil {
 		c.removePending(id)
+		if ctx.Err() != nil {
+			// The frame may already be on its way to the plugin.
+			c.CancelRequest(id)
+		}
 		return err
 	}
 	select {
@@ -306,6 +536,9 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 		return nil
 	case <-ctx.Done():
 		c.removePending(id)
+		// Graceful cancellation first: killing the process group is an
+		// escalation the supervisor performs only if the plugin stays wedged.
+		c.CancelRequest(id)
 		return ctx.Err()
 	case <-c.done:
 		if err := c.Err(); err != nil {
@@ -321,12 +554,27 @@ func (c *Client) removePending(id string) {
 	c.mu.Unlock()
 }
 
-func (c *Client) writeCancel(id string) error {
-	envelope, err := NewEvent(MethodCancel, CancelParams{RequestID: id})
+// CancelRequest sends the best-effort request.cancel notification for an
+// in-flight request. It never blocks the caller — a caller whose context was
+// just cancelled must not be made to wait on the plugin again — and the write
+// itself is bounded by the configured close timeout.
+func (c *Client) CancelRequest(id string) {
+	if strings.TrimSpace(id) == "" || isClosed(c.done) {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), c.config.CloseTimeout)
+		defer cancel()
+		_ = c.writeCancel(ctx, id)
+	}()
+}
+
+func (c *Client) writeCancel(ctx context.Context, id string) error {
+	envelope, err := NewRequest(c.nextID(), MethodCancel, CancelParams{RequestID: id})
 	if err != nil {
 		return err
 	}
-	return c.writeEnvelope(envelope)
+	return c.writeEnvelope(ctx, envelope)
 }
 
 func (c *Client) Handshake(ctx context.Context, params HandshakeParams) (HandshakeResult, error) {
@@ -380,6 +628,19 @@ func (c *Client) Shutdown(ctx context.Context) error {
 
 func (c *Client) Events() <-chan Envelope { return c.events }
 
+// DroppedEvents reports how many plugin events were discarded because the host
+// consumer could not keep up. It is a health signal, not a protocol error.
+func (c *Client) DroppedEvents() uint64 { return c.droppedEvents.Load() }
+
+// StderrTail returns the retained plugin stderr with secrets redacted. It is
+// bounded by ClientConfig.MaxStderrBytes.
+func (c *Client) StderrTail() string {
+	if c == nil || c.stderr == nil {
+		return ""
+	}
+	return c.stderr.Snapshot()
+}
+
 func (c *Client) Done() <-chan struct{} { return c.done }
 
 func (c *Client) Err() error {
@@ -432,4 +693,84 @@ func isClosed(channel <-chan struct{}) bool {
 	default:
 		return false
 	}
+}
+
+// stderrCapture keeps a bounded tail of the plugin's diagnostics. Raw bytes
+// never leave the process: Snapshot is the only accessor and it redacts
+// credential-shaped values first.
+type stderrCapture struct {
+	mu         sync.Mutex
+	max        int
+	buffer     []byte
+	sink       io.Writer
+	overflowed bool
+}
+
+func newStderrCapture(max int, sink io.Writer) *stderrCapture {
+	if max <= 0 {
+		max = DefaultMaxStderrBytes
+	}
+	if sink == io.Discard {
+		sink = nil
+	}
+	return &stderrCapture{max: max, sink: sink}
+}
+
+func (s *stderrCapture) Write(data []byte) (int, error) {
+	if s.sink != nil {
+		_, _ = s.sink.Write(data)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(data) >= s.max {
+		s.buffer = append(s.buffer[:0], data[len(data)-s.max:]...)
+		s.overflowed = true
+		return len(data), nil
+	}
+	if len(s.buffer)+len(data) > s.max {
+		drop := len(s.buffer) + len(data) - s.max
+		s.buffer = append(s.buffer[:0], s.buffer[drop:]...)
+		s.overflowed = true
+	}
+	s.buffer = append(s.buffer, data...)
+	return len(data), nil
+}
+
+func (s *stderrCapture) Snapshot() string {
+	s.mu.Lock()
+	raw := string(s.buffer)
+	overflowed := s.overflowed
+	s.mu.Unlock()
+	redacted := redactDiagnostics(raw)
+	if redacted == "" {
+		return ""
+	}
+	if overflowed {
+		return "…" + redacted
+	}
+	return redacted
+}
+
+// Redaction mirrors the discipline used for provider errors: a plugin can
+// print anything at all to stderr, and that text ends up in the audit log and
+// in the UI. Every match is replaced wholesale, keyword included, so a later
+// keyword-based filter does not have to blank the entire diagnostic.
+var (
+	diagnosticsBearerPattern = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=-]+`)
+	diagnosticsKeyPattern    = regexp.MustCompile(`(?i)\b(?:sk|rk)-[A-Za-z0-9_-]{8,}`)
+	diagnosticsJWTPattern    = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}`)
+	diagnosticsJSONPattern   = regexp.MustCompile(`(?i)"[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|passphrase|credential|authorization)[A-Za-z0-9_.-]*"\s*:\s*"[^"]*"`)
+	diagnosticsAssignPattern = regexp.MustCompile(`(?i)\b[A-Za-z0-9_.-]*(?:api[_-]?key|apikey|token|secret|password|passwd|passphrase|credential|authorization)[A-Za-z0-9_.-]*\s*[:=]\s*\S+`)
+)
+
+func redactDiagnostics(value string) string {
+	value = strings.ToValidUTF8(value, "")
+	value = diagnosticsJSONPattern.ReplaceAllString(value, "[REDACTED]")
+	value = diagnosticsBearerPattern.ReplaceAllString(value, "[REDACTED]")
+	value = diagnosticsJWTPattern.ReplaceAllString(value, "[REDACTED]")
+	value = diagnosticsKeyPattern.ReplaceAllString(value, "[REDACTED]")
+	// The assignment sweep runs last so it also swallows the keyword in front
+	// of a value one of the shape-based patterns has already replaced.
+	value = diagnosticsAssignPattern.ReplaceAllString(value, "[REDACTED]")
+	return strings.TrimSpace(value)
 }

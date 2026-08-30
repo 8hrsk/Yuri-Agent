@@ -7,6 +7,7 @@ import type {
   ActivityType,
   ProactivitySettings,
 } from '../lib/contracts'
+import { formatDateTime } from '../lib/datetime'
 import { Icon } from './Icon'
 
 type Feedback = { kind: 'success' | 'error'; text: string }
@@ -48,7 +49,7 @@ const timezones = ['Europe/Moscow', 'UTC', 'Europe/London', 'Europe/Berlin', 'Am
 function formatDate(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+  return formatDateTime(date)
 }
 
 function formatDuration(durationMs?: number): string {

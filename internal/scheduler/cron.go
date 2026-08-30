@@ -58,7 +58,46 @@ func parseCron(expression string) (cronSpec, error) {
 	if err != nil {
 		return cronSpec{}, fmt.Errorf("day of week: %w", err)
 	}
-	return cronSpec{minute: minute, hour: hour, dom: dom, month: month, dow: dow}, nil
+	spec := cronSpec{minute: minute, hour: hour, dom: dom, month: month, dow: dow}
+	if err := spec.checkDayReachable(); err != nil {
+		return cronSpec{}, err
+	}
+	return spec, nil
+}
+
+// maxDaysInMonth is the largest day number a month can carry, counting the
+// leap day for February. Every ten-year search window contains a leap year, so
+// a February 29 expression is reachable and must not be rejected.
+func maxDaysInMonth(month int) int {
+	switch month {
+	case 2:
+		return 29
+	case 4, 6, 9, 11:
+		return 30
+	default:
+		return 31
+	}
+}
+
+// checkDayReachable rejects day/month combinations that can never occur, such
+// as "0 0 30 2 *". They parse field by field but have no occurrence at all, so
+// without this check the caller only learns about them from the ten-year
+// search bound, after a full scan. The check only applies when day-of-week is
+// an unrestricted '*': with both day fields restricted POSIX ORs them, so an
+// impossible day-of-month is still satisfiable through the weekday.
+func (spec cronSpec) checkDayReachable() error {
+	if !spec.dow.any {
+		return nil
+	}
+	for month := range spec.month.values {
+		limit := maxDaysInMonth(month)
+		for day := range spec.dom.values {
+			if day <= limit {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("day of month: selected days never occur in the selected months")
 }
 
 func parseCronField(raw string, minimum, maximum int, names map[string]int, sundaySeven bool) (fieldSet, error) {
@@ -171,17 +210,12 @@ func (f fieldSet) matches(value int) bool {
 	return ok
 }
 
-func (spec cronSpec) matchesTime(value time.Time) bool {
-	month := int(value.Month())
-	dom := value.Day()
-	dow := int(value.Weekday())
-	if !spec.minute.matches(value.Minute()) || !spec.hour.matches(value.Hour()) || !spec.month.matches(month) {
-		return false
-	}
-	// POSIX cron uses OR semantics when both day-of-month and day-of-week
-	// are restricted; if either is '*', the restricted field alone applies.
-	domMatches := spec.dom.matches(dom)
-	dowMatches := spec.dow.matches(dow)
+// matchesDay reports whether the calendar day of value is selected. POSIX cron
+// uses OR semantics when both day-of-month and day-of-week are restricted; if
+// either is '*', the restricted field alone applies.
+func (spec cronSpec) matchesDay(value time.Time) bool {
+	domMatches := spec.dom.matches(value.Day())
+	dowMatches := spec.dow.matches(int(value.Weekday()))
 	switch {
 	case spec.dom.any && spec.dow.any:
 		return true
@@ -194,30 +228,94 @@ func (spec cronSpec) matchesTime(value time.Time) bool {
 	}
 }
 
+func (spec cronSpec) matchesTime(value time.Time) bool {
+	if !spec.minute.matches(value.Minute()) || !spec.hour.matches(value.Hour()) || !spec.month.matches(int(value.Month())) {
+		return false
+	}
+	return spec.matchesDay(value)
+}
+
+// cronSearchMinutes is the ten-year search window, expressed as the number of
+// one-minute candidates it contains. It turns malformed or unreachable
+// combinations into a deterministic error instead of an infinite worker loop.
+const cronSearchMinutes = 10 * 366 * 24 * 60
+
 // nextCronOccurrence returns the first matching wall-clock minute strictly
-// after after. Iterating absolute minutes preserves both occurrences during a
-// fall-back DST transition and naturally skips nonexistent spring-forward
-// minutes. The ten-year bound turns malformed/unreachable combinations into a
-// deterministic error instead of an infinite worker loop.
+// after after.
 func nextCronOccurrence(expression, timezone string, after time.Time) (time.Time, error) {
+	occurrence, _, err := nextCronOccurrenceSteps(expression, timezone, after)
+	return occurrence, err
+}
+
+// nextCronOccurrenceSteps is nextCronOccurrence plus the number of loop
+// iterations the search needed. Tests assert on that count so a regression
+// back to a per-minute scan of the whole window is caught deterministically
+// rather than by timing the wall clock.
+//
+// The search still walks the absolute timeline one wall-clock minute at a
+// time inside a selected day, which is what preserves both occurrences of a
+// fall-back DST transition and skips nonexistent spring-forward minutes.
+// What it no longer does is visit every minute of a day or month that cannot
+// contain a match: those are skipped in a single step to the first instant of
+// the next day or month. A scan of "0 0 29 2 *" costs 2.1 million iterations
+// without the skips and under three thousand with them.
+func nextCronOccurrenceSteps(expression, timezone string, after time.Time) (time.Time, int, error) {
 	spec, err := parseCron(expression)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, 0, err
 	}
 	location, err := time.LoadLocation(timezone)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("load timezone %q: %w", timezone, err)
+		return time.Time{}, 0, fmt.Errorf("load timezone %q: %w", timezone, err)
 	}
 	if after.IsZero() {
-		return time.Time{}, fmt.Errorf("cron reference time is required")
+		return time.Time{}, 0, fmt.Errorf("cron reference time is required")
 	}
 	candidate := after.In(location).Truncate(time.Minute).Add(time.Minute)
-	const maxMinutes = 10 * 366 * 24 * 60
-	for index := 0; index < maxMinutes; index++ {
-		if spec.matchesTime(candidate.In(location)) {
-			return candidate.UTC(), nil
+	// The bound is the same instant the per-minute scan used to stop at, so
+	// the reachable set is identical to the previous implementation's.
+	limit := candidate.Add(cronSearchMinutes * time.Minute)
+	steps := 0
+	for candidate.Before(limit) {
+		steps++
+		local := candidate.In(location)
+		if !spec.month.matches(int(local.Month())) {
+			// A jump that failed to advance would loop forever, so fall back
+			// to the one-minute step, which always advances.
+			if jumped := startOfNextLocalMonth(local, location); jumped.After(candidate) {
+				candidate = jumped
+			} else {
+				candidate = candidate.Add(time.Minute)
+			}
+			continue
+		}
+		if !spec.matchesDay(local) {
+			if jumped := startOfNextLocalDay(local, location); jumped.After(candidate) {
+				candidate = jumped
+			} else {
+				candidate = candidate.Add(time.Minute)
+			}
+			continue
+		}
+		if spec.hour.matches(local.Hour()) && spec.minute.matches(local.Minute()) {
+			return candidate.UTC(), steps, nil
 		}
 		candidate = candidate.Add(time.Minute)
 	}
-	return time.Time{}, fmt.Errorf("cron expression has no occurrence within ten years")
+	return time.Time{}, steps, fmt.Errorf("cron expression has no occurrence within ten years")
+}
+
+// startOfNextLocalDay returns the first instant of the calendar day after
+// local's, in location. time.Date normalizes a midnight that does not exist
+// (a spring-forward transition landing on midnight) forward to the first
+// instant that does, and resolves an ambiguous midnight to its earlier
+// occurrence, so the result is never later than the first real minute of that
+// day and the skip cannot step over a match.
+func startOfNextLocalDay(local time.Time, location *time.Location) time.Time {
+	return time.Date(local.Year(), local.Month(), local.Day()+1, 0, 0, 0, 0, location)
+}
+
+// startOfNextLocalMonth is the month-level equivalent of startOfNextLocalDay.
+func startOfNextLocalMonth(local time.Time, location *time.Location) time.Time {
+	return time.Date(local.Year(), local.Month()+1, 1, 0, 0, 0, 0, location)
 }

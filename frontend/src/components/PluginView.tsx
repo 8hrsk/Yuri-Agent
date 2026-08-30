@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
 import type {
+  PluginEnableRequest,
   PluginPackageInspection,
   PluginPermission,
   PluginRecord,
@@ -9,7 +10,10 @@ import type {
   PluginStatus,
   PluginTool,
 } from '../lib/contracts'
+import { formatDateTime } from '../lib/datetime'
+import { declaredScope } from '../lib/plugin-consent'
 import { Icon } from './Icon'
+import { PluginConsentDialog } from './PluginConsentDialog'
 
 type Feedback = { kind: 'success' | 'error'; text: string }
 
@@ -40,7 +44,7 @@ function formatDate(value?: string): string {
   if (!value) return 'дата не указана'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+  return formatDateTime(date)
 }
 
 function statusClass(status: PluginStatus): string {
@@ -52,8 +56,10 @@ function signatureClass(status: PluginSignatureStatus): string {
 }
 
 function permissionLabel(permission: PluginPermission): string {
-  if (!permission.scope) return permission.capability
-  return `${permission.capability} · ${permission.scope}`
+  const scope = declaredScope(permission)
+  if (scope.kind === 'unrestricted') return `${permission.capability} · без ограничений`
+  if (scope.values.length === 0) return `${permission.capability} · ${scope.kind}`
+  return `${permission.capability} · ${scope.kind}: ${scope.values.join(', ')}`
 }
 
 function riskLabel(risk: PluginTool['risk']): string {
@@ -72,7 +78,7 @@ function PluginPermissionList({ permissions }: { permissions: PluginPermission[]
             <strong>{permissionLabel(permission)}</strong>
             {permission.description && <small>{permission.description}</small>}
           </span>
-          <span className="plugin-permission__state">{permission.granted ? 'выдано' : 'требует доступа'}</span>
+          <span className="plugin-permission__state">{permission.granted ? 'выдано' : 'запрошено, не выдано'}</span>
         </li>
       ))}
     </ul>
@@ -102,9 +108,11 @@ function InspectionPanel({ inspection, devMode, busy, onInstall }: {
   onInstall: () => void
 }) {
   const manifest = inspection.manifest
-  const unsignedDevPackage = devMode && inspection.signatureStatus === 'unsigned'
-  const policyAllowsInstall = inspection.installable ?? true
-  const canInstall = policyAllowsInstall && inspection.compatible && Boolean(manifest) && (inspection.valid || unsignedDevPackage) && (inspection.signatureStatus === 'signed' || unsignedDevPackage || inspection.signatureStatus === 'dev')
+  // `installable` is the backend's verdict, already resolved against the
+  // persisted dev-mode switch. Recomputing the policy here could only produce
+  // a different answer than the one InstallPlugin will enforce, so the view
+  // reports the verdict instead of second-guessing it.
+  const canInstall = inspection.installable
 
   return (
     <section className="plugin-inspection" aria-labelledby="plugin-inspection-title">
@@ -144,7 +152,8 @@ function InspectionPanel({ inspection, devMode, busy, onInstall }: {
 
       {inspection.warnings.length > 0 && <div className="plugin-messages plugin-messages--warning"><Icon name="warning" width={14} height={14} /><div>{inspection.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div></div>}
       {inspection.errors.length > 0 && <div className="plugin-messages plugin-messages--error"><Icon name="warning" width={14} height={14} /><div>{inspection.errors.map((error) => <p key={error}>{error}</p>)}</div></div>}
-      {!inspection.valid && inspection.signatureStatus === 'unsigned' && !devMode && <p className="plugin-inspection__hint">Неподписанные пакеты разрешены только после явного включения dev mode.</p>}
+      {inspection.requiresDevMode && !devMode && <p className="plugin-inspection__hint">Подпись пакета не подтверждена. Установить и запустить его можно только после включения dev mode, а это снимает проверку подписи для всех плагинов.</p>}
+      {inspection.requiresDevMode && devMode && <p className="plugin-inspection__hint plugin-inspection__hint--warning">Подпись пакета не подтверждена. Установка разрешена только потому, что включён dev mode.</p>}
 
       <div className="plugin-card__actions">
         <button className="button button--accent" disabled={!canInstall || busy} onClick={onInstall} type="button"><Icon name="plus" width={14} height={14} /> {busy ? 'Устанавливаю…' : 'Установить плагин'}</button>
@@ -211,11 +220,18 @@ export function PluginView() {
   const [error, setError] = useState<string>()
   const [feedback, setFeedback] = useState<Feedback>()
   const [installPath, setInstallPath] = useState('')
+  // Dev mode is a persisted owner decision held by the backend, never a local
+  // component flag: the same switch decides whether InstallPlugin and
+  // StartPlugin accept an unverified package.
   const [devMode, setDevMode] = useState(false)
+  const [devModeReady, setDevModeReady] = useState(false)
+  const [devModeBusy, setDevModeBusy] = useState(false)
   const [inspection, setInspection] = useState<PluginPackageInspection>()
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set())
   const [inspecting, setInspecting] = useState(false)
   const [installing, setInstalling] = useState(false)
+  const [consentTarget, setConsentTarget] = useState<PluginRecord>()
+  const [consentError, setConsentError] = useState<string>()
 
   const loadPlugins = useCallback(async () => {
     setLoading(true)
@@ -232,6 +248,21 @@ export function PluginView() {
 
   useEffect(() => { void loadPlugins() }, [loadPlugins])
 
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const enabled = await client.pluginDevMode()
+        if (!cancelled) setDevMode(enabled)
+      } catch (cause) {
+        if (!cancelled) setFeedback({ kind: 'error', text: errorText(cause, 'Не удалось прочитать состояние dev mode.') })
+      } finally {
+        if (!cancelled) setDevModeReady(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [client])
+
   const markBusy = (id: string, value: boolean) => {
     setBusyIds((current) => {
       const next = new Set(current)
@@ -241,33 +272,66 @@ export function PluginView() {
     })
   }
 
+  // Inspection is keyed only by the path: the backend resolves the package
+  // against its own dev-mode state and returns the verdict in `installable`.
+  const inspectPath = useCallback(async (path: string): Promise<boolean> => {
+    setInspecting(true)
+    setFeedback(undefined)
+    try {
+      setInspection(await client.inspectPluginPackage(path))
+      return true
+    } catch (cause) {
+      setInspection(undefined)
+      setFeedback({ kind: 'error', text: errorText(cause, 'Проверка пакета завершилась ошибкой.') })
+      return false
+    } finally {
+      setInspecting(false)
+    }
+  }, [client])
+
   const inspect = async () => {
     const path = installPath.trim()
     if (!path) {
       setFeedback({ kind: 'error', text: 'Укажите путь к локальному пакету плагина.' })
       return
     }
-    setInspecting(true)
+    await inspectPath(path)
+  }
+
+  // Writing the switch is the whole action: it is persisted config, and the
+  // reviewed package's `installable` was computed against the previous value,
+  // so the package is re-checked rather than left showing a stale verdict.
+  const toggleDevMode = async (enabled: boolean) => {
+    setDevModeBusy(true)
     setFeedback(undefined)
     try {
-      setInspection(await client.inspectPluginPackage(path, devMode))
+      await client.setPluginDevMode(enabled)
+      setDevMode(enabled)
+      const reinspected = inspection ? await inspectPath(inspection.path) : true
+      if (reinspected) {
+        setFeedback({
+          kind: 'success',
+          text: enabled
+            ? 'Dev mode включён: Yuri будет устанавливать и запускать плагины без подтверждённой подписи.'
+            : 'Dev mode выключен: снова требуется подтверждённая подпись.',
+        })
+      }
     } catch (cause) {
-      setInspection(undefined)
-      setFeedback({ kind: 'error', text: errorText(cause, 'Проверка пакета завершилась ошибкой.') })
+      setFeedback({ kind: 'error', text: errorText(cause, 'Не удалось изменить состояние dev mode.') })
     } finally {
-      setInspecting(false)
+      setDevModeBusy(false)
     }
   }
 
   const install = async () => {
-    if (!inspection?.manifest || !inspection.compatible) return
-    const unsignedDevPackage = devMode && (inspection.signatureStatus === 'unsigned' || inspection.signatureStatus === 'dev')
-    if (!inspection.valid && !unsignedDevPackage) return
-    if (inspection.signatureStatus !== 'signed' && !unsignedDevPackage) return
+    // The backend decides installability; the button is disabled on the same
+    // field, so reaching here with a refused package means the state changed
+    // underneath and the install must not be attempted.
+    if (!inspection?.installable) return
     setInstalling(true)
     setFeedback(undefined)
     try {
-      const installed = await client.installPlugin({ path: inspection.path, devMode })
+      const installed = await client.installPlugin({ path: inspection.path })
       await loadPlugins()
       setInspection(undefined)
       if (installed) setFeedback({ kind: 'success', text: `${installed.name} установлен и пока выключен.` })
@@ -280,26 +344,52 @@ export function PluginView() {
     }
   }
 
+  // Enabling is the one lifecycle action that needs the owner's consent list,
+  // so it opens the dialog instead of going straight to the bridge.
   const runAction = async (plugin: PluginRecord, action: 'enable' | 'disable' | 'start' | 'stop') => {
     if (action === 'enable') {
-      const confirmed = globalThis.confirm(`Включить плагин «${plugin.name}»?\n\nОн сможет использовать перечисленные capabilities после проверки policy.`)
-      if (!confirmed) return
+      setConsentError(undefined)
+      setConsentTarget(plugin)
+      return
     }
     markBusy(plugin.id, true)
     setFeedback(undefined)
     try {
-      const updated = action === 'enable'
-        ? await client.enablePlugin(plugin.id)
-        : action === 'disable'
-          ? await client.disablePlugin(plugin.id)
-          : action === 'start'
-            ? await client.startPlugin(plugin.id)
-            : await client.stopPlugin(plugin.id)
+      const updated = action === 'disable'
+        ? await client.disablePlugin(plugin.id)
+        : action === 'start'
+          ? await client.startPlugin(plugin.id)
+          : await client.stopPlugin(plugin.id)
       if (updated) setPlugins((current) => current.map((item) => item.id === updated.id ? updated : item))
       else await loadPlugins()
-      setFeedback({ kind: 'success', text: action === 'enable' ? 'Плагин включён.' : action === 'disable' ? 'Плагин выключен.' : action === 'start' ? 'Плагин запущен.' : 'Плагин остановлен.' })
+      setFeedback({ kind: 'success', text: action === 'disable' ? 'Плагин выключен.' : action === 'start' ? 'Плагин запущен.' : 'Плагин остановлен.' })
     } catch (cause) {
       setFeedback({ kind: 'error', text: errorText(cause, 'Операция с плагином завершилась ошибкой.') })
+    } finally {
+      markBusy(plugin.id, false)
+    }
+  }
+
+  // The backend is the authority on whether a consented scope is narrow enough.
+  // Its rejection is shown inside the dialog, with the owner's input intact, so
+  // a refused narrowing can be corrected instead of quietly disappearing.
+  const confirmConsent = async (plugin: PluginRecord, request: PluginEnableRequest) => {
+    markBusy(plugin.id, true)
+    setConsentError(undefined)
+    setFeedback(undefined)
+    try {
+      const updated = await client.enablePlugin(request)
+      if (updated) setPlugins((current) => current.map((item) => item.id === updated.id ? updated : item))
+      else await loadPlugins()
+      setConsentTarget(undefined)
+      setFeedback({
+        kind: 'success',
+        text: request.capabilities.length === 0
+          ? 'Плагин включён без единого доступа.'
+          : `Плагин включён. Выдано доступов: ${request.capabilities.length}.`,
+      })
+    } catch (cause) {
+      setConsentError(errorText(cause, 'Backend отклонил список согласий.'))
     } finally {
       markBusy(plugin.id, false)
     }
@@ -346,7 +436,7 @@ export function PluginView() {
           <label className="plugin-path-input"><Icon name="plugins" width={15} height={15} /><span className="sr-only">Путь к пакету</span><input onChange={(event) => { setInstallPath(event.target.value); setInspection(undefined) }} placeholder="/Users/you/Downloads/yuri-plugin" spellCheck={false} value={installPath} /></label>
           <button className="button button--quiet" disabled={inspecting || !installPath.trim()} onClick={() => void inspect()} type="button">{inspecting ? 'Проверяю…' : 'Проверить пакет'}</button>
         </div>
-        <label className="plugin-dev-toggle"><input checked={devMode} onChange={(event) => { setDevMode(event.target.checked); setInspection(undefined) }} type="checkbox" /><span><strong>Разрешить dev mode</strong><small>Допускает неподписанные пакеты. Используйте только для локальной разработки.</small></span></label>
+        <label className="plugin-dev-toggle"><input checked={devMode} disabled={!devModeReady || devModeBusy} onChange={(event) => void toggleDevMode(event.target.checked)} type="checkbox" /><span><strong>Разрешить dev mode</strong><small>Настройка Yuri, а не этой формы: она сохраняется и снимает требование подтверждённой подписи для всех плагинов — неподписанный пакет можно будет установить и запустить. Включайте только для локальной разработки и выключайте после.</small></span></label>
       </section>
 
       {inspection && <InspectionPanel busy={installing} devMode={devMode} inspection={inspection} onInstall={() => void install()} />}
@@ -359,6 +449,16 @@ export function PluginView() {
         {!loading && !error && plugins.length === 0 && <div className="plugin-state plugin-state--empty"><Icon name="plugins" width={22} height={22} /><strong>Плагинов пока нет</strong><span>Установите reference plugin или локальный пакет, чтобы подключить новый источник данных. Автоматический GitHub browser будет добавлен позднее.</span></div>}
         {!loading && plugins.length > 0 && <div className="plugin-grid">{plugins.map((plugin) => <PluginCard busy={busyIds.has(plugin.id)} key={plugin.id} onAction={runAction} onUninstall={uninstall} plugin={plugin} />)}</div>}
       </section>
+
+      {consentTarget && (
+        <PluginConsentDialog
+          busy={busyIds.has(consentTarget.id)}
+          error={consentError}
+          onCancel={() => { setConsentTarget(undefined); setConsentError(undefined) }}
+          onConfirm={(request) => void confirmConsent(consentTarget, request)}
+          plugin={consentTarget}
+        />
+      )}
     </div>
   )
 }

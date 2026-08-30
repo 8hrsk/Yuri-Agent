@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Check whitespace errors
         run: git diff --check
@@ -29,10 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
@@ -57,15 +57,41 @@ jobs:
       - name: Test
         run: go test ./cmd/... ./internal/... ./sdk/... ./plugins/...
 
+      - name: Test with race detector
+        run: go test -race -count=1 ./cmd/... ./internal/... ./sdk/... ./plugins/...
+
+  lint:
+    name: Go lint and vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6
+        with:
+          version: v2.13.2
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          govulncheck ./...
+
   frontend:
     name: Frontend foundation
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
@@ -76,6 +102,17 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: npm run lint
+
+      - name: Lint stylesheets
+        working-directory: frontend
+        run: npm run lint:css
+
+      # Reads internal/desktop/*.go directly, so it needs the full checkout but
+      # no Go toolchain. tsc cannot see this boundary: the renderer resolves
+      # Bridge methods by name string at runtime and swallows a miss.
+      - name: Check Go/TypeScript bridge contract
+        working-directory: frontend
+        run: npm run lint:contract
 
       - name: Typecheck
         working-directory: frontend
@@ -94,10 +131,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
@@ -112,7 +149,7 @@ jobs:
         run: make mvp-smoke
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
@@ -128,7 +165,7 @@ jobs:
         run: make macos-smoke macos-launch-smoke macos-ui-smoke macos-voice-smoke YURI_VERSION=0.7.0 MACOS_LAUNCH_TIMEOUT=25
 
       - name: Upload universal OSS archive and checksum as CI artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: yuri-macos-universal-oss-${{ github.sha }}
           path: |

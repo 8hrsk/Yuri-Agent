@@ -69,17 +69,27 @@ func (r *ToolCallRepository) Get(ctx context.Context, id domain.ID) (ToolCall, e
 	return r.get(ctx, string(id))
 }
 
+// toolCallSelect lists the full record so Get and ListByRun share one scanner
+// and one round-trip per query.
+const toolCallColumns = `id, run_id, tool_id, args_redacted, risk, approval_id, status,
+	       result_ref, idempotency_key, version, created_at, updated_at`
+
+const toolCallSelect = `
+	SELECT ` + toolCallColumns + `
+	FROM tool_calls`
+
 func (r *ToolCallRepository) get(ctx context.Context, id string) (ToolCall, error) {
+	return scanToolCall(r.db.QueryRowContext(ctx, toolCallSelect+` WHERE id = ?`, id))
+}
+
+func scanToolCall(row rowScanner) (ToolCall, error) {
 	var (
 		call                                       ToolCall
 		idValue, runID, toolID, args, risk, status string
 		approvalID, resultRef, idempotencyKey      sql.NullString
 		createdAt, updatedAt                       string
 	)
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, run_id, tool_id, args_redacted, risk, approval_id, status,
-		       result_ref, idempotency_key, version, created_at, updated_at
-		FROM tool_calls WHERE id = ?`, id).Scan(
+	err := row.Scan(
 		&idValue, &runID, &toolID, &args, &risk, &approvalID, &status,
 		&resultRef, &idempotencyKey, &call.Version, &createdAt, &updatedAt)
 	if err != nil {
@@ -147,7 +157,9 @@ func (r *ToolCallRepository) Save(ctx context.Context, call ToolCall) error {
 	return domain.ErrConflict
 }
 
-func (r *ToolCallRepository) ListByRun(ctx context.Context, runID domain.ID, limit ...int) ([]ToolCall, error) {
+// ListByRun reads the run's tool calls in one query. window is the optional
+// (limit, offset) tail.
+func (r *ToolCallRepository) ListByRun(ctx context.Context, runID domain.ID, window ...int) ([]ToolCall, error) {
 	if err := requireDatabase(r.db); err != nil {
 		return nil, err
 	}
@@ -157,39 +169,28 @@ func (r *ToolCallRepository) ListByRun(ctx context.Context, runID domain.ID, lim
 	if runID.Empty() {
 		return nil, fmt.Errorf("%w: run id is required", domain.ErrInvalidArgument)
 	}
-	query := `SELECT id FROM tool_calls WHERE run_id = ? ORDER BY created_at ASC, id ASC`
-	args := []any{string(runID)}
-	if len(limit) > 0 && limit[0] > 0 {
-		query += " LIMIT ?"
-		args = append(args, limit[0])
+	limit, offset, err := listWindow("tool call", window)
+	if err != nil {
+		return nil, err
 	}
+	query := toolCallSelect + ` WHERE run_id = ? ORDER BY created_at ASC, id ASC`
+	args := []any{string(runID)}
+	query, args = appendWindow(query, args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, wrappedSQLError("list tool calls", err)
 	}
-	ids := make([]string, 0)
+	defer rows.Close()
+	result := make([]ToolCall, 0)
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, wrappedSQLError("scan tool call id", err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, wrappedSQLError("iterate tool calls", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, wrappedSQLError("close tool calls", err)
-	}
-	result := make([]ToolCall, 0, len(ids))
-	for _, id := range ids {
-		item, err := r.get(ctx, id)
-		if err != nil {
-			return nil, err
+		item, scanErr := scanToolCall(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
 		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrappedSQLError("iterate tool calls", err)
 	}
 	return result, nil
 }
@@ -204,13 +205,12 @@ func (r *ToolCallRepository) FindByIdempotencyKey(ctx context.Context, runID dom
 	if runID.Empty() || strings.TrimSpace(key) == "" {
 		return ToolCall{}, fmt.Errorf("%w: run id and idempotency key are required", domain.ErrInvalidArgument)
 	}
-	var id string
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id FROM tool_calls WHERE run_id = ? AND idempotency_key = ?`, string(runID), key).Scan(&id)
+	call, err := scanToolCall(r.db.QueryRowContext(ctx,
+		toolCallSelect+` WHERE run_id = ? AND idempotency_key = ?`, string(runID), key))
 	if err != nil {
-		return ToolCall{}, wrappedSQLError("find tool call by idempotency key", err)
+		return ToolCall{}, err
 	}
-	return r.get(ctx, id)
+	return call, nil
 }
 
 func validateToolCall(call ToolCall) error {

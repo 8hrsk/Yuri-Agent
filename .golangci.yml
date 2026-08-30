@@ -1,0 +1,81 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+# Tiered adoption. The blocking set below is green today, so the CI job is
+# meaningful from the first run instead of being permanently red and ignored.
+#
+# Staged for later enablement, with the current issue count and the finding
+# that has to land first (see docs/REMEDIATION_PLAN.md):
+#
+#   errorlint      91 issues  — N-6 cleared the whole `comparison` class (5 issues,
+#                               all `== sql.ErrNoRows` / `== domain.ErrNotFound`), so
+#                               what is left is 90 `errorf` hits (`%v` where `%w` was
+#                               meant) plus 1 `asserts` hit in a provider test. The
+#                               errorf class is not mechanical: switching to `%w`
+#                               changes what callers can match with errors.Is, so it
+#                               needs its own pass — do not bundle it with a fix wave.
+#   staticcheck    32 issues  — mechanical; mostly ST1005/QF1001
+#   gosec          29 issues  — needs triage against docs/THREAT_MODEL.md
+#   errcheck      145 issues  — needs its own pass; do not bundle with a fix wave
+linters:
+  default: none
+  enable:
+    - govet
+    - ineffassign
+    - bodyclose
+    # M-5 closed 2026-08-30: zero issues repo-wide, so this is now blocking.
+    - rowserrcheck
+    # Wave 4 / M-29 closed 2026-08-30: zero issues repo-wide, so this is now
+    # blocking. Half the staged count of 8 had already gone stale on its own —
+    # identitySeedSystemPrompt was deleted in the chat.go split, writeCancel was
+    # revived when M-29 reinstated the request.cancel protocol instead of
+    # SIGKILL, and deliver/recordDrop were resolved with the codexapp event
+    # channel. The remaining 4 (sortMemories, stringOrNumber, requiredString,
+    # proposalHasTarget) were deleted after a compiler probe proved each had no
+    # caller in any package including tests; git log -S showed none of them had
+    # ever had one since the commit that introduced them.
+    - unused
+    # M-10 closed 2026-08-30: zero issues in non-test code, so this is now
+    # blocking (with the same _test.go exclusion bodyclose already carries;
+    # see below).
+    #
+    # The staged note this replaces claimed a single issue at
+    # peer_dialogues.go:313. That does not reproduce on golangci-lint 2.11.4 —
+    # neither before nor after this session's changes — so the count was stale
+    # in both directions: the flagged line was clean, and five *other* loops in
+    # listing_batch.go were not. All five were the same shape, a chunked read
+    # closing rows by hand on each of its three exits because a `defer` inside
+    # the loop would have held every chunk's rows open until the whole read
+    # returned. They were converted by pulling one chunk into `eachChunkRow`,
+    # where the deferred close is correct; the close error is still returned,
+    # and still only when it would not mask a scan failure.
+    #
+    # One issue remains, at peer_dialogue_timestamps_test.go:351, and is
+    # covered by the test exclusion rather than fixed here: it belongs to
+    # another workstream's file. A leaked *sql.Rows in a test dies with the
+    # test process, which is the same reasoning that already excludes bodyclose
+    # from tests. Production code is what this promotion protects.
+    - sqlclosecheck
+
+  exclusions:
+    generated: lax
+    rules:
+      - path: _test\.go
+        linters:
+          - bodyclose
+          - sqlclosecheck
+      - path: cmd/yuri/build/
+        linters:
+          - govet
+          - ineffassign
+          - bodyclose
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt

@@ -388,7 +388,10 @@ func defaultPersonaTraits() map[string]float64 {
 		"warmth": .58, "trust": .45, "attachment": .35, "jealousy": .20,
 		"irritability": .18, "romantic_tone": .25, "emotionality": .62,
 		"directness": .72, "playfulness": .55, "formality": .20, "initiative": .48,
-		"tsundere": .52,
+		"tsundere": .52, "empathy": .72, "sociability": .48, "shyness": .34,
+		"anxiety": .22, "fearfulness": .18, "emotional_stability": .64,
+		"sensitivity": .58, "possessiveness": .16, "impulsivity": .22,
+		"stubbornness": .38, "optimism": .58, "curiosity": .72, "suspicion": .18,
 	}
 }
 
@@ -412,7 +415,15 @@ func sortedFloatKeys(values map[string]float64) []string {
 }
 
 func personaTraitLabel(name string) string {
-	labels := map[string]string{"warmth": "Теплота", "trust": "Доверие", "attachment": "Привязанность", "jealousy": "Ревность", "irritability": "Раздражительность", "romantic_tone": "Романтичность", "emotionality": "Эмоциональность", "directness": "Прямота", "playfulness": "Игривость", "formality": "Формальность", "initiative": "Инициативность", "tsundere": "Цундере"}
+	labels := map[string]string{
+		"warmth": "Теплота", "trust": "Доверие", "attachment": "Привязанность", "jealousy": "Ревность",
+		"irritability": "Раздражительность", "romantic_tone": "Романтичность", "emotionality": "Эмоциональность",
+		"directness": "Прямота", "playfulness": "Игривость", "formality": "Формальность", "initiative": "Инициативность",
+		"tsundere": "Цундере", "empathy": "Эмпатия", "sociability": "Общительность", "shyness": "Стеснительность",
+		"anxiety": "Тревожность", "fearfulness": "Пугливость", "emotional_stability": "Эмоциональная устойчивость",
+		"sensitivity": "Чувствительность", "possessiveness": "Собственничество", "impulsivity": "Импульсивность",
+		"stubbornness": "Упрямство", "optimism": "Оптимизм", "curiosity": "Любопытство", "suspicion": "Подозрительность",
+	}
 	if label := labels[name]; label != "" {
 		return label
 	}

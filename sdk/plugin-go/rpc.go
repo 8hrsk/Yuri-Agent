@@ -38,6 +38,11 @@ const (
 	MessageShutdown        MessageType = "shutdown"
 	MessageShutdownResult  MessageType = "shutdown_result"
 	MessageError           MessageType = "error"
+	// MessageCancel is a host notification asking the plugin to abandon one
+	// in-flight request. It is never answered directly: the cancelled request
+	// produces its own (failed) response. A plugin that ignores it stays
+	// correct but risks being killed by the host after the grace period.
+	MessageCancel MessageType = "request.cancel"
 )
 
 func (t MessageType) Valid() bool {
@@ -46,7 +51,7 @@ func (t MessageType) Valid() bool {
 		MessageHealth, MessageHealthResult,
 		MessageToolInvoke, MessageToolResult,
 		MessageEvent, MessageShutdown, MessageShutdownResult,
-		MessageError:
+		MessageError, MessageCancel:
 		return true
 	default:
 		return false
@@ -363,6 +368,11 @@ type Event struct {
 	EventType  string          `json:"event_type"`
 	Payload    json.RawMessage `json:"payload"`
 	OccurredAt time.Time       `json:"occurred_at"`
+}
+
+// CancelRequest identifies the in-flight request the host wants abandoned.
+type CancelRequest struct {
+	RequestID string `json:"request_id"`
 }
 
 type ShutdownRequest struct {

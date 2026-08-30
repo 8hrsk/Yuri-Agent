@@ -1,0 +1,864 @@
+/* Stage 3 plugin host */
+
+.plugin-view {
+  position: relative;
+  width: min(100%, 1180px);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: clamp(28px, 4vw, 54px) clamp(18px, 4vw, 58px) 68px;
+}
+
+.plugin-view__hero {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 29px;
+}
+
+.plugin-view__hero h1 {
+  margin: 13px 0 0;
+  color: #f9f7ff;
+  font-size: clamp(38px, 5vw, 62px);
+  font-weight: 800;
+  letter-spacing: -0.065em;
+  line-height: 1;
+}
+
+.plugin-view__hero p {
+  max-width: 620px;
+  margin: 17px 0 0;
+  color: #9691a6;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.plugin-view__metric {
+  display: grid;
+  min-width: 150px;
+  justify-items: end;
+  gap: 5px;
+  padding-bottom: 3px;
+}
+
+.plugin-view__metric strong {
+  color: #d8d2f0;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 31px;
+  font-weight: 400;
+}
+
+.plugin-view__metric span,
+.plugin-list__heading .section-heading__count {
+  color: #706b80;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.plugin-install-card,
+.plugin-inspection,
+.plugin-card {
+  position: relative;
+  z-index: 1;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface-wash);
+}
+
+.plugin-install-card,
+.plugin-inspection {
+  padding: 20px;
+}
+
+.plugin-card__heading,
+.plugin-list__heading,
+.plugin-card__header,
+.plugin-inspection__manifest,
+.plugin-card__meta,
+.plugin-inspection__meta,
+.plugin-card__actions {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.plugin-card__heading h2,
+.plugin-list__heading h2 {
+  margin: 0;
+  color: #ded9e9;
+  font-size: 16px;
+  letter-spacing: -0.03em;
+}
+
+.plugin-install-card__lead {
+  max-width: 680px;
+  margin: 13px 0 16px;
+  color: #777187;
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.plugin-install-card__lead code,
+.plugin-inspection__hint code {
+  color: #bcb1e8;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+}
+
+.plugin-install-form {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.plugin-path-input {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #716b83;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.plugin-path-input:focus-within {
+  border-color: rgba(var(--accent-rgb), 0.45);
+}
+
+.plugin-path-input input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: #d8d3e3;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 9px;
+  background: transparent;
+}
+
+.plugin-path-input input::placeholder {
+  color: #626073;
+}
+
+.plugin-dev-toggle {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  margin-top: 13px;
+  color: #888296;
+  cursor: pointer;
+}
+
+.plugin-dev-toggle input {
+  margin-top: 2px;
+  accent-color: var(--rose);
+}
+
+.plugin-dev-toggle span {
+  display: grid;
+  gap: 3px;
+}
+
+.plugin-dev-toggle strong {
+  color: #b9b1c8;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.plugin-dev-toggle small {
+  color: #6f697c;
+  font-size: 8px;
+}
+
+.plugin-inspection {
+  margin-top: 10px;
+  border-color: rgba(var(--accent-rgb), 0.23);
+  background: rgba(var(--accent-rgb), 0.025);
+}
+
+.plugin-inspection__path,
+.plugin-install-path {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+  color: #756f83;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+}
+
+.plugin-inspection__path {
+  margin: 19px 0 17px;
+  padding: 8px 9px;
+  border: 1px solid rgba(var(--accent-rgb), 0.1);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.13);
+}
+
+.plugin-inspection__path svg,
+.plugin-install-path svg {
+  flex: 0 0 auto;
+  color: #8d7ec7;
+}
+
+.plugin-inspection__path span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-inspection__identity,
+.plugin-card__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.plugin-avatar {
+  display: grid;
+  width: 35px;
+  height: 35px;
+  flex: 0 0 35px;
+  place-items: center;
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
+  border-radius: 11px;
+  color: var(--accent-light);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.plugin-inspection__identity > div,
+.plugin-card__identity > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.plugin-inspection__identity strong,
+.plugin-card__identity h3 {
+  overflow: hidden;
+  margin: 0;
+  color: #d9d4e4;
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-inspection__identity small,
+.plugin-card__identity > div > span {
+  overflow: hidden;
+  color: #777187;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-check,
+.plugin-status,
+.plugin-signature {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: #777187;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.plugin-check i,
+.plugin-status i,
+.plugin-signature i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #837d91;
+}
+
+.plugin-check--ok,
+.plugin-status--running,
+.plugin-status--enabled,
+.plugin-signature--signed {
+  color: var(--mint);
+}
+
+.plugin-check--ok i,
+.plugin-status--running i,
+.plugin-status--enabled i,
+.plugin-signature--signed i {
+  background: var(--mint);
+  box-shadow: 0 0 7px var(--mint);
+}
+
+.plugin-check--error,
+.plugin-status--crashed,
+.plugin-status--error,
+.plugin-signature--invalid,
+.plugin-signature--unsigned,
+.plugin-signature--dev {
+  color: var(--rose);
+}
+
+.plugin-check--error i,
+.plugin-status--crashed i,
+.plugin-status--error i,
+.plugin-signature--invalid i,
+.plugin-signature--unsigned i,
+.plugin-signature--dev i {
+  background: var(--rose);
+}
+
+.plugin-signature {
+  padding: 4px 6px;
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
+  border-radius: 5px;
+  color: #90899e;
+  font-size: 7px;
+  text-transform: uppercase;
+}
+
+.plugin-signature--signed {
+  border-color: rgba(var(--mint-rgb), 0.18);
+}
+
+.plugin-signature--unsigned,
+.plugin-signature--invalid,
+.plugin-signature--dev {
+  border-color: rgba(var(--rose-rgb), 0.2);
+}
+
+.plugin-description {
+  margin: 14px 0 0;
+  color: #9a95a9;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.plugin-inspection__meta,
+.plugin-card__meta {
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 10px 0 12px;
+  border-bottom: 1px solid var(--line);
+  color: #706a7e;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+}
+
+.plugin-inspection__meta span,
+.plugin-card__meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-review-grid,
+.plugin-card__sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 15px;
+}
+
+.plugin-review-grid__label {
+  display: block;
+  margin-bottom: 8px;
+  color: #777187;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.plugin-permission-list,
+.plugin-tool-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plugin-permission,
+.plugin-tool-list li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 7px;
+  border: 1px solid rgba(var(--accent-rgb), 0.09);
+  border-radius: 7px;
+  background: rgba(var(--accent-rgb), 0.025);
+}
+
+.plugin-permission__dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  border-radius: 50%;
+  background: #81798f;
+}
+
+.plugin-permission--granted .plugin-permission__dot {
+  background: var(--mint);
+  box-shadow: 0 0 6px rgba(var(--mint-rgb), 0.5);
+}
+
+.plugin-permission__copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.plugin-permission strong,
+.plugin-tool__name {
+  overflow: hidden;
+  color: #aaa4b7;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-permission small,
+.plugin-tool-list small {
+  overflow: hidden;
+  color: #6e687b;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-permission__state {
+  flex: 0 0 auto;
+  color: #706a7e;
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+.plugin-permission--granted .plugin-permission__state {
+  color: var(--mint);
+}
+
+.plugin-tool-list li {
+  flex-wrap: wrap;
+}
+
+.plugin-tool__name {
+  flex: 1;
+}
+
+.plugin-tool__risk {
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: #8f899d;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  text-transform: uppercase;
+}
+
+.plugin-tool__risk--medium {
+  color: #d9bf87;
+  background: rgba(217, 191, 135, 0.08);
+}
+
+.plugin-tool__risk--high,
+.plugin-tool__risk--critical {
+  color: var(--rose);
+  background: rgba(var(--rose-rgb), 0.08);
+}
+
+.plugin-tool-list small {
+  width: 100%;
+}
+
+.plugin-muted {
+  margin: 0;
+  color: #716b7e;
+  font-size: 9px;
+}
+
+.plugin-messages {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  margin-top: 13px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.plugin-messages svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.plugin-messages p {
+  margin: 0;
+}
+
+.plugin-messages p + p {
+  margin-top: 4px;
+}
+
+.plugin-messages--warning {
+  border-color: rgba(217, 191, 135, 0.18);
+  color: #cfb981;
+  background: rgba(217, 191, 135, 0.045);
+}
+
+.plugin-messages--error {
+  border-color: rgba(var(--rose-rgb), 0.2);
+  color: var(--rose);
+  background: rgba(var(--rose-rgb), 0.045);
+}
+
+.plugin-inspection__hint {
+  margin: 12px 0 0;
+  color: #b98498;
+  font-size: 8px;
+}
+
+.plugin-card__actions {
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 17px;
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
+}
+
+.plugin-card__actions .button {
+  margin-left: auto;
+}
+
+.plugin-action {
+  min-height: 27px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: #9993a8;
+  cursor: pointer;
+  font-size: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.plugin-action:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.28);
+  color: var(--text);
+}
+
+.plugin-action:disabled {
+  cursor: wait;
+  opacity: 0.45;
+}
+
+.plugin-action--accent {
+  border-color: rgba(var(--accent-rgb), 0.28);
+  color: var(--accent-light);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.plugin-action--danger {
+  margin-left: auto;
+  border-color: rgba(var(--rose-rgb), 0.12);
+  color: #b98498;
+}
+
+.plugin-action--danger:hover:not(:disabled) {
+  border-color: rgba(var(--rose-rgb), 0.3);
+  color: var(--rose);
+  background: rgba(var(--rose-rgb), 0.06);
+}
+
+.plugin-install-path {
+  overflow: hidden;
+  margin-top: 14px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-card {
+  min-width: 0;
+  padding: 17px;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.plugin-card:hover {
+  border-color: rgba(var(--accent-rgb), 0.2);
+  background: rgba(var(--accent-rgb), 0.025);
+}
+
+.plugin-card__badges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.plugin-list {
+  position: relative;
+  z-index: 1;
+  padding-top: 27px;
+}
+
+.plugin-list__heading {
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.plugin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.plugin-feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 11px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 9px;
+}
+
+.plugin-feedback .icon-button {
+  margin-left: auto;
+}
+
+.plugin-feedback--success {
+  border-color: rgba(var(--mint-rgb), 0.18);
+  color: var(--mint);
+  background: rgba(var(--mint-rgb), 0.05);
+}
+
+.plugin-feedback--error {
+  border-color: rgba(var(--rose-rgb), 0.2);
+  color: var(--rose);
+  background: rgba(var(--rose-rgb), 0.05);
+}
+
+.plugin-state {
+  display: grid;
+  min-height: 122px;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 28px;
+  border: 1px dashed rgba(var(--accent-rgb), 0.15);
+  border-radius: 13px;
+  color: #777187;
+  font-size: 10px;
+  text-align: center;
+}
+
+.plugin-state strong {
+  color: #b9b4c5;
+  font-size: 12px;
+}
+
+.plugin-state span:last-child {
+  max-width: 500px;
+  line-height: 1.55;
+}
+
+@media (max-width: 860px) {
+  .plugin-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 650px) {
+  .plugin-view {
+    padding: 25px 20px 45px;
+  }
+
+  .plugin-view__hero,
+  .plugin-card__header,
+  .plugin-inspection__manifest,
+  .plugin-list__heading {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .plugin-view__metric {
+    justify-items: start;
+  }
+
+  .plugin-install-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .plugin-review-grid,
+  .plugin-card__sections {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+
+  .plugin-card__actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .plugin-action--danger {
+    margin-left: 0;
+  }
+}
+
+
+/* Plugin consent dialog.
+   Rides on .approval-dialog for the frame (see dialogs.css) and only widens it
+   and styles the per-capability form. view-plugins.css is imported after
+   dialogs.css, so these overrides win at equal specificity. */
+.plugin-consent {
+  width: min(100%, 560px);
+}
+
+.plugin-consent__list {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plugin-consent__row {
+  display: grid;
+  gap: 9px;
+  padding: 10px 11px;
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.plugin-consent__approve {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.plugin-consent__approve > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.plugin-consent__approve strong {
+  color: #d1ccdc;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.plugin-consent__approve small {
+  color: #777185;
+  font-size: 8px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.plugin-consent__scope {
+  display: grid;
+  gap: 7px;
+  padding-left: 20px;
+}
+
+.plugin-consent__scope > label {
+  display: grid;
+  gap: 4px;
+}
+
+.plugin-consent__scope > label > span {
+  color: #706a7e;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  text-transform: uppercase;
+}
+
+.plugin-consent__scope input,
+.plugin-consent__scope select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: #d1ccdc;
+  background: rgba(0, 0, 0, 0.28);
+  font-family: inherit;
+  font-size: 9px;
+}
+
+.plugin-consent__scope input:disabled,
+.plugin-consent__scope select:disabled {
+  opacity: 0.45;
+}
+
+.plugin-consent__effective {
+  margin: 0;
+  color: #8f889d;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  overflow-wrap: anywhere;
+}
+
+/* An unbounded grant is a separate decision, so it is styled as a warning and
+   never blends into the ordinary scope fields above it. */
+.plugin-consent__unrestricted {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid rgba(232, 196, 146, 0.32);
+  border-radius: 8px;
+  color: #e8c492;
+  background: rgba(232, 196, 146, 0.09);
+  cursor: pointer;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.plugin-consent__issue {
+  margin: 0;
+  color: var(--rose);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+@media (max-width: 650px) {
+  .plugin-consent__scope {
+    padding-left: 0;
+  }
+}
+
+/* Dev mode is persisted backend state, so the switch is unavailable until it
+   has been read and while it is being written. */
+.plugin-dev-toggle:has(input:disabled) {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* A package that only passes because dev mode is on is not a neutral fact:
+   it is called out in the same amber as the other package warnings. */
+.plugin-inspection__hint--warning {
+  color: #e8c492;
+}

@@ -5,9 +5,66 @@ import {
   createYuriClient,
   requestBrowserNotificationPermission,
   resetYuriClientForTests,
+  subscribeMemoryUpdates,
   subscribeNotifications,
+  type MemoryUpdateEvent,
 } from './client'
 import { defaultAgentDraft } from './agents'
+
+type RuntimeListener = (value: unknown) => void
+
+/**
+ * Wails v2 keeps a *list* of listeners per event name: `EventsOn` appends one
+ * and hands back an unregister for that listener alone, while `EventsOff(name)`
+ * tears down the whole list at once.
+ *
+ * The previous fake stored a single callback per name (`listeners.set(name, cb)`
+ * / `listeners.delete(name)`), which made `EventsOff` look like a per-listener
+ * cleanup and hid H-7 — one run's teardown silencing every other run — from the
+ * whole suite. Modelling the real shape is what lets these tests see it.
+ */
+function createWailsEventBus(options: { unregisterable?: boolean } = {}) {
+  const listeners = new Map<string, RuntimeListener[]>()
+  return {
+    listenerCount: (name: string) => listeners.get(name)?.length ?? 0,
+    emit: (name: string, value: unknown) => {
+      for (const listener of [...(listeners.get(name) ?? [])]) listener(value)
+    },
+    runtime: {
+      EventsOn: (name: string, callback: RuntimeListener) => {
+        const current = listeners.get(name) ?? []
+        current.push(callback)
+        listeners.set(name, current)
+        // Not every runtime build hands an unregister back; `unregisterable:
+        // false` models that one, where the only defence left is the caller's
+        // own `active` guard.
+        if (options.unregisterable === false) return undefined
+        return () => {
+          const registered = listeners.get(name)
+          if (!registered) return
+          const index = registered.indexOf(callback)
+          if (index >= 0) registered.splice(index, 1)
+          if (registered.length === 0) listeners.delete(name)
+        }
+      },
+      EventsOff: (name: string) => { listeners.delete(name) },
+    },
+  }
+}
+
+/** Installs a fake `window` for the duration of `run` and always restores it. */
+async function withWindow(value: unknown, run: () => Promise<void>): Promise<void> {
+  const previousWindow = (globalThis as { window?: unknown }).window
+  Object.defineProperty(globalThis, 'window', { configurable: true, value })
+  resetYuriClientForTests()
+  try {
+    await run()
+  } finally {
+    if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+    else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+    resetYuriClientForTests()
+  }
+}
 
 describe('Yuri client contract', () => {
   beforeEach(() => {
@@ -32,6 +89,34 @@ describe('Yuri client contract', () => {
     expect(events).toContain('assistant.delta')
     expect(events).toContain('assistant.completed')
     expect(events.at(-1)).toBe('run.completed')
+  })
+
+  it('forwards an explicit conversation rename and normalizes the returned source', async () => {
+    const calls: unknown[] = []
+    await withWindow({
+      go: {
+        main: {
+          Bridge: {
+            ListConversations: () => [],
+            RenameConversation: (input: unknown) => {
+              calls.push(input)
+              return {
+                id: 'conversation-rename',
+                title: 'План релиза',
+                title_source: 'user',
+                preview: '',
+                updated_at: '2026-08-30T10:00:00.000Z',
+                messages: [],
+              }
+            },
+          },
+        },
+      },
+    }, async () => {
+      const conversation = await createYuriClient().renameConversation('conversation-rename', 'План релиза')
+      expect(calls).toEqual([{ id: 'conversation-rename', conversationId: 'conversation-rename', title: 'План релиза' }])
+      expect(conversation).toMatchObject({ id: 'conversation-rename', title: 'План релиза', titleSource: 'user' })
+    })
   })
 
   it('keeps the mock first-run gate closed until provider probe succeeds', async () => {
@@ -191,7 +276,7 @@ describe('Yuri client contract', () => {
   it('normalizes and forwards named-agent roster methods through Wails', async () => {
     const calls: Array<{ name: string; args: unknown[] }> = []
     const wireAgent = {
-      id: 'agent-yuri', name: 'Юри', age: 21, gender: 'female', preferences: 'Коротко',
+      id: 'agent-yuri', name: 'Юри', age: 21, gender: 'female', preferences: 'Коротко', backstory: 'Выросла среди старых карт.',
       traits: { warmth: 0.6 }, active: true, created_at: '2026-08-29T00:00:00Z', updated_at: '2026-08-29T00:00:00Z',
     }
     const bridge = {
@@ -206,9 +291,9 @@ describe('Yuri client contract', () => {
     resetYuriClientForTests()
     try {
       const client = createYuriClient()
-      await expect(client.listAgents()).resolves.toMatchObject([{ id: 'agent-yuri', name: 'Юри', traits: { warmth: 0.6 }, active: true }])
-      await expect(client.getActiveAgent()).resolves.toMatchObject({ id: 'agent-yuri' })
-      await expect(client.createAgent(defaultAgentDraft)).resolves.toMatchObject({ id: 'agent-yuri' })
+      await expect(client.listAgents()).resolves.toMatchObject([{ id: 'agent-yuri', name: 'Юри', backstory: 'Выросла среди старых карт.', traits: { warmth: 0.6 }, active: true }])
+      await expect(client.getActiveAgent()).resolves.toMatchObject({ id: 'agent-yuri', backstory: 'Выросла среди старых карт.' })
+      await expect(client.createAgent(defaultAgentDraft)).resolves.toMatchObject({ id: 'agent-yuri', backstory: 'Выросла среди старых карт.' })
       await expect(client.setActiveAgent('agent-yuri')).resolves.toMatchObject({ id: 'agent-yuri', active: true })
       expect(calls).toEqual([
         { name: 'ListAgents', args: [] },
@@ -289,7 +374,7 @@ describe('Yuri client contract', () => {
   })
 
   it('preserves repeated live streaming deltas while suppressing returned replay events', async () => {
-    const listeners = new Map<string, (value: unknown) => void>()
+    const bus = createWailsEventBus()
     const streamed = [
       { type: 'run.started', runId: 'run-1' },
       { type: 'assistant.delta', runId: 'run-1', messageId: 'message-1', delta: 'Я' },
@@ -302,7 +387,7 @@ describe('Yuri client contract', () => {
     const bridge = {
       ListConversations: () => [],
       SendMessage: () => {
-        streamed.forEach((event) => listeners.get('yuri:chat')?.(event))
+        streamed.forEach((event) => bus.emit('yuri:chat', event))
         return { runId: 'run-1', status: 'complete', events: streamed }
       },
     }
@@ -311,10 +396,7 @@ describe('Yuri client contract', () => {
       configurable: true,
       value: {
         go: { main: { Bridge: bridge } },
-        runtime: {
-          EventsOn: (name: string, callback: (value: unknown) => void) => { listeners.set(name, callback) },
-          EventsOff: (name: string) => { listeners.delete(name) },
-        },
+        runtime: bus.runtime,
       },
     })
     resetYuriClientForTests()
@@ -330,6 +412,210 @@ describe('Yuri client contract', () => {
       else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
       resetYuriClientForTests()
     }
+  })
+
+  it('keeps two concurrent runs on separate streams and lets neither silence the other (H-7)', async () => {
+    const bus = createWailsEventBus()
+    const finish = new Map<string, (result: unknown) => void>()
+    const bridge = {
+      ListConversations: () => [],
+      SendMessage: (request: { text: string }) => new Promise((resolve) => finish.set(request.text, resolve)),
+    }
+
+    await withWindow({ go: { main: { Bridge: bridge } }, runtime: bus.runtime }, async () => {
+      const client = createYuriClient()
+      const first: string[] = []
+      const second: string[] = []
+
+      // Both runs live in the same conversation: the user sends, leaves the tab,
+      // comes back and sends again while the first run is still going.
+      const firstRun = client.sendMessage({ conversationId: 'conversation-1', text: 'первый' }, (event) => {
+        if (event.type === 'assistant.delta') first.push(event.delta)
+      })
+      const secondRun = client.sendMessage({ conversationId: 'conversation-1', text: 'второй' }, (event) => {
+        if (event.type === 'assistant.delta') second.push(event.delta)
+      })
+
+      // Go mints the ids and announces each run before any text arrives, which
+      // is what lets each subscription claim the run it owns.
+      bus.emit('yuri:chat', { type: 'run.started', runId: 'run-a', conversationId: 'conversation-1' })
+      bus.emit('yuri:chat', { type: 'run.started', runId: 'run-b', conversationId: 'conversation-1' })
+      bus.emit('yuri:chat', { type: 'assistant.delta', runId: 'run-a', conversationId: 'conversation-1', messageId: 'message-a', delta: 'A1' })
+      bus.emit('yuri:chat', { type: 'assistant.delta', runId: 'run-b', conversationId: 'conversation-1', messageId: 'message-b', delta: 'B1' })
+
+      // Neither run has picked up the other's text.
+      expect(first).toEqual(['A1'])
+      expect(second).toEqual(['B1'])
+
+      // The first run finishes and tears its subscription down.
+      bus.emit('yuri:chat', { type: 'run.completed', runId: 'run-a', conversationId: 'conversation-1', status: 'complete' })
+      finish.get('первый')?.({ runId: 'run-a', status: 'complete', events: [] })
+      await expect(firstRun).resolves.toMatchObject({ runId: 'run-a', status: 'complete' })
+
+      // …and the second run, still active, keeps streaming. Under the old
+      // `EventsOff('yuri:chat')` cleanup this delta reached nobody.
+      bus.emit('yuri:chat', { type: 'assistant.delta', runId: 'run-b', conversationId: 'conversation-1', messageId: 'message-b', delta: 'B2' })
+      expect(second).toEqual(['B1', 'B2'])
+
+      bus.emit('yuri:chat', { type: 'run.completed', runId: 'run-b', conversationId: 'conversation-1', status: 'complete' })
+      finish.get('второй')?.({ runId: 'run-b', status: 'complete', events: [] })
+      await expect(secondRun).resolves.toMatchObject({ runId: 'run-b', status: 'complete' })
+
+      expect(first).toEqual(['A1'])
+      expect(second).toEqual(['B1', 'B2'])
+    })
+  })
+
+  it('releases only the finished run from the chat bus and drops the bus when the last run leaves', async () => {
+    const bus = createWailsEventBus()
+    const finish = new Map<string, (result: unknown) => void>()
+    const bridge = {
+      ListConversations: () => [],
+      SendMessage: (request: { conversationId: string }) => new Promise((resolve) => finish.set(request.conversationId, resolve)),
+    }
+
+    await withWindow({ go: { main: { Bridge: bridge } }, runtime: bus.runtime }, async () => {
+      const client = createYuriClient()
+      const second: string[] = []
+
+      const firstRun = client.sendMessage({ conversationId: 'conversation-a', text: 'первый' }, () => undefined)
+      const secondRun = client.sendMessage({ conversationId: 'conversation-b', text: 'второй' }, (event) => second.push(event.type))
+
+      // One shared bus listener multiplexes both runs.
+      expect(bus.listenerCount('yuri:chat')).toBe(1)
+
+      bus.emit('yuri:chat', { type: 'run.started', runId: 'run-a', conversationId: 'conversation-a' })
+      bus.emit('yuri:chat', { type: 'run.started', runId: 'run-b', conversationId: 'conversation-b' })
+
+      finish.get('conversation-a')?.({ runId: 'run-a', status: 'complete', events: [] })
+      await firstRun
+
+      // The bus survives the first run's cleanup, and the second run still hears it.
+      expect(bus.listenerCount('yuri:chat')).toBe(1)
+      bus.emit('yuri:chat', { type: 'assistant.completed', runId: 'run-b', conversationId: 'conversation-b', messageId: 'message-b' })
+      expect(second).toEqual(['run.started', 'assistant.completed'])
+
+      finish.get('conversation-b')?.({ runId: 'run-b', status: 'complete', events: [] })
+      await secondRun
+
+      // Nothing is left registered once the last run releases.
+      expect(bus.listenerCount('yuri:chat')).toBe(0)
+
+      // A straggler for a retired run is not adopted by anyone.
+      bus.emit('yuri:chat', { type: 'assistant.completed', runId: 'run-b', conversationId: 'conversation-b', messageId: 'message-b' })
+      expect(second).toEqual(['run.started', 'assistant.completed'])
+    })
+  })
+
+  it('renders each lifecycle event once when the return value replays what the live stream already delivered', async () => {
+    const bus = createWailsEventBus()
+    // Mirrors ChatRunResult.Events: lifecycle events only, all of them already
+    // dispatched on the bus (chatEmitter.record skips assistant.delta).
+    const lifecycle = [
+      { type: 'run.started', runId: 'run-1', conversationId: 'conversation-1', createdAt: '2026-08-29T10:00:00.000Z' },
+      { type: 'assistant.completed', runId: 'run-1', conversationId: 'conversation-1', messageId: 'message-1', createdAt: '2026-08-29T10:00:02.000Z' },
+      { type: 'run.completed', runId: 'run-1', conversationId: 'conversation-1', status: 'complete', createdAt: '2026-08-29T10:00:02.100Z' },
+    ]
+    const bridge = {
+      ListConversations: () => [],
+      SendMessage: () => {
+        bus.emit('yuri:chat', lifecycle[0])
+        bus.emit('yuri:chat', { type: 'assistant.delta', runId: 'run-1', conversationId: 'conversation-1', messageId: 'message-1', delta: 'Готово' })
+        bus.emit('yuri:chat', lifecycle[1])
+        bus.emit('yuri:chat', lifecycle[2])
+        return { runId: 'run-1', status: 'complete', events: lifecycle }
+      },
+    }
+
+    await withWindow({ go: { main: { Bridge: bridge } }, runtime: bus.runtime }, async () => {
+      const seen: string[] = []
+      await createYuriClient().sendMessage({ conversationId: 'conversation-1', text: 'Привет' }, (event) => seen.push(event.type))
+      expect(seen).toEqual(['run.started', 'assistant.delta', 'assistant.completed', 'run.completed'])
+    })
+  })
+
+  it('replays the returned events in full when no live stream exists', async () => {
+    const bridge = {
+      ListConversations: () => [],
+      SendMessage: () => ({
+        runId: 'run-1',
+        status: 'complete',
+        events: [
+          { type: 'run.started', runId: 'run-1', conversationId: 'conversation-1' },
+          { type: 'assistant.delta', runId: 'run-1', conversationId: 'conversation-1', messageId: 'message-1', delta: 'Готово' },
+          { type: 'assistant.completed', runId: 'run-1', conversationId: 'conversation-1', messageId: 'message-1' },
+          { type: 'run.completed', runId: 'run-1', conversationId: 'conversation-1', status: 'complete' },
+        ],
+      }),
+    }
+
+    // No `runtime`, so there is nothing to subscribe to and the replay is the
+    // only delivery path.
+    await withWindow({ go: { main: { Bridge: bridge } } }, async () => {
+      const seen: string[] = []
+      await createYuriClient().sendMessage({ conversationId: 'conversation-1', text: 'Привет' }, (event) => seen.push(event.type))
+      expect(seen).toEqual(['run.started', 'assistant.delta', 'assistant.completed', 'run.completed'])
+    })
+  })
+
+  it('forwards the memory update payload instead of discarding it', async () => {
+    const bus = createWailsEventBus()
+    await withWindow({ go: { main: { Bridge: { ListConversations: () => [] } } }, runtime: bus.runtime }, async () => {
+      const updates: MemoryUpdateEvent[] = []
+      const unsubscribe = subscribeMemoryUpdates((update) => updates.push(update))
+
+      bus.emit('yuri:memory', { type: 'memory.updated', writes: 3 })
+      bus.emit('yuri:memory', { data: { type: 'memory.updated', writes: '2' } })
+      expect(updates).toEqual([
+        { type: 'memory.updated', writes: 3 },
+        { type: 'memory.updated', writes: 2 },
+      ])
+
+      unsubscribe()
+      expect(bus.listenerCount('yuri:memory')).toBe(0)
+      bus.emit('yuri:memory', { type: 'memory.updated', writes: 9 })
+      expect(updates).toHaveLength(2)
+    })
+  })
+
+  it('unsubscribes one listener without silencing the others on the same event (H-7)', async () => {
+    const bus = createWailsEventBus()
+    await withWindow({ go: { main: { Bridge: { ListConversations: () => [] } } }, runtime: bus.runtime }, async () => {
+      const first: number[] = []
+      const second: number[] = []
+      const releaseFirst = subscribeMemoryUpdates((update) => first.push(update.writes))
+      subscribeMemoryUpdates((update) => second.push(update.writes))
+      expect(bus.listenerCount('yuri:memory')).toBe(2)
+
+      releaseFirst()
+
+      // The old cleanup was `EventsOff('yuri:memory')`, which drops the whole
+      // registration: the surviving subscriber went deaf along with the one
+      // that actually asked to leave.
+      expect(bus.listenerCount('yuri:memory')).toBe(1)
+      bus.emit('yuri:memory', { type: 'memory.updated', writes: 5 })
+      expect(first).toEqual([])
+      expect(second).toEqual([5])
+    })
+  })
+
+  it('leaves a released listener inert when the runtime returns no unregister (H-7)', async () => {
+    const bus = createWailsEventBus({ unregisterable: false })
+    await withWindow({ go: { main: { Bridge: { ListConversations: () => [] } } }, runtime: bus.runtime }, async () => {
+      const first: number[] = []
+      const second: number[] = []
+      const releaseFirst = subscribeMemoryUpdates((update) => first.push(update.writes))
+      subscribeMemoryUpdates((update) => second.push(update.writes))
+
+      releaseFirst()
+
+      // Nothing can be unregistered here, so the released listener stays on the
+      // bus — the `active` guard is what stops it delivering. Reaching for
+      // `EventsOff` instead would have taken the survivor down too.
+      bus.emit('yuri:memory', { type: 'memory.updated', writes: 5 })
+      expect(first).toEqual([])
+      expect(second).toEqual([5])
+    })
   })
 
   it('holds a side effect at approval until the user resolves it', async () => {
@@ -369,11 +655,14 @@ describe('Yuri client contract', () => {
       valid: false,
       compatible: false,
     })
-    await expect(client.enablePlugin('reference.demo')).resolves.toBeUndefined()
+    await expect(client.enablePlugin({ pluginId: 'reference.demo', capabilities: [] })).resolves.toBeUndefined()
     await expect(client.startPlugin('reference.demo')).resolves.toBeUndefined()
     await expect(client.stopPlugin('reference.demo')).resolves.toBeUndefined()
     await expect(client.disablePlugin('reference.demo')).resolves.toBeUndefined()
     await expect(client.uninstallPlugin('reference.demo')).resolves.toBeUndefined()
+    // Nothing offline is installable, and the switch starts off rather than
+    // reporting a value the owner never chose.
+    await expect(client.pluginDevMode()).resolves.toBe(false)
   })
 
   it('normalizes plugin metadata and forwards lifecycle requests to Wails', async () => {
@@ -388,7 +677,12 @@ describe('Yuri client contract', () => {
       status: 'stopped',
       signature_status: 'signed',
       protocol_version: '1',
-      permissions: [{ capability: 'network.http', scope: 'example.test', granted: true }],
+      // PluginPermissionDTO splits the scope: `scope` is the kind
+      // (domain.ScopeKind) and `values` the values it is narrowed to.
+      permissions: [
+        { capability: 'network.http', scope: 'network', values: ['example.test'], granted: true },
+        { capability: 'filesystem.read', scope: 'filesystem', values: ['/tmp/reference'], granted: false },
+      ],
       tools: [{ id: 'demo.echo', name: 'Echo', risk: 'low' }],
     }
     const bridge = {
@@ -396,7 +690,10 @@ describe('Yuri client contract', () => {
       ListPlugins: () => [plugin],
       InspectPluginPackage: (request: unknown) => {
         calls.push({ name: 'InspectPluginPackage', args: [request] })
-        return { path: '/tmp/reference-plugin.zip', valid: true, compatible: true, signatureStatus: 'signed', manifest: plugin, warnings: [], errors: [] }
+        return {
+          path: '/tmp/reference-plugin.zip', valid: true, compatible: true, signatureStatus: 'signed',
+          manifest: plugin, warnings: [], errors: [], installable: true, requires_dev_mode: false,
+        }
       },
       EnablePlugin: (request: unknown) => {
         calls.push({ name: 'EnablePlugin', args: [request] })
@@ -416,17 +713,207 @@ describe('Yuri client contract', () => {
       await expect(client.listPlugins()).resolves.toMatchObject([{
         id: 'reference.demo',
         signatureStatus: 'signed',
-        permissions: [{ capability: 'network.http', granted: true }],
+        permissions: [
+          { capability: 'network.http', scope: 'network', scopeValues: ['example.test'], granted: true },
+          { capability: 'filesystem.read', scope: 'filesystem', scopeValues: ['/tmp/reference'], granted: false },
+        ],
         tools: [{ id: 'demo.echo', name: 'Echo' }],
       }])
-      await expect(client.inspectPluginPackage('/tmp/reference-plugin.zip')).resolves.toMatchObject({ valid: true, compatible: true, manifest: { id: 'reference.demo' } })
-      await expect(client.enablePlugin('reference.demo')).resolves.toMatchObject({ enabled: true, status: 'enabled' })
+      await expect(client.inspectPluginPackage('/tmp/reference-plugin.zip')).resolves.toMatchObject({
+        valid: true,
+        compatible: true,
+        manifest: { id: 'reference.demo' },
+        // The backend's verdict, already resolved against plugin dev mode.
+        installable: true,
+        requiresDevMode: false,
+      })
+      // A subset: only the capability the owner approved travels, narrowed and
+      // time-bounded. Nothing else in the manifest is granted.
+      await expect(client.enablePlugin({
+        pluginId: 'reference.demo',
+        capabilities: [{ capability: 'network.http', scopeKind: 'network', scopeValues: ['api.example.test'], expiresInHours: 24 }],
+      })).resolves.toMatchObject({ enabled: true, status: 'enabled' })
       await client.uninstallPlugin('reference.demo')
       expect(calls).toEqual([
-        { name: 'InspectPluginPackage', args: [{ path: '/tmp/reference-plugin.zip', devMode: false, allowUnsigned: false }] },
-        { name: 'EnablePlugin', args: [{ id: 'reference.demo', pluginId: 'reference.demo' }] },
+        // PluginPathRequest carries the path and nothing else.
+        { name: 'InspectPluginPackage', args: [{ path: '/tmp/reference-plugin.zip' }] },
+        {
+          name: 'EnablePlugin',
+          args: [{
+            id: 'reference.demo',
+            pluginId: 'reference.demo',
+            capabilities: [{ capability: 'network.http', scopeKind: 'network', scopeValues: ['api.example.test'], expiresInHours: 24 }],
+          }],
+        },
         { name: 'UninstallPlugin', args: [{ id: 'reference.demo', pluginId: 'reference.demo' }] },
       ])
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
+  it('reads and writes plugin dev mode as persisted backend state', async () => {
+    const calls: Array<{ name: string; args: unknown[] }> = []
+    let devMode = true
+    const bridge = {
+      ListConversations: () => [],
+      // Bridge.PluginDevMode() bool — the persisted config.plugin_dev_mode.
+      PluginDevMode: () => {
+        calls.push({ name: 'PluginDevMode', args: [] })
+        return devMode
+      },
+      // Bridge.SetPluginDevMode(enabled bool) error — a scalar argument, not
+      // a request object.
+      SetPluginDevMode: (enabled: unknown) => {
+        calls.push({ name: 'SetPluginDevMode', args: [enabled] })
+        devMode = Boolean(enabled)
+      },
+      InspectPluginPackage: (request: unknown) => {
+        calls.push({ name: 'InspectPluginPackage', args: [request] })
+        return {
+          path: '/tmp/unsigned-plugin', valid: true, compatible: true, signature_status: 'unsigned',
+          warnings: [], errors: [], installable: devMode, requires_dev_mode: true,
+        }
+      },
+      InstallPlugin: (request: unknown) => {
+        calls.push({ name: 'InstallPlugin', args: [request] })
+        return undefined
+      },
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      const client = createYuriClient()
+      await expect(client.pluginDevMode()).resolves.toBe(true)
+      await client.setPluginDevMode(false)
+      await expect(client.pluginDevMode()).resolves.toBe(false)
+
+      // With the switch off the backend refuses the unsigned package, and the
+      // signature status is reported as it is rather than relabelled 'dev'.
+      await expect(client.inspectPluginPackage('/tmp/unsigned-plugin')).resolves.toMatchObject({
+        signatureStatus: 'unsigned',
+        installable: false,
+        requiresDevMode: true,
+      })
+
+      await client.setPluginDevMode(true)
+      await expect(client.inspectPluginPackage('/tmp/unsigned-plugin')).resolves.toMatchObject({
+        signatureStatus: 'unsigned',
+        installable: true,
+        requiresDevMode: true,
+      })
+      await client.installPlugin({ path: '/tmp/unsigned-plugin' })
+
+      expect(calls).toEqual([
+        { name: 'PluginDevMode', args: [] },
+        { name: 'SetPluginDevMode', args: [false] },
+        { name: 'PluginDevMode', args: [] },
+        // PluginPathRequest is `{Path string}`: no devMode, no allowUnsigned.
+        { name: 'InspectPluginPackage', args: [{ path: '/tmp/unsigned-plugin' }] },
+        { name: 'SetPluginDevMode', args: [true] },
+        { name: 'InspectPluginPackage', args: [{ path: '/tmp/unsigned-plugin' }] },
+        { name: 'InstallPlugin', args: [{ path: '/tmp/unsigned-plugin' }] },
+      ])
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
+  it('treats an inspection with no verdict as not installable', async () => {
+    const bridge = {
+      ListConversations: () => [],
+      // A payload the current bridge cannot produce. If it ever appears, the
+      // missing verdict must fail closed: absent is not permission.
+      InspectPluginPackage: () => ({ path: '/tmp/legacy', valid: true, compatible: true, signature_status: 'signed', warnings: [], errors: [] }),
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      await expect(createYuriClient().inspectPluginPackage('/tmp/legacy')).resolves.toMatchObject({
+        installable: false,
+        requiresDevMode: false,
+      })
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
+  it('refuses to send an unrestricted consent that was never confirmed', async () => {
+    const calls: unknown[] = []
+    const bridge = {
+      ListConversations: () => [],
+      EnablePlugin: (request: unknown) => {
+        calls.push(request)
+        return undefined
+      },
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      const client = createYuriClient()
+
+      // Scope kind `unrestricted` without AllowUnrestricted: rejected by
+      // pluginConsentGrants, and never worth attempting.
+      await expect(client.enablePlugin({
+        pluginId: 'reference.demo',
+        capabilities: [{ capability: 'filesystem.read', scopeKind: 'unrestricted' }],
+      })).rejects.toThrow(/подтверждения/)
+
+      // N-8: a bare "*" value is unbounded too, even though its kind looks
+      // narrow. It passes through the same gate.
+      await expect(client.enablePlugin({
+        pluginId: 'reference.demo',
+        capabilities: [{ capability: 'network.http', scopeKind: 'network', scopeValues: ['*'] }],
+      })).rejects.toThrow(/подтверждения/)
+
+      // Neither attempt reached the bridge.
+      expect(calls).toEqual([])
+
+      await client.enablePlugin({
+        pluginId: 'reference.demo',
+        capabilities: [{ capability: 'network.http', scopeKind: 'network', scopeValues: ['*'], allowUnrestricted: true }],
+      })
+      expect(calls).toEqual([{
+        id: 'reference.demo',
+        pluginId: 'reference.demo',
+        capabilities: [{ capability: 'network.http', scopeKind: 'network', scopeValues: ['*'], allowUnrestricted: true }],
+      }])
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
+  it('surfaces a backend rejection of a consented scope instead of swallowing it', async () => {
+    const bridge = {
+      ListConversations: () => [],
+      EnablePlugin: () => {
+        throw new Error('consented scope for "filesystem.read" is broader than the manifest declaration')
+      },
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      const client = createYuriClient()
+      await expect(client.enablePlugin({
+        pluginId: 'reference.demo',
+        capabilities: [{ capability: 'filesystem.read', scopeKind: 'filesystem', scopeValues: ['/'] }],
+      })).rejects.toThrow('broader than the manifest declaration')
     } finally {
       if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
       else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
@@ -611,7 +1098,7 @@ describe('Yuri client contract', () => {
   })
 
   it('subscribes to notification events and gates native delivery on explicit flags', async () => {
-    const listeners = new Map<string, (value: unknown) => void>()
+    const bus = createWailsEventBus()
     const bridge = { ListConversations: () => [] }
     const previousWindow = (globalThis as { window?: unknown }).window
     const previousNotification = (globalThis as { Notification?: unknown }).Notification
@@ -619,10 +1106,7 @@ describe('Yuri client contract', () => {
       configurable: true,
       value: {
         go: { main: { Bridge: bridge } },
-        runtime: {
-          EventsOn: (name: string, callback: (value: unknown) => void) => { listeners.set(name, callback) },
-          EventsOff: (name: string) => { listeners.delete(name) },
-        },
+        runtime: bus.runtime,
       },
     })
     resetYuriClientForTests()
@@ -630,7 +1114,7 @@ describe('Yuri client contract', () => {
     try {
       const received: string[] = []
       const unsubscribe = subscribeNotifications((notification) => received.push(notification.id))
-      listeners.get('yuri:notification')?.({
+      bus.emit('yuri:notification', {
         data: {
           notification: {
             notification_id: 'notification-1',
@@ -644,7 +1128,7 @@ describe('Yuri client contract', () => {
       })
       expect(received).toEqual(['notification-1'])
       unsubscribe()
-      expect(listeners.has('yuri:notification')).toBe(false)
+      expect(bus.listenerCount('yuri:notification')).toBe(0)
 
       const fakeNotification = { permission: 'granted' as NotificationPermission, requestPermission: async () => 'granted' as NotificationPermission }
       Object.defineProperty(globalThis, 'Notification', { configurable: true, value: fakeNotification })

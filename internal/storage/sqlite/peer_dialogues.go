@@ -174,7 +174,7 @@ func (r *PeerDialogueRepository) GetForParticipant(ctx context.Context, particip
 
 // ListByParticipant returns only dialogues in which participantAgentID is a
 // named participant. It never exposes the other agent's unrelated history.
-func (r *PeerDialogueRepository) ListByParticipant(ctx context.Context, participantAgentID domain.ID, limit ...int) ([]domain.PeerDialogue, error) {
+func (r *PeerDialogueRepository) ListByParticipant(ctx context.Context, participantAgentID domain.ID, window ...int) ([]domain.PeerDialogue, error) {
 	if participantAgentID.Empty() {
 		return nil, fmt.Errorf("%w: participant agent id is required", domain.ErrInvalidArgument)
 	}
@@ -184,51 +184,38 @@ func (r *PeerDialogueRepository) ListByParticipant(ctx context.Context, particip
 	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
-	query := `
-		SELECT id
-		FROM peer_dialogues
+	limit, offset, err := listWindow("peer dialogue", window)
+	if err != nil {
+		return nil, err
+	}
+	query := peerDialogueSelect + `
 		WHERE initiator_agent_id = ? OR peer_agent_id = ?
 		ORDER BY created_at DESC, id DESC`
 	args := []any{string(participantAgentID), string(participantAgentID)}
-	if len(limit) > 0 && limit[0] > 0 {
-		query += " LIMIT ?"
-		args = append(args, limit[0])
-	}
+	query, args = appendWindow(query, args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, wrappedSQLError("list peer dialogues", err)
 	}
-	ids := make([]string, 0)
+	defer rows.Close()
+	result := make([]domain.PeerDialogue, 0)
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, wrappedSQLError("scan peer dialogue id", err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, wrappedSQLError("iterate peer dialogues", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, wrappedSQLError("close peer dialogues", err)
-	}
-	result := make([]domain.PeerDialogue, 0, len(ids))
-	for _, id := range ids {
-		item, err := r.Get(ctx, domain.ID(id))
-		if err != nil {
-			return nil, err
+		item, scanErr := scanPeerDialogue(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
 		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrappedSQLError("iterate peer dialogues", err)
 	}
 	return result, nil
 }
 
 // ListForParticipant is an explicit alias for callers that prefer the
 // participant-first naming used by the scoped Get method.
-func (r *PeerDialogueRepository) ListForParticipant(ctx context.Context, participantAgentID domain.ID, limit ...int) ([]domain.PeerDialogue, error) {
-	return r.ListByParticipant(ctx, participantAgentID, limit...)
+func (r *PeerDialogueRepository) ListForParticipant(ctx context.Context, participantAgentID domain.ID, window ...int) ([]domain.PeerDialogue, error) {
+	return r.ListByParticipant(ctx, participantAgentID, window...)
 }
 
 // FindByIdempotencyKey is scoped to the initiating agent and the root run,
@@ -244,16 +231,9 @@ func (r *PeerDialogueRepository) FindByIdempotencyKey(ctx context.Context, initi
 	if err := contextErr(ctx); err != nil {
 		return domain.PeerDialogue{}, err
 	}
-	var id string
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id
-		FROM peer_dialogues
-		WHERE initiator_agent_id = ? AND trigger_run_id = ? AND idempotency_key = ?`,
-		string(initiatorAgentID), string(triggerRunID), strings.TrimSpace(key)).Scan(&id)
-	if err != nil {
-		return domain.PeerDialogue{}, wrappedSQLError("find peer dialogue idempotency key", err)
-	}
-	return r.Get(ctx, domain.ID(id))
+	return scanPeerDialogue(r.db.QueryRowContext(ctx,
+		peerDialogueSelect+` WHERE initiator_agent_id = ? AND trigger_run_id = ? AND idempotency_key = ?`,
+		string(initiatorAgentID), string(triggerRunID), strings.TrimSpace(key)))
 }
 
 // HasRecentPair reports whether either agent has opened an exchange for this
@@ -274,11 +254,57 @@ func (r *PeerDialogueRepository) HasRecentPair(ctx context.Context, pairKey stri
 		SELECT EXISTS(
 			SELECT 1 FROM peer_dialogues
 			WHERE pair_key = ? AND created_at >= ?
-		)`, strings.TrimSpace(pairKey), since.UTC().Format(time.RFC3339Nano)).Scan(&exists)
+		)`, strings.TrimSpace(pairKey), formatTime(since)).Scan(&exists)
 	if err != nil {
 		return false, wrappedSQLError("check peer dialogue cooldown", err)
 	}
 	return exists == 1, nil
+}
+
+// interruptedDialogue is the minimal projection RecoverInterrupted needs to
+// close a non-terminal exchange: which row, what it is being moved away from,
+// and the version its update must still match.
+type interruptedDialogue struct {
+	id      string
+	status  domain.PeerDialogueStatus
+	version uint64
+}
+
+// selectInterruptedPeerDialoguesTx materializes the whole candidate set before
+// returning. That is not an optimization: the pool is a single connection and
+// the caller updates rows on this same transaction, so the cursor has to be
+// closed before the first UPDATE rather than held open across it. Doing the
+// read in its own function makes that ordering structural, and lets the cursor
+// be released by defer on every path instead of by a Close at each exit.
+func selectInterruptedPeerDialoguesTx(ctx context.Context, tx *sql.Tx) ([]interruptedDialogue, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, status, version
+		FROM peer_dialogues
+		WHERE status IN ('queued', 'running', 'cancelling')
+		ORDER BY created_at ASC, id ASC`)
+	if err != nil {
+		return nil, wrappedSQLError("list interrupted peer dialogues", err)
+	}
+	defer rows.Close()
+	items := make([]interruptedDialogue, 0)
+	for rows.Next() {
+		var item interruptedDialogue
+		var status string
+		if err := rows.Scan(&item.id, &status, &item.version); err != nil {
+			return nil, wrappedSQLError("scan interrupted peer dialogue", err)
+		}
+		item.status = domain.PeerDialogueStatus(status)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrappedSQLError("iterate interrupted peer dialogues", err)
+	}
+	// Closed explicitly as well as by the defer above so a close failure is
+	// still reported rather than discarded; sql.Rows.Close is idempotent.
+	if err := rows.Close(); err != nil {
+		return nil, wrappedSQLError("close interrupted peer dialogues", err)
+	}
+	return items, nil
 }
 
 // RecoverInterrupted closes non-terminal exchanges left by a process crash
@@ -312,38 +338,11 @@ func (r *PeerDialogueRepository) RecoverInterrupted(ctx context.Context, now tim
 		return wrappedSQLError("begin recover peer dialogues", err)
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `
-		SELECT id, status, version
-		FROM peer_dialogues
-		WHERE status IN ('queued', 'running', 'cancelling')
-		ORDER BY created_at ASC, id ASC`)
+	items, err := selectInterruptedPeerDialoguesTx(ctx, tx)
 	if err != nil {
-		return wrappedSQLError("list interrupted peer dialogues", err)
+		return err
 	}
-	type interruptedDialogue struct {
-		id      string
-		status  domain.PeerDialogueStatus
-		version uint64
-	}
-	items := make([]interruptedDialogue, 0)
-	for rows.Next() {
-		var item interruptedDialogue
-		var status string
-		if err := rows.Scan(&item.id, &status, &item.version); err != nil {
-			rows.Close()
-			return wrappedSQLError("scan interrupted peer dialogue", err)
-		}
-		item.status = domain.PeerDialogueStatus(status)
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return wrappedSQLError("iterate interrupted peer dialogues", err)
-	}
-	if err := rows.Close(); err != nil {
-		return wrappedSQLError("close interrupted peer dialogues", err)
-	}
-	updatedAt := now.UTC().Format(time.RFC3339Nano)
+	updatedAt := formatTime(now)
 	for _, item := range items {
 		nextStatus := domain.PeerDialogueCancelled
 		failure := ""
@@ -428,7 +427,7 @@ func savePeerDialogue(ctx context.Context, database *sql.DB, dialogue domain.Pee
 		strings.TrimSpace(dialogue.Purpose), string(dialogue.Status), dialogue.Budget.MaxTurns, dialogue.Budget.MaxTokens,
 		dialogue.Budget.MaxDurationSeconds, dialogue.Budget.CooldownSeconds, dialogue.TurnCount, dialogue.TokensUsed,
 		dialogue.Failure, dialogue.Version, updatedAt, nullableTimeValue(dialogue.StartedAt), nullableTimeValue(dialogue.FinishedAt),
-		dialogue.ExpiresAt.UTC().Format(time.RFC3339Nano), string(dialogue.ID), expectedVersion)
+		formatTime(dialogue.ExpiresAt), string(dialogue.ID), expectedVersion)
 	if err != nil {
 		return wrappedSQLError("save peer dialogue", err)
 	}
@@ -534,7 +533,7 @@ func updatePeerDialogueTx(ctx context.Context, tx *sql.Tx, dialogue domain.PeerD
 		strings.TrimSpace(dialogue.Purpose), string(dialogue.Status), dialogue.Budget.MaxTurns, dialogue.Budget.MaxTokens,
 		dialogue.Budget.MaxDurationSeconds, dialogue.Budget.CooldownSeconds, dialogue.TurnCount, dialogue.TokensUsed,
 		dialogue.Failure, dialogue.Version, updatedAt, nullableTimeValue(dialogue.StartedAt), nullableTimeValue(dialogue.FinishedAt),
-		dialogue.ExpiresAt.UTC().Format(time.RFC3339Nano), string(dialogue.ID), expectedVersion)
+		formatTime(dialogue.ExpiresAt), string(dialogue.ID), expectedVersion)
 	if err != nil {
 		return wrappedSQLError("update peer dialogue", err)
 	}
@@ -548,20 +547,20 @@ func updatePeerDialogueTx(ctx context.Context, tx *sql.Tx, dialogue domain.PeerD
 	return nil
 }
 
+// peerDialogueSelect lists the full record so the single-row reads and
+// ListByParticipant share one scanner and one round-trip per query.
+const peerDialogueSelect = `
+	SELECT id, initiator_agent_id, peer_agent_id, trigger_run_id, pair_key, purpose, status,
+	       max_turns, max_tokens, max_duration_seconds, cooldown_seconds, turn_count, tokens_used,
+	       idempotency_key, request_hash, failure, version, created_at, updated_at, started_at, finished_at, expires_at
+	FROM peer_dialogues`
+
 func getPeerDialogue(ctx context.Context, database *sql.DB, id string) (domain.PeerDialogue, error) {
-	return scanPeerDialogue(database.QueryRowContext(ctx, `
-		SELECT id, initiator_agent_id, peer_agent_id, trigger_run_id, pair_key, purpose, status,
-		       max_turns, max_tokens, max_duration_seconds, cooldown_seconds, turn_count, tokens_used,
-		       idempotency_key, request_hash, failure, version, created_at, updated_at, started_at, finished_at, expires_at
-		FROM peer_dialogues WHERE id = ?`, id))
+	return scanPeerDialogue(database.QueryRowContext(ctx, peerDialogueSelect+` WHERE id = ?`, id))
 }
 
 func getPeerDialogueTx(ctx context.Context, tx *sql.Tx, id string) (domain.PeerDialogue, error) {
-	return scanPeerDialogue(tx.QueryRowContext(ctx, `
-		SELECT id, initiator_agent_id, peer_agent_id, trigger_run_id, pair_key, purpose, status,
-		       max_turns, max_tokens, max_duration_seconds, cooldown_seconds, turn_count, tokens_used,
-		       idempotency_key, request_hash, failure, version, created_at, updated_at, started_at, finished_at, expires_at
-		FROM peer_dialogues WHERE id = ?`, id))
+	return scanPeerDialogue(tx.QueryRowContext(ctx, peerDialogueSelect+` WHERE id = ?`, id))
 }
 
 type peerDialogueScanner interface {
@@ -622,9 +621,8 @@ func (r *PeerDialogueMessageRepository) Get(ctx context.Context, id domain.ID) (
 	if id.Empty() {
 		return domain.PeerDialogueMessage{}, fmt.Errorf("%w: peer dialogue message id is required", domain.ErrInvalidArgument)
 	}
-	return scanPeerDialogueMessage(r.db.QueryRowContext(ctx, `
-		SELECT id, dialogue_id, sequence, sender_agent_id, recipient_agent_id, source_run_id, content, created_at
-		FROM peer_dialogue_messages WHERE id = ?`, string(id)))
+	return scanPeerDialogueMessage(r.db.QueryRowContext(ctx,
+		`SELECT `+peerDialogueMessageColumns+` FROM peer_dialogue_messages AS m WHERE m.id = ?`, string(id)))
 }
 
 // GetForParticipant is the single-message counterpart to the scoped dialogue
@@ -634,17 +632,24 @@ func (r *PeerDialogueMessageRepository) GetForParticipant(ctx context.Context, d
 	if dialogueID.Empty() || participantAgentID.Empty() || messageID.Empty() {
 		return domain.PeerDialogueMessage{}, fmt.Errorf("%w: dialogue, participant and message ids are required", domain.ErrInvalidArgument)
 	}
-	message, err := r.Get(ctx, messageID)
-	if err != nil {
+	if r == nil || r.db == nil {
+		return domain.PeerDialogueMessage{}, fmt.Errorf("%w: peer dialogue message repository is unavailable", domain.ErrInvalidArgument)
+	}
+	if err := contextErr(ctx); err != nil {
 		return domain.PeerDialogueMessage{}, err
 	}
-	if message.DialogueID != dialogueID {
-		return domain.PeerDialogueMessage{}, domain.ErrNotFound
-	}
-	if _, err := r.dialogueForParticipant(ctx, dialogueID, participantAgentID); err != nil {
-		return domain.PeerDialogueMessage{}, err
-	}
-	return message, nil
+	// The participation proof is the join, not a preceding round-trip. All
+	// three ways this can fail — no such message, right message but wrong
+	// dialogue, right dialogue but the caller is not one of its two named
+	// participants — still collapse to the same ErrNotFound, so a
+	// non-participant cannot tell them apart.
+	return scanPeerDialogueMessage(r.db.QueryRowContext(ctx,
+		`SELECT `+peerDialogueMessageColumns+`
+		FROM peer_dialogue_messages AS m
+		JOIN peer_dialogues AS d ON d.id = m.dialogue_id
+		WHERE m.id = ? AND m.dialogue_id = ?
+		  AND (d.initiator_agent_id = ? OR d.peer_agent_id = ?)`,
+		string(messageID), string(dialogueID), string(participantAgentID), string(participantAgentID)))
 }
 
 // ListByDialogue returns chronological messages only when the caller is a
@@ -660,15 +665,21 @@ func (r *PeerDialogueMessageRepository) ListByDialogue(ctx context.Context, dial
 	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
-	if _, err := r.dialogueForParticipant(ctx, dialogueID, participantAgentID); err != nil {
-		return nil, err
-	}
+	// The scope check is driven from peer_dialogues and the messages are
+	// LEFT JOINed onto it, so one statement both proves participation and
+	// reads the turns. Driving from the dialogue side is what keeps the two
+	// outcomes distinguishable: a caller who is not a participant matches no
+	// row at all and gets ErrNotFound, while a participant whose dialogue has
+	// somehow lost its messages matches exactly one row whose message columns
+	// are NULL and gets an empty slice — the damaged-state signal the bridge
+	// reports separately.
 	query := `
-		SELECT id, dialogue_id, sequence, sender_agent_id, recipient_agent_id, source_run_id, content, created_at
-		FROM peer_dialogue_messages
-		WHERE dialogue_id = ?
-		ORDER BY sequence ASC, id ASC`
-	args := []any{string(dialogueID)}
+		SELECT d.id, ` + peerDialogueMessageColumns + `
+		FROM peer_dialogues AS d
+		LEFT JOIN peer_dialogue_messages AS m ON m.dialogue_id = d.id
+		WHERE d.id = ? AND (d.initiator_agent_id = ? OR d.peer_agent_id = ?)
+		ORDER BY m.sequence ASC, m.id ASC`
+	args := []any{string(dialogueID), string(participantAgentID), string(participantAgentID)}
 	if len(limit) > 0 && limit[0] > 0 {
 		query += " LIMIT ?"
 		args = append(args, limit[0])
@@ -679,15 +690,28 @@ func (r *PeerDialogueMessageRepository) ListByDialogue(ctx context.Context, dial
 	}
 	defer rows.Close()
 	result := make([]domain.PeerDialogueMessage, 0)
+	scoped := false
 	for rows.Next() {
-		message, scanErr := scanPeerDialogueMessage(rows)
-		if scanErr != nil {
-			return nil, scanErr
+		var scopeID string
+		var row peerDialogueMessageRow
+		if err := rows.Scan(append([]any{&scopeID}, row.dest()...)...); err != nil {
+			return nil, wrappedSQLError("scan peer dialogue message", err)
+		}
+		scoped = true
+		if !row.present() {
+			continue
+		}
+		message, buildErr := row.toMessage()
+		if buildErr != nil {
+			return nil, buildErr
 		}
 		result = append(result, message)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, wrappedSQLError("iterate peer dialogue messages", err)
+	}
+	if !scoped {
+		return nil, wrappedSQLError("scope peer dialogue messages", sql.ErrNoRows)
 	}
 	return result, nil
 }
@@ -698,45 +722,62 @@ func (r *PeerDialogueMessageRepository) ListByDialogueForParticipant(ctx context
 	return r.ListByDialogue(ctx, dialogueID, participantAgentID, limit...)
 }
 
-func (r *PeerDialogueMessageRepository) dialogueForParticipant(ctx context.Context, dialogueID, participantAgentID domain.ID) (domain.PeerDialogue, error) {
-	if r == nil || r.db == nil {
-		return domain.PeerDialogue{}, fmt.Errorf("%w: peer dialogue message repository is unavailable", domain.ErrInvalidArgument)
-	}
-	var id string
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id
-		FROM peer_dialogues
-		WHERE id = ? AND (initiator_agent_id = ? OR peer_agent_id = ?)`,
-		string(dialogueID), string(participantAgentID), string(participantAgentID)).Scan(&id)
-	if err != nil {
-		return domain.PeerDialogue{}, wrappedSQLError("scope peer dialogue messages", err)
-	}
-	return getPeerDialogue(ctx, r.db, id)
-}
-
 type peerDialogueMessageScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanPeerDialogueMessage(scanner peerDialogueMessageScanner) (domain.PeerDialogueMessage, error) {
-	var message domain.PeerDialogueMessage
-	var id, dialogueID, senderID, recipientID, sourceRunID, createdAt string
-	if err := scanner.Scan(&id, &dialogueID, &message.Sequence, &senderID, &recipientID, &sourceRunID, &message.Content, &createdAt); err != nil {
-		return domain.PeerDialogueMessage{}, wrappedSQLError("scan peer dialogue message", err)
+// peerDialogueMessageColumns is the one column list every message read uses, so
+// the single-row reads and the joined list read share peerDialogueMessageRow.
+// It is qualified with the "m" alias because both reads join peer_dialogues,
+// which carries columns of the same names.
+const peerDialogueMessageColumns = `m.id, m.dialogue_id, m.sequence, m.sender_agent_id,
+	       m.recipient_agent_id, m.source_run_id, m.content, m.created_at`
+
+// peerDialogueMessageRow is one raw message row. Its fields are nullable
+// because the scoped list read LEFT JOINs messages onto the dialogue that
+// authorizes them: a participant whose dialogue has no messages produces one
+// row with every message column NULL, and that has to be recognized rather
+// than fail the scan.
+type peerDialogueMessageRow struct {
+	id, dialogueID, senderID, recipientID, sourceRunID, content, createdAt sql.NullString
+	sequence                                                               sql.NullInt64
+}
+
+func (row *peerDialogueMessageRow) dest() []any {
+	return []any{&row.id, &row.dialogueID, &row.sequence, &row.senderID,
+		&row.recipientID, &row.sourceRunID, &row.content, &row.createdAt}
+}
+
+// present reports whether the row carries a message at all, as opposed to the
+// all-NULL placeholder an unmatched LEFT JOIN produces.
+func (row *peerDialogueMessageRow) present() bool { return row.id.Valid }
+
+func (row *peerDialogueMessageRow) toMessage() (domain.PeerDialogueMessage, error) {
+	message := domain.PeerDialogueMessage{
+		ID:               domain.ID(row.id.String),
+		DialogueID:       domain.ID(row.dialogueID.String),
+		Sequence:         int(row.sequence.Int64),
+		SenderAgentID:    domain.ID(row.senderID.String),
+		RecipientAgentID: domain.ID(row.recipientID.String),
+		SourceRunID:      domain.ID(row.sourceRunID.String),
+		Content:          row.content.String,
 	}
-	message.ID = domain.ID(id)
-	message.DialogueID = domain.ID(dialogueID)
-	message.SenderAgentID = domain.ID(senderID)
-	message.RecipientAgentID = domain.ID(recipientID)
-	message.SourceRunID = domain.ID(sourceRunID)
 	var err error
-	if message.CreatedAt, err = scanTime(createdAt); err != nil {
+	if message.CreatedAt, err = scanTime(row.createdAt.String); err != nil {
 		return domain.PeerDialogueMessage{}, err
 	}
 	if err := message.Validate(); err != nil {
 		return domain.PeerDialogueMessage{}, err
 	}
 	return message, nil
+}
+
+func scanPeerDialogueMessage(scanner peerDialogueMessageScanner) (domain.PeerDialogueMessage, error) {
+	var row peerDialogueMessageRow
+	if err := scanner.Scan(row.dest()...); err != nil {
+		return domain.PeerDialogueMessage{}, wrappedSQLError("scan peer dialogue message", err)
+	}
+	return row.toMessage()
 }
 
 var _ interface {

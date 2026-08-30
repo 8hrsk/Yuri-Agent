@@ -396,3 +396,97 @@ func (s *blockingStream) Recv(ctx context.Context) (ModelEvent, error) {
 }
 
 func (s *blockingStream) Close() error { return nil }
+
+// TestRuntimeDeliversTerminalEventAfterCancellation pins the fix for a run that
+// the owner interrupts: emit() short-circuits on a cancelled context, so the
+// sink never saw run.failed and the UI kept the partial assistant message in a
+// streaming state forever. The terminal event must reach the sink, must say the
+// run was cancelled, and must arrive on a context the sink can still use for
+// its own persistence work.
+func TestRuntimeDeliversTerminalEventAfterCancellation(t *testing.T) {
+	backend := &blockingBackend{started: make(chan struct{})}
+	runtime, err := NewRuntime(backend, NewToolRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var terminal *Event
+	var sinkCtxLive bool
+	ctx, cancel := context.WithCancel(context.Background())
+	finished := make(chan error, 1)
+	go func() {
+		_, runErr := runtime.Run(ctx, RunRequest{
+			RunID:        "run-cancelled",
+			ModelRequest: ModelRequest{Model: "test-model", Messages: []Message{{Role: RoleUser, Content: "wait"}}},
+			Budget:       domain.RunBudget{MaxSteps: 1, MaxTokens: 100, MaxToolOutputBytes: 1000, MaxDurationSeconds: 10},
+			Sink: func(sinkCtx context.Context, event Event) error {
+				if event.Type != EventRunCompleted && event.Type != EventRunFailed {
+					return nil
+				}
+				mu.Lock()
+				copied := event
+				terminal = &copied
+				sinkCtxLive = sinkCtx.Err() == nil
+				mu.Unlock()
+				return nil
+			},
+		})
+		finished <- runErr
+	}()
+	select {
+	case <-backend.started:
+	case <-time.After(time.Second):
+		t.Fatal("backend was not called")
+	}
+	cancel()
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime did not stop after cancellation")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if terminal == nil {
+		t.Fatal("cancelled run delivered no terminal event to the sink")
+	}
+	if terminal.Type != EventRunFailed {
+		t.Fatalf("terminal event = %#v, want run.failed", terminal)
+	}
+	if terminal.Status != RunStatusCancelled {
+		t.Fatalf("terminal status = %q, want %q", terminal.Status, RunStatusCancelled)
+	}
+	if !sinkCtxLive {
+		t.Fatal("sink received an already cancelled context and cannot persist the finalized run")
+	}
+}
+
+// TestRuntimeTerminalEventReportsSuccessStatus keeps the successful path honest
+// about its own status now that terminal events carry one.
+func TestRuntimeTerminalEventReportsSuccessStatus(t *testing.T) {
+	backend := &scriptedBackend{streams: [][]ModelEvent{{
+		{Type: ModelEventTextDelta, Delta: "готово"},
+		{Type: ModelEventCompleted},
+	}}}
+	runtime, err := NewRuntime(backend, NewToolRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var terminal *Event
+	if _, err := runtime.Run(context.Background(), RunRequest{
+		RunID:        "run-complete",
+		ModelRequest: ModelRequest{Model: "test-model", Messages: []Message{{Role: RoleUser, Content: "привет"}}},
+		Budget:       domain.RunBudget{MaxSteps: 1, MaxTokens: 100, MaxToolOutputBytes: 1000, MaxDurationSeconds: 10},
+		Sink: func(_ context.Context, event Event) error {
+			if event.Type == EventRunCompleted {
+				copied := event
+				terminal = &copied
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if terminal == nil || terminal.Status != RunStatusCompleted {
+		t.Fatalf("terminal event = %#v, want a completed status", terminal)
+	}
+}

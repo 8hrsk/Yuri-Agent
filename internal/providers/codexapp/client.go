@@ -16,6 +16,11 @@ import (
 
 var ErrClosed = errors.New("codex app server connection closed")
 
+// eventBuffer bounds the shared feed and every per-thread feed. A turn that is
+// executing a tool is not draining its feed, so the buffer has to absorb a whole
+// tool round trip worth of notifications.
+const eventBuffer = 128
+
 type Options struct {
 	Binary           string
 	WorkingDirectory string
@@ -69,6 +74,76 @@ type Client struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	maxBytes  int
+	// dropped counts notifications discarded because no consumer was draining
+	// the event channel. Guarded by mu.
+	dropped uint64
+	// subscriptions routes thread-scoped notifications to the turn that owns
+	// them. One app-server connection carries every concurrent turn, so a single
+	// shared channel would let one turn consume another turn's deltas, dynamic
+	// tool requests, and completion. Guarded by mu.
+	subscriptions map[string]*ThreadEvents
+}
+
+// ThreadEvents is the event feed of one Codex thread. A turn subscribes before
+// it starts and unsubscribes when its stream closes, so concurrent turns — a
+// delegated subagent running inside an open parent turn, for example — never
+// steal each other's events.
+type ThreadEvents struct {
+	client   *Client
+	threadID string
+	events   chan Event
+}
+
+// SubscribeThread claims every notification and server request carrying this
+// thread id. It must be called before the thread's first turn/start: the app
+// server only emits thread events in response to a turn, so subscribing between
+// thread/start and turn/start cannot miss one.
+func (client *Client) SubscribeThread(threadID string) *ThreadEvents {
+	if client == nil || threadID == "" {
+		return nil
+	}
+	subscription := &ThreadEvents{client: client, threadID: threadID, events: make(chan Event, eventBuffer)}
+	client.mu.Lock()
+	if client.subscriptions == nil {
+		client.subscriptions = make(map[string]*ThreadEvents)
+	}
+	client.subscriptions[threadID] = subscription
+	client.mu.Unlock()
+	return subscription
+}
+
+// Events is the feed of this thread only.
+func (subscription *ThreadEvents) Events() <-chan Event {
+	if subscription == nil {
+		return nil
+	}
+	return subscription.events
+}
+
+// Close unsubscribes the thread and declines whatever server request is still
+// queued, so the app server is never left waiting for an answer nobody will
+// produce. The channel itself is deliberately never closed: the read loop routes
+// into it while holding the client mutex, and an unsubscribed feed is simply
+// garbage collected. A consumer learns that the connection died from the shared
+// channel returned by Events, which finish closes.
+func (subscription *ThreadEvents) Close() {
+	if subscription == nil || subscription.client == nil {
+		return
+	}
+	client := subscription.client
+	client.mu.Lock()
+	if client.subscriptions[subscription.threadID] == subscription {
+		delete(client.subscriptions, subscription.threadID)
+	}
+	client.mu.Unlock()
+	for {
+		select {
+		case event := <-subscription.events:
+			client.declineDropped(event)
+		default:
+			return
+		}
+	}
 }
 
 func Start(ctx context.Context, options Options) (*Client, error) {
@@ -126,7 +201,7 @@ func newClient(stdin io.WriteCloser, stdout io.Reader, maxBytes int) *Client {
 	}
 	client := &Client{
 		stdin: stdin, stdout: stdout, nextID: 1,
-		pending: make(map[string]chan response), events: make(chan Event, 128),
+		pending: make(map[string]chan response), events: make(chan Event, eventBuffer),
 		stop: make(chan struct{}), done: make(chan struct{}), maxBytes: maxBytes,
 	}
 	if closer, ok := stdout.(io.Closer); ok {
@@ -136,6 +211,9 @@ func newClient(stdin io.WriteCloser, stdout io.Reader, maxBytes int) *Client {
 	return client
 }
 
+// Events is the shared feed of everything that is not claimed by a thread
+// subscription: connection-scoped notifications, events of threads whose turn
+// already ended, and the closure signal — finish closes this channel.
 func (client *Client) Events() <-chan Event { return client.events }
 
 func (client *Client) Initialize(ctx context.Context, info ClientInfo) error {
@@ -323,16 +401,95 @@ func (client *Client) readLoop() {
 		if message.Method == "" {
 			continue
 		}
-		event := Event{ID: message.ID, Method: message.Method, Params: message.Params}
-		select {
-		case client.events <- event:
-		case <-client.stop:
+		if !client.deliver(Event{ID: message.ID, Method: message.Method, Params: message.Params}) {
 			return
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		terminal = fmt.Errorf("read Codex message: %w", err)
 	}
+}
+
+// deliver publishes a notification without ever blocking the read loop. Event
+// channels are only drained while a turn is streaming, so a blocking send would
+// stall the same loop that resolves RPC replies: after a full buffer between
+// turns, every later request (including thread/start) would hang until its own
+// timeout. When the buffer is full the oldest event is discarded to make room. A
+// discarded server-initiated request is declined so the app server is never left
+// waiting for a response nobody will produce. It reports false when the client
+// is closing and the loop should stop.
+func (client *Client) deliver(event Event) bool {
+	dropped, ok := client.enqueue(event)
+	for _, discarded := range dropped {
+		client.declineDropped(discarded)
+	}
+	return ok
+}
+
+// enqueue routes one event to the feed that owns it and reports what had to be
+// discarded to make room. Routing and the drop-oldest bookkeeping happen under
+// the client mutex so a subscription can never be unregistered between the
+// lookup and the send; every operation inside is non-blocking, and the declines
+// are issued by the caller after the mutex is released.
+func (client *Client) enqueue(event Event) ([]Event, bool) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	target := client.events
+	if threadID := eventThreadID(event); threadID != "" {
+		if subscription := client.subscriptions[threadID]; subscription != nil {
+			target = subscription.events
+		}
+	}
+	var dropped []Event
+	for {
+		select {
+		case target <- event:
+			client.dropped += uint64(len(dropped))
+			return dropped, true
+		case <-client.stop:
+			client.dropped += uint64(len(dropped))
+			return dropped, false
+		default:
+		}
+		select {
+		case oldest := <-target:
+			dropped = append(dropped, oldest)
+		case <-client.stop:
+			client.dropped += uint64(len(dropped))
+			return dropped, false
+		default:
+			// A consumer emptied the buffer between the two selects; retry.
+		}
+	}
+}
+
+// eventThreadID reports the thread a notification or server request belongs to.
+// Connection-scoped events carry no thread id and stay on the shared feed.
+func eventThreadID(event Event) string {
+	if len(event.Params) == 0 {
+		return ""
+	}
+	var params struct {
+		ThreadID string `json:"threadId"`
+	}
+	if err := json.Unmarshal(event.Params, &params); err != nil {
+		return ""
+	}
+	return params.ThreadID
+}
+
+func (client *Client) declineDropped(event Event) {
+	if event.IsServerRequest() {
+		_ = client.Respond(event.ID, map[string]string{"decision": "decline"}, nil)
+	}
+}
+
+// DroppedEvents reports how many notifications were discarded because no
+// consumer was draining the event channel.
+func (client *Client) DroppedEvents() uint64 {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.dropped
 }
 
 func (client *Client) finish(cause error) {
@@ -343,6 +500,10 @@ func (client *Client) finish(cause error) {
 	client.err = cause
 	pending := client.pending
 	client.pending = make(map[string]chan response)
+	// Live turns learn about the dead connection from the shared channel below;
+	// per-thread feeds are dropped rather than closed because Close never closes
+	// them either.
+	client.subscriptions = nil
 	client.mu.Unlock()
 	for _, result := range pending {
 		result <- response{Cause: cause}

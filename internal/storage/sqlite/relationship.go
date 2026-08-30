@@ -225,7 +225,9 @@ func (r *RelationshipRepository) GetVersionRecord(ctx context.Context, id domain
 	return relationshipVersionRecord(state), nil
 }
 
-func (r *RelationshipRepository) ListVersions(ctx context.Context, id domain.ID, limit ...int) ([]RelationshipVersionRecord, error) {
+// ListVersions reads each revision in full in one query. window is the
+// optional (limit, offset) tail.
+func (r *RelationshipRepository) ListVersions(ctx context.Context, id domain.ID, window ...int) ([]RelationshipVersionRecord, error) {
 	if err := requireDatabase(r.db); err != nil {
 		return nil, err
 	}
@@ -235,44 +237,35 @@ func (r *RelationshipRepository) ListVersions(ctx context.Context, id domain.ID,
 	if id.Empty() {
 		return nil, fmt.Errorf("%w: relationship id is required", domain.ErrInvalidArgument)
 	}
-	if len(limit) > 0 && limit[0] < 0 {
-		return nil, fmt.Errorf("%w: relationship history limit cannot be negative", domain.ErrInvalidArgument)
+	limit, offset, err := listWindow("relationship history", window)
+	if err != nil {
+		return nil, err
 	}
-	query := `SELECT version FROM relationship_versions WHERE relationship_id = ? ORDER BY version DESC`
+	query := relationshipSelect + ` FROM relationship_versions AS rv
+		WHERE rv.relationship_id = ? ORDER BY rv.version DESC`
 	args := []any{string(id)}
-	if len(limit) > 0 && limit[0] > 0 {
-		query += " LIMIT ?"
-		args = append(args, limit[0])
-	}
+	query, args = appendWindow(query, args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, wrappedSQLError("list relationship versions", err)
 	}
 	defer rows.Close()
-	versions := make([]uint64, 0)
+	result := make([]RelationshipVersionRecord, 0)
 	for rows.Next() {
-		var version uint64
-		if err := rows.Scan(&version); err != nil {
-			return nil, wrappedSQLError("scan relationship version", err)
+		state, scanErr := scanRelationship(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		versions = append(versions, version)
+		result = append(result, relationshipVersionRecord(state))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, wrappedSQLError("iterate relationship versions", err)
 	}
-	result := make([]RelationshipVersionRecord, 0, len(versions))
-	for _, version := range versions {
-		item, err := r.GetVersionRecord(ctx, id, version)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, item)
-	}
 	return result, nil
 }
 
-func (r *RelationshipRepository) ListHistory(ctx context.Context, id domain.ID, limit ...int) ([]RelationshipVersionRecord, error) {
-	return r.ListVersions(ctx, id, limit...)
+func (r *RelationshipRepository) ListHistory(ctx context.Context, id domain.ID, window ...int) ([]RelationshipVersionRecord, error) {
+	return r.ListVersions(ctx, id, window...)
 }
 
 // RecordOpinion appends one opinion while preserving all other relationship

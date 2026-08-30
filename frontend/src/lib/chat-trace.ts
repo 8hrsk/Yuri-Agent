@@ -3,6 +3,7 @@ import type {
   ApprovalTraceStatus,
   ApprovalTraceStep,
   ChatEvent,
+  ChatMessage,
   CompletionTraceStep,
   RunStatus,
   RunTrace,
@@ -151,9 +152,19 @@ function traceStatusForRunStatus(status: RunStatus): RunTraceStatus {
   return 'running'
 }
 
+// Steps and traces are treated as immutable throughout this module, so their
+// parsed timestamps can be memoized by object identity. Without this the
+// comparators re-ran `Date.parse` O(n log n) times per event (M-43).
+const stepTimes = new WeakMap<RunTraceStep, number>()
+const traceTimes = new WeakMap<RunTrace, number>()
+
 function stepTime(step: RunTraceStep): number {
+  const cached = stepTimes.get(step)
+  if (cached !== undefined) return cached
   const parsed = Date.parse(step.createdAt)
-  return Number.isFinite(parsed) ? parsed : 0
+  const value = Number.isFinite(parsed) ? parsed : 0
+  stepTimes.set(step, value)
+  return value
 }
 
 function sortSteps(steps: RunTraceStep[]): RunTraceStep[] {
@@ -161,6 +172,22 @@ function sortSteps(steps: RunTraceStep[]): RunTraceStep[] {
     .map((step, index) => ({ step, index }))
     .sort((left, right) => stepTime(left.step) - stepTime(right.step) || left.index - right.index)
     .map(({ step }) => step)
+}
+
+/** True when `sortSteps` would return the array unchanged. */
+function stepsOrdered(steps: RunTraceStep[]): boolean {
+  for (let index = 1; index < steps.length; index += 1) {
+    if (stepTime(steps[index - 1]) > stepTime(steps[index])) return false
+  }
+  return true
+}
+
+/** True when `sortRunTraces` would return the array unchanged. */
+function tracesOrdered(traces: RunTrace[]): boolean {
+  for (let index = 1; index < traces.length; index += 1) {
+    if (traceTime(traces[index - 1]) > traceTime(traces[index])) return false
+  }
+  return true
 }
 
 function cloneToolCall(toolCall: ToolCall): ToolCall {
@@ -183,10 +210,38 @@ function cloneStep(step: RunTraceStep): RunTraceStep {
   }
 }
 
+/**
+ * Re-apply the label invariant a `cloneStep` pass used to enforce, without the
+ * deep copy. Steps are never mutated in place, so an already-correct step can
+ * be shared instead of duplicated — which is also what keeps the rendered
+ * `RunTrace` fragments referentially stable for `React.memo`.
+ */
+function normalizeStep(step: RunTraceStep): RunTraceStep {
+  if (step.kind !== 'thinking') return step
+  const label = step.status === 'running' ? 'Обрабатывает запрос…' : 'Обработка завершена'
+  return step.label === label ? step : { ...step, label }
+}
+
+function normalizeSteps(steps: RunTraceStep[]): RunTraceStep[] {
+  let changed = false
+  const next = steps.map((step) => {
+    const normalized = normalizeStep(step)
+    if (normalized !== step) changed = true
+    return normalized
+  })
+  return changed ? next : steps
+}
+
 function upsertStep(steps: RunTraceStep[], next: RunTraceStep): RunTraceStep[] {
   const index = steps.findIndex((step) => step.id === next.id)
-  if (index === -1) return sortSteps([...steps, cloneStep(next)])
-  return sortSteps(steps.map((step, candidateIndex) => candidateIndex === index ? cloneStep(next) : step))
+  const candidate = cloneStep(next)
+  const merged = index === -1
+    ? [...steps, candidate]
+    : steps.map((step, candidateIndex) => candidateIndex === index ? candidate : step)
+  // `sortSteps` is stable on the very index order `merged` already carries, so
+  // for an ordered array it is an expensive identity function. Events arrive in
+  // time order, which makes that the normal case.
+  return stepsOrdered(merged) ? merged : sortSteps(merged)
 }
 
 function withUpdatedTrace(trace: RunTrace, at: string, patch: Partial<RunTrace>): RunTrace {
@@ -195,7 +250,7 @@ function withUpdatedTrace(trace: RunTrace, at: string, patch: Partial<RunTrace>)
     ...trace,
     ...patch,
     updatedAt: at,
-    steps: steps.map(cloneStep),
+    steps: normalizeSteps(steps),
   }
 }
 
@@ -211,10 +266,13 @@ function thinkingStep(runId: string, at: string, label = 'Обрабатывае
 }
 
 function completeThinking(trace: RunTrace, at: string, status: ThinkingTraceStep['status'] = 'completed'): RunTrace {
-  const steps = trace.steps.map((step) => step.kind === 'thinking' && step.status === 'running'
-    ? { ...step, status, finishedAt: at }
-    : step)
-  return { ...trace, steps }
+  let changed = false
+  const steps = trace.steps.map((step) => {
+    if (step.kind !== 'thinking' || step.status !== 'running') return step
+    changed = true
+    return { ...step, status, finishedAt: at }
+  })
+  return changed ? { ...trace, steps } : trace
 }
 
 function statusStep(runId: string, eventStatus: RunStatus, at: string, label?: string): StatusTraceStep {
@@ -379,12 +437,18 @@ export function aggregateChatEvent(traces: RunTrace[] = [], event: ChatEvent, at
   const next = index === -1
     ? [...traces, nextTrace]
     : traces.map((trace, traceIndex) => traceIndex === index ? nextTrace : trace)
-  return sortRunTraces(next)
+  // Unchanged traces keep their identity here, which is what lets the renderer
+  // skip every trace block that this event did not touch.
+  return tracesOrdered(next) ? next : sortRunTraces(next)
 }
 
 function traceTime(trace: RunTrace): number {
+  const cached = traceTimes.get(trace)
+  if (cached !== undefined) return cached
   const parsed = Date.parse(trace.startedAt || trace.updatedAt || trace.finishedAt || '')
-  return Number.isFinite(parsed) ? parsed : 0
+  const value = Number.isFinite(parsed) ? parsed : 0
+  traceTimes.set(trace, value)
+  return value
 }
 
 /** Stable chronological ordering for historical and live traces. */
@@ -400,8 +464,18 @@ export function sortRunTraces(traces: RunTrace[]): RunTrace[] {
  * between assistant response segments. Every tool call gets its own block;
  * the terminal marker is omitted because the final response already conveys
  * completion in the conversation flow.
+ *
+ * The result is memoized by trace identity: a conversation re-renders many
+ * times per run, but `aggregateChatEvent` only replaces the trace the event
+ * belongs to, so every other trace keeps both its fragments and their object
+ * identity. Traces are immutable here, and the fragments are render-only, so
+ * the cache is never observable through the returned values.
  */
+const timelineFragments = new WeakMap<RunTrace, RunTrace[]>()
+
 export function splitRunTraceForTimeline(trace: RunTrace): RunTrace[] {
+  const cached = timelineFragments.get(trace)
+  if (cached) return cached
   const fragments: RunTrace[] = []
   const initialThinking = trace.steps.find((step): step is ThinkingTraceStep => step.kind === 'thinking')
   if (initialThinking) {
@@ -419,7 +493,7 @@ export function splitRunTraceForTimeline(trace: RunTrace): RunTrace[] {
             ? 'cancelled'
             : 'complete',
       toolCalls: undefined,
-      steps: [cloneStep(initialThinking)],
+      steps: [normalizeStep(initialThinking)],
     })
   }
   const toolSteps = trace.steps.filter((step): step is ToolTraceStep => step.kind === 'tool')
@@ -450,11 +524,13 @@ export function splitRunTraceForTimeline(trace: RunTrace): RunTrace[] {
       updatedAt: tool.finishedAt ?? trace.updatedAt,
       finishedAt: tool.finishedAt,
       status,
-      toolCalls: [cloneToolCall(tool.toolCall)],
-      steps: [preparation, cloneStep(tool), ...approvals.map(cloneStep)],
+      toolCalls: [tool.toolCall],
+      steps: [preparation, tool, ...approvals],
     })
   }
-  return sortRunTraces(fragments)
+  const ordered = tracesOrdered(fragments) ? fragments : sortRunTraces(fragments)
+  timelineFragments.set(trace, ordered)
+  return ordered
 }
 
 export function normalizeRunTraceStep(value: unknown, index: number, runId: string, fallbackAt: string): RunTraceStep | undefined {
@@ -567,6 +643,77 @@ export function normalizeRunTrace(value: unknown, fallbackIndex = 0): RunTrace |
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     steps: sortSteps(steps),
   }
+}
+
+/**
+ * One rendered row of the conversation: either a message bubble or one of the
+ * execution-trace blocks a run was split into.
+ *
+ * `time` and `priority` are the sort keys, resolved once when the entry is
+ * built. The renderer used to recompute them inside the comparator on every
+ * pass, which meant `Date.parse` ran O(n log n) times per streaming token.
+ */
+export type ChatTimelineEntry =
+  | { kind: 'message'; key: string; time: number; priority: number; message: ChatMessage }
+  | { kind: 'trace'; key: string; time: number; priority: number; trace: RunTrace }
+
+function timelineTime(value: string | undefined): number {
+  const parsed = Date.parse(value ?? '')
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function messageTimelineEntry(message: ChatMessage): ChatTimelineEntry {
+  return {
+    kind: 'message',
+    key: message.id,
+    time: timelineTime(message.createdAt),
+    // A user message opens the exchange, the trace blocks describe the work,
+    // and the answer closes it; ties in time keep that reading order.
+    priority: message.role === 'user' ? 0 : 2,
+    message,
+  }
+}
+
+function traceTimelineEntry(trace: RunTrace): ChatTimelineEntry {
+  return { kind: 'trace', key: `trace-${trace.id}`, time: timelineTime(trace.startedAt), priority: 1, trace }
+}
+
+function compareTimelineEntries(left: ChatTimelineEntry, right: ChatTimelineEntry): number {
+  return left.time - right.time || left.priority - right.priority
+}
+
+/** Build the chronological timeline of one conversation's durable state. */
+export function buildChatTimeline(messages: ChatMessage[], traces?: RunTrace[]): ChatTimelineEntry[] {
+  const entries: ChatTimelineEntry[] = []
+  for (const message of messages) {
+    if (message.role !== 'tool') entries.push(messageTimelineEntry(message))
+  }
+  for (const trace of traces ?? []) {
+    for (const fragment of splitRunTraceForTimeline(trace)) entries.push(traceTimelineEntry(fragment))
+  }
+  entries.sort(compareTimelineEntries)
+  return entries
+}
+
+/**
+ * Splice the messages of the run currently streaming into an already ordered
+ * timeline. The live buffer is kept out of the conversation state so a token
+ * cannot invalidate `buildChatTimeline`; this is the cheap per-token step that
+ * replaces rebuilding and re-sorting the whole conversation (C-1).
+ */
+export function mergeStreamingMessages(entries: ChatTimelineEntry[], streaming: ChatMessage[]): ChatTimelineEntry[] {
+  if (streaming.length === 0) return entries
+  const merged = entries.slice()
+  for (const message of streaming) {
+    if (message.role === 'tool') continue
+    const entry = messageTimelineEntry(message)
+    // Insert after every entry that already sorts before or with it, which is
+    // exactly where a stable sort of the concatenation would have placed it.
+    let index = merged.length
+    while (index > 0 && compareTimelineEntries(merged[index - 1], entry) > 0) index -= 1
+    merged.splice(index, 0, entry)
+  }
+  return merged
 }
 
 export function toolStatusLabel(status: ToolStatus): string {

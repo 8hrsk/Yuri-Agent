@@ -41,8 +41,20 @@ func TestPersonalitySnapshotSeedsSingleOwnerState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.ID != "owner" || snapshot.CurrentVersion != 1 || len(snapshot.Traits) < 8 || snapshot.Relationship.Version != 1 || snapshot.Affect.Version != 1 {
+	if snapshot.ID != "owner" || snapshot.CurrentVersion != 1 || len(snapshot.Traits) < 24 || snapshot.Relationship.Version != 1 || snapshot.Affect.Version != 1 {
 		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	for _, trait := range []string{"empathy", "sociability", "shyness", "anxiety", "fearfulness", "emotional_stability", "sensitivity", "possessiveness", "impulsivity", "stubbornness", "optimism", "curiosity", "suspicion"} {
+		found := false
+		for _, item := range snapshot.Traits {
+			if item.ID == trait && item.Min == 0 && item.Max == 1 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expanded trait %q missing from snapshot", trait)
+		}
 	}
 	if !snapshot.AutoEvolution || len(snapshot.Versions) != 1 || snapshot.CurrentVersionID == "" {
 		t.Fatalf("persona controls/history = %#v", snapshot)

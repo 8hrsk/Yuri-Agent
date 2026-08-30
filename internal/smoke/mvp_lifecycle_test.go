@@ -156,8 +156,17 @@ func TestMVPOfflineLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("list memory versions: %v", err)
 		}
-		if len(versions) < 2 {
-			t.Fatalf("recall should persist a touch revision, got %d versions", len(versions))
+		// A recall is durable telemetry, not a content revision: it must not
+		// append a full copy of the content to the journal (see H-17).
+		if len(versions) != 1 {
+			t.Fatalf("recall should not add a content revision, got %d versions", len(versions))
+		}
+		touched, err := repositories.Memories.Get(ctx, memoryID)
+		if err != nil {
+			t.Fatalf("get recalled memory: %v", err)
+		}
+		if touched.AccessCount == 0 || touched.LastRecalledAt.IsZero() {
+			t.Fatalf("recall was not persisted: %#v", touched)
 		}
 		memoryArchiveHits, err := adapter.SearchArchive(ctx, "durable", memory.ArchiveSearchOptions{Limit: 2})
 		if err != nil {

@@ -330,6 +330,18 @@ func validateEventSources(sources []EventSource) error {
 	return nil
 }
 
+// ValidatePermissionDeclarations is the single rule for a manifest permission
+// block, exported so every manifest decode in the tree applies exactly the
+// same one. In particular it rejects a manifest that declares the same
+// capability twice: pluginDTO renders one row per declaration while a
+// consumer keying declarations by capability can only keep one scope, so a
+// duplicate lets the scope an owner reads and approves differ from the scope
+// that is enforced. Merging the declarations would leave the same ambiguity
+// in the manifest format, so a duplicate is treated as malformed.
+func ValidatePermissionDeclarations(permissions []PermissionDeclaration) error {
+	return validatePermissions(permissions)
+}
+
 func validatePermissions(permissions []PermissionDeclaration) error {
 	seen := make(map[string]struct{}, len(permissions))
 	for _, permission := range permissions {

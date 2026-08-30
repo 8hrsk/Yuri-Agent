@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -23,8 +25,29 @@ func TestPluginHelperProcess(t *testing.T) {
 	if os.Getenv("YURI_PLUGIN_HELPER") != "1" {
 		return
 	}
-	scanner := bufio.NewScanner(os.Stdin)
+	if text := os.Getenv("YURI_PLUGIN_STDERR"); text != "" {
+		_, _ = fmt.Fprintln(os.Stderr, text)
+	}
+	if os.Getenv("YURI_PLUGIN_IGNORE_STDIN") == "1" {
+		// Deliberately never drains stdin. A host that writes more than one
+		// pipe buffer must not be wedged forever by this.
+		time.Sleep(10 * time.Second)
+		return
+	}
+
+	var writeMu sync.Mutex
 	encoder := json.NewEncoder(os.Stdout)
+	write := func(envelope Envelope) {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		_ = encoder.Encode(envelope)
+	}
+
+	var cancelMu sync.Mutex
+	cancels := make(map[string]chan struct{})
+
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 64*1024), 8<<20)
 	for scanner.Scan() {
 		var request Envelope
 		if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
@@ -32,7 +55,22 @@ func TestPluginHelperProcess(t *testing.T) {
 		}
 		switch request.Type {
 		case MessageEvent:
-			// Cancellation is intentionally accepted as a best-effort event.
+			continue
+		case MessageType("request.cancel"):
+			// Written as a literal so this helper also compiles against the
+			// pre-fix protocol, where the type constant does not exist.
+			var params CancelParams
+			_ = json.Unmarshal(request.Payload, &params)
+			if marker := os.Getenv("YURI_PLUGIN_CANCEL_MARKER"); marker != "" {
+				_ = os.WriteFile(marker, []byte(params.RequestID), 0o600)
+			}
+			cancelMu.Lock()
+			stop := cancels[params.RequestID]
+			delete(cancels, params.RequestID)
+			cancelMu.Unlock()
+			if stop != nil {
+				close(stop)
+			}
 			continue
 		case MessageHandshake, MessageHealth, MessageToolInvoke, MessageShutdown:
 		default:
@@ -51,11 +89,29 @@ func TestPluginHelperProcess(t *testing.T) {
 				PluginVersion:   "1.0.0",
 				Accepted:        os.Getenv("YURI_PLUGIN_NOT_READY") != "1",
 			}, nil)
+			if count := os.Getenv("YURI_PLUGIN_EVENT_FLOOD"); count != "" {
+				write(response)
+				total, _ := strconv.Atoi(count)
+				for i := 0; i < total; i++ {
+					event, err := NewEvent("noise", map[string]any{"index": i})
+					if err != nil {
+						return
+					}
+					write(event)
+				}
+				continue
+			}
 		case MessageHealth:
 			if os.Getenv("YURI_PLUGIN_DELAY_HEALTH") == "1" {
 				time.Sleep(250 * time.Millisecond)
 			}
 			response, _ = NewTypedResponse(MessageHealthResult, request.ID, HealthResult{Status: "ok", PluginID: "example.reference", PluginVersion: "1.0.0", ProtocolVersion: ProtocolVersion, CheckedAt: time.Now().UTC()}, nil)
+			if delay := os.Getenv("YURI_PLUGIN_EXIT_AFTER_HEALTH_MS"); delay != "" {
+				write(response)
+				milliseconds, _ := strconv.Atoi(delay)
+				time.Sleep(time.Duration(milliseconds) * time.Millisecond)
+				os.Exit(3)
+			}
 		case MessageToolInvoke:
 			if os.Getenv("YURI_PLUGIN_CRASH_ON_TOOL") == "1" {
 				os.Exit(17)
@@ -64,10 +120,33 @@ func TestPluginHelperProcess(t *testing.T) {
 			if err := json.Unmarshal(request.Payload, &params); err != nil {
 				return
 			}
+			if os.Getenv("YURI_PLUGIN_SLOW_TOOL") == "1" {
+				stop := make(chan struct{})
+				cancelMu.Lock()
+				cancels[request.ID] = stop
+				cancelMu.Unlock()
+				go func(id string, arguments json.RawMessage) {
+					select {
+					case <-stop:
+						cancelled, _ := NewTypedResponse(MessageError, id, nil, &RPCError{Code: "cancelled", Message: "request cancelled by host"})
+						write(cancelled)
+					case <-time.After(5 * time.Second):
+						completed, _ := NewTypedResponse(MessageToolResult, id, ToolInvokeResult{OK: true, Output: arguments}, nil)
+						write(completed)
+					}
+				}(request.ID, params.Arguments)
+				continue
+			}
 			response, _ = NewTypedResponse(MessageToolResult, request.ID, ToolInvokeResult{OK: true, Output: params.Arguments}, nil)
+			if os.Getenv("YURI_PLUGIN_EXIT_AFTER_TOOL") == "1" {
+				// Exits the instant the frame is handed to the pipe: the host
+				// must still deliver the result rather than ErrPluginExited.
+				write(response)
+				os.Exit(0)
+			}
 		case MessageShutdown:
 			response, _ = NewTypedResponse(MessageShutdownResult, request.ID, ShutdownResult{Accepted: true}, nil)
-			_ = encoder.Encode(response)
+			write(response)
 			return
 		default:
 			response, _ = NewTypedResponse(MessageError, request.ID, nil, &RPCError{Code: "method_not_found", Message: "unknown method"})
@@ -75,9 +154,7 @@ func TestPluginHelperProcess(t *testing.T) {
 		if os.Getenv("YURI_PLUGIN_HUGE_RESPONSE") == "1" && request.Type == MessageHealth {
 			response.Payload = json.RawMessage(`{"status":"` + strings.Repeat("x", 4096) + `"}`)
 		}
-		if err := encoder.Encode(response); err != nil {
-			return
-		}
+		write(response)
 	}
 }
 
@@ -105,6 +182,11 @@ func copyTestBinary(t *testing.T, dir string) string {
 
 func testSupervisor(t *testing.T, extraEnv ...string) (*Supervisor, func()) {
 	t.Helper()
+	return testSupervisorWith(t, nil, extraEnv...)
+}
+
+func testSupervisorWith(t *testing.T, customize func(*SupervisorConfig), extraEnv ...string) (*Supervisor, func()) {
+	t.Helper()
 	packageDir := t.TempDir()
 	_ = copyTestBinary(t, packageDir)
 	manifest := validManifest("reference-plugin")
@@ -118,6 +200,9 @@ func testSupervisor(t *testing.T, extraEnv ...string) (*Supervisor, func()) {
 			Args: []string{"-test.run=TestPluginHelperProcess"},
 			Env:  append([]string{"YURI_PLUGIN_HELPER=1"}, extraEnv...),
 		},
+	}
+	if customize != nil {
+		customize(&config)
 	}
 	supervisor, err := NewSupervisor(config)
 	if err != nil {

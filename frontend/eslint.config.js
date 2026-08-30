@@ -9,6 +9,14 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // Build/lint helpers under scripts/ are plain Node ESM, not browser code.
+    files: ['scripts/**/*.mjs', '*.config.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      globals: { ...globals.node },
+    },
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2022,

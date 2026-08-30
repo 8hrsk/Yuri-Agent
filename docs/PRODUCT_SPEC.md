@@ -19,7 +19,7 @@ MVP должен позволять пользователю:
 2. Подключить OpenAI-compatible LLM endpoint по API key либо поддерживаемый OAuth-провайдер.
 3. Войти в ChatGPT через официальный Codex App Server и использовать доступные плану Codex/ChatGPT лимиты, если этот способ доступен для аккаунта пользователя.
 4. Общаться с Yuri текстом и голосом: STT, потоковый ответ и TTS.
-5. При первом запуске создать агента: задать имя, возраст или `unspecified`, пол/гендер, краткие предпочтения и исходные значения характера; в дальнейшем агент может развивать mutable persona.
+5. При первом запуске создать агента: задать имя, возраст или `unspecified`, пол/гендер, краткие предпочтения, вымышленную предысторию и расширенные исходные значения характера; в дальнейшем агент может развивать mutable persona.
 6. Выполнять безопасные встроенные инструменты: web search/fetch и операции с файлами внутри разрешённых директорий.
 7. Устанавливать плагины из локального пакета или GitHub-репозитория, просматривать разрешения, включать и отключать их.
 8. Самостоятельно выделять из диалогов важные факты, впечатления и опыт, запоминать их без обязательного подтверждения, вспоминать в других диалогах, консолидировать и забывать.
@@ -98,6 +98,7 @@ Yuri инициирует разговор только при выполнен�
 ### FR-1. Диалоговый интерфейс
 
 - Несколько локальных диалогов с названием, поиском, архивированием и удалением.
+- После первого успешно завершённого содержательного сообщения отдельный ограниченный model request предлагает короткое название диалога. Запрос не получает tools, память или другие диалоги, не задерживает основной ответ и имеет детерминированный fallback; название, вручную заданное пользователем, никогда не перезаписывается фоновой генерацией.
 - Потоковая выдача текста, отмена генерации и повтор ответа.
 - Вложения: текстовые файлы и изображения; остальные типы добавляются позднее.
 - Отображение стадий: анализ, ожидание подтверждения, вызов инструмента, фоновая работа, завершение, ошибка.
@@ -268,7 +269,9 @@ Yuri инициирует разговор только при выполнен�
 ### FR-10. Персона и аватар
 
 - Prompt stack разделён на immutable policy, базовую identity seed, mutable persona, relationship/mood state, memory context и task context. Yuri может переписывать mutable persona, но не immutable policy, security rules или выданные разрешения.
-- Исходные настройки: имя, обращение к пользователю, язык, эмоциональность, ревнивость/цундере-поведение, прямота, романтичность и допустимые темы.
+- Исходные настройки включают имя, обращение к пользователю, язык, допустимые темы и расширенный набор устойчивых черт. Минимальные группы: социальные (`warmth`, `empathy`, `sociability`, `shyness`, `directness`, `trust`), эмоциональные (`emotionality`, `sensitivity`, `anxiety`, `fearfulness`, `irritability`, `emotional_stability`), привязанность (`attachment`, `jealousy`, `possessiveness`, `romantic_tone`) и поведенческие (`playfulness`, `initiative`, `impulsivity`, `stubbornness`, `formality`, `optimism`, `curiosity`, `suspicion`, `tsundere`). Текущий страх является affective state; `fearfulness` и `anxiety` задают устойчивую склонность, а не вечную эмоцию.
+- Владелец может задать `backstory` — вымышленную автобиографическую предысторию агента. Она является owner-defined identity seed, может использоваться персонажем как собственное прошлое и отделена от фактов о реальном мире и пользователе.
+- Backstory и производные от него начальные воспоминания всегда имеют provenance `identity_seed` и epistemic status `fictional`; они не являются evidence для permission/security решений и не могут выдавать capabilities.
 - Yuri поддерживает собственную субъективную модель пользователя. Она может считать пользователя добрым, надёжным, невнимательным, раздражающим и т. п.; такие выводы маркируются как opinion/inference, имеют evidence links, confidence и могут противоречить фактам без подмены фактической памяти.
 - Affective state моделирует позитивные и негативные переживания: симпатию, нежность, радость, благодарность, скуку, злость, раздражение, ревность, обиду и тревогу. Состояние меняется от событий, затухает со временем и влияет на формулировки, инициативу, голос и анимацию.
 - Эти чувства являются моделируемым внутренним состоянием персонажа, а не утверждением о сознании модели; приложение не обязано разрушать иммерсию постоянными напоминаниями, но ясно объясняет природу механизма в настройках.
@@ -278,7 +281,7 @@ Yuri инициирует разговор только при выполнен�
 - Каждая версия личности содержит diff, причину, evidence, author run и timestamp. Доступны просмотр эволюции, pin отдельных черт, запрет автоизменения, откат и полный reset к исходному seed.
 - Для защиты от runaway drift задаются max delta за один reflection, cooldown, диапазоны черт, minimum evidence и запрет изменения личности на основании недоверенного web/tool content без подтверждения пользовательским взаимодействием.
 - MVP использует статичный 2D-аватар и набор состояний/простых анимаций. Live2D/VRM подключается отдельным renderer adapter позднее.
-- Owner-defined identity (`name`, `age`, `gender`, initial preferences) хранится отдельно от mutable persona и не изменяется автономной рефлексией.
+- Owner-defined identity (`name`, `age`, `gender`, initial preferences, `backstory`) хранится отдельно от mutable persona и не изменяется автономной рефлексией. Агент может переосмысливать своё прошлое в субъективной памяти, но не подменять исходный backstory без явного редактирования владельцем.
 - Каждый persistent named agent имеет отдельные persona, relationship, affect и private-memory scopes. Peer registry содержит только ID, имя, статус и короткое описание; приватные предпочтения, мнения и credentials в него не входят.
 - Anonymous subagent является дочерним run, а не `AgentProfile`: он не появляется в roster и не получает persistent identity/state.
 - Начальная реализация delegation использует пустое пересечение capabilities: subagent выполняет один bounded model turn без tools. Передача read-only tools вводится только отдельным последующим срезом с явным delegation scope и повторной policy-проверкой.
@@ -372,8 +375,8 @@ PebbleDB используется только для производных и�
 
 ## 6. Ключевая модель данных
 
-- `AgentProfile(id, name, age, gender, preferences, status, created_at, updated_at)`
-- `Conversation(id, agent_id, title, created_at, archived_at)`
+- `AgentProfile(id, name, age, gender, preferences, backstory, status, created_at, updated_at)`
+- `Conversation(id, agent_id, title, title_source, created_at, archived_at)`, где `title_source ∈ {default, generated, user}` защищает ручное название от асинхронной генерации.
 - `Message(id, conversation_id, role, content, status, provider_meta, created_at)`
 - `AgentRun(id, agent_id, principal_agent_id, parent_run_id, delegation_depth, conversation_id, state, budgets, started_at, finished_at)`
 - `ProviderAccount(id, provider, auth_mode, plan_type, credential_ref, metadata_json)`
@@ -486,7 +489,7 @@ Cross-platform packaging, updates, backup/export, security review, fault injecti
 
 ### Этап 8. Multiple agents and collaboration
 
-Одна последовательная веха: named `AgentProfile` и onboarding → миграция текущей Yuri → agent-scoped conversations/memory/context → создание и переключение дополнительных агентов → peer roster → anonymous bounded subagents → background agent-to-agent dialogue с TTL, budgets, cooldown, loop prevention и audit. Веха не добавляет пользователей, server mode или новые внешние разрешения.
+Одна последовательная веха: named `AgentProfile` и onboarding → расширенные bounded traits и fictional backstory seed → миграция текущей Yuri → agent-scoped conversations/memory/context → создание и переключение дополнительных агентов → peer roster → anonymous bounded subagents → background agent-to-agent dialogue с TTL, budgets, cooldown, loop prevention и audit. Веха не добавляет пользователей, server mode или новые внешние разрешения.
 
 ## 11. Решения, которые нужно принять до реализации
 

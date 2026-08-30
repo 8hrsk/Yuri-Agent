@@ -13,6 +13,7 @@
     { "$ref": "#/$defs/event" },
     { "$ref": "#/$defs/shutdown" },
     { "$ref": "#/$defs/shutdownResult" },
+    { "$ref": "#/$defs/cancel" },
     { "$ref": "#/$defs/error" }
   ],
   "$defs": {
@@ -35,6 +36,7 @@
         "event",
         "shutdown",
         "shutdown_result",
+        "request.cancel",
         "error"
       ]
     },
@@ -283,6 +285,28 @@
           "properties": {
             "type": { "const": "event" },
             "payload": { "$ref": "#/$defs/eventPayload" }
+          },
+          "required": ["payload"]
+        }
+      ]
+    },
+    "cancelPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id"],
+      "properties": {
+        "request_id": { "$ref": "#/$defs/id" }
+      }
+    },
+    "cancel": {
+      "description": "Host notification asking the plugin to abandon one in-flight request. It is never answered directly; the cancelled request produces its own response.",
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "request.cancel" },
+            "payload": { "$ref": "#/$defs/cancelPayload" }
           },
           "required": ["payload"]
         }

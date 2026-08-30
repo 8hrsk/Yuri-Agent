@@ -202,3 +202,107 @@ func newDelegationTestBridge(t *testing.T) (*Bridge, domain.ID, domain.AgentRun)
 	}
 	return bridge, domain.ID(created.ID), parent
 }
+
+// TestDelegationCompletesWhileParentHoldsTheTurnGate is the regression test for
+// the agent.delegate self-deadlock. A delegated run executes as a tool call
+// inside the parent run, so with a Codex-style interactive turn the parent
+// still holds the single modelTurns slot while the child asks for one. The
+// child waited for a slot only the parent could release, and the parent waited
+// for the child's tool result: the run could only end at the duration budget.
+func TestDelegationCompletesWhileParentHoldsTheTurnGate(t *testing.T) {
+	bridge, agentID, parent := newDelegationTestBridge(t)
+	stub := &delegationBackendStub{events: []agent.ModelEvent{
+		{Type: agent.ModelEventTextDelta, Delta: "Результат субагента."},
+		{Type: agent.ModelEventCompleted},
+	}}
+	turns := make(chan struct{}, 1)
+	backend := gatedBackend{backend: stub, turns: turns}
+	request := agent.ModelRequest{Model: "test-model", Messages: []agent.Message{{Role: agent.RoleUser, Content: "родительский запрос"}}}
+
+	runContext := withModelTurnLease(context.Background())
+	parentStream, err := backend.Start(runContext, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = parentStream.Close() }()
+
+	// The gate must still be exclusive for anything outside this run subtree.
+	foreign := make(chan struct{})
+	go func() {
+		stream, startErr := backend.Start(withModelTurnLease(context.Background()), request)
+		if startErr == nil {
+			_ = stream.Close()
+		}
+		close(foreign)
+	}()
+	select {
+	case <-foreign:
+		t.Fatal("an unrelated run took the slot while the parent turn was open")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	tool := delegationAgentTool{bridge: bridge, backend: backend, model: "test-model", principalAgentID: agentID, parentRunID: parent.ID}
+	call := agent.ToolCall{ID: "delegate-nested-turn", Name: delegationToolID, Arguments: json.RawMessage(`{"task":"Вложенная задача"}`)}
+	type outcome struct {
+		result agent.ToolResult
+		err    error
+	}
+	finished := make(chan outcome, 1)
+	go func() {
+		result, execErr := tool.Execute(runContext, call)
+		finished <- outcome{result: result, err: execErr}
+	}()
+	select {
+	case value := <-finished:
+		if value.err != nil {
+			t.Fatalf("delegated run failed: %v", value.err)
+		}
+		if !strings.Contains(value.result.Content, "Результат субагента.") {
+			t.Fatalf("delegated result = %q", value.result.Content)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("delegated run deadlocked on the parent run's turn slot")
+	}
+
+	delegations, err := bridge.repositories.Delegations.ListByParent(context.Background(), agentID, parent.ID)
+	if err != nil || len(delegations) != 1 || delegations[0].Status != domain.DelegationStatusCompleted {
+		t.Fatalf("delegations=%#v err=%v", delegations, err)
+	}
+	if err := parentStream.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-foreign:
+	case <-time.After(2 * time.Second):
+		t.Fatal("unrelated run never got the slot after the parent turn closed")
+	}
+}
+
+// TestModelTurnLeaseReleasesSlotAfterNestedTurns makes sure reentrancy does not
+// leak the slot: once the whole subtree is done the gate is free again.
+func TestModelTurnLeaseReleasesSlotAfterNestedTurns(t *testing.T) {
+	turns := make(chan struct{}, 1)
+	backend := gatedBackend{backend: &delegationBackendStub{}, turns: turns}
+	request := agent.ModelRequest{Model: "test-model", Messages: []agent.Message{{Role: agent.RoleUser, Content: "запрос"}}}
+	ctx := withModelTurnLease(context.Background())
+	outer, err := backend.Start(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested, err := backend.Start(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := nested.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := outer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case turns <- struct{}{}:
+		<-turns
+	default:
+		t.Fatal("turn slot was not returned after the nested turns finished")
+	}
+}

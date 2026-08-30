@@ -2,7 +2,6 @@ package openai
 
 import (
 	"encoding/json"
-	"fmt"
 	"strconv"
 
 	"github.com/OrdoAI/yuri-agent/internal/agent"
@@ -145,26 +144,6 @@ func chatTools(tools []agent.ToolDescriptor) []chatTool {
 		result = append(result, chatTool{Type: "function", Function: chatToolFunction{Name: tool.Name, Description: tool.Description, Parameters: tool.InputSchema}})
 	}
 	return result
-}
-
-func stringOrNumber(value json.RawMessage) string {
-	var stringValue string
-	if json.Unmarshal(value, &stringValue) == nil {
-		return stringValue
-	}
-	var number json.Number
-	if json.Unmarshal(value, &number) == nil {
-		return number.String()
-	}
-	return string(value)
-}
-
-func requiredString(value json.RawMessage, field string) (string, error) {
-	var result string
-	if err := json.Unmarshal(value, &result); err != nil || result == "" {
-		return "", fmt.Errorf("openai: %s is required", field)
-	}
-	return result, nil
 }
 
 func ordinalID(index int) string {

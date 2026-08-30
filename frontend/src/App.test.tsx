@@ -1,0 +1,313 @@
+// @vitest-environment jsdom
+import '@testing-library/jest-dom/vitest'
+
+import { act, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import App from './App'
+import type {
+  AgentProfile,
+  ApprovalRequest,
+  ChatEvent,
+  ChatRequest,
+  Conversation,
+  RunResult,
+  YuriClient,
+} from './lib/contracts'
+
+type EventSink = (event: ChatEvent) => void
+
+let clientStub: YuriClient
+
+vi.mock('./lib/client', () => ({
+  createYuriClient: () => clientStub,
+  subscribeNotifications: () => () => undefined,
+  canUseNativeNotification: () => false,
+  requestBrowserNotificationPermission: async () => undefined,
+  subscribeMemoryUpdates: () => () => undefined,
+  subscribePersonaUpdates: () => () => undefined,
+}))
+
+const agent: AgentProfile = {
+  id: 'agent-1',
+  name: 'Юри',
+  gender: 'female',
+  preferences: '',
+  backstory: '',
+  traits: {},
+  active: true,
+  createdAt: '2026-08-29T09:00:00.000Z',
+  updatedAt: '2026-08-29T09:00:00.000Z',
+}
+
+const approval: ApprovalRequest = {
+  id: 'approval-1',
+  toolCallId: 'call-1',
+  title: 'Записать файл в Documents',
+  explanation: 'Yuri хочет создать файл notes.md.',
+  risk: 'high',
+  scope: 'filesystem.write ~/Documents/notes.md',
+}
+
+type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void }
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((settle) => { resolve = settle })
+  return { promise, resolve }
+}
+
+type RunHandle = { emit: EventSink; settle: (result: RunResult) => void }
+
+/**
+ * A bridge that answers everything the shell asks for on a cold start, with the
+ * two calls that matter under manual control: the active agent (M-37 hinges on
+ * it resolving *after* the first render) and the conversation bootstrap.
+ */
+function createHarness(options: { conversations?: Conversation[] } = {}) {
+  const stored: Conversation[] = [...(options.conversations ?? [])]
+  const activeAgent = deferred<AgentProfile | undefined>()
+  const createGate = deferred<void>()
+  let handle: RunHandle | undefined
+
+  const listConversations = vi.fn(async () => [...stored])
+  const createConversation = vi.fn(async (title: string) => {
+    await createGate.promise
+    const conversation: Conversation = {
+      id: `conv-${stored.length + 1}`,
+      title,
+      preview: '',
+      updatedAt: '2026-08-29T10:00:00.000Z',
+      messages: [],
+      traces: [],
+    }
+    stored.push(conversation)
+    return conversation
+  })
+  // The conversation list carries metadata only, so opening a conversation is
+  // what fetches its transcript. Nothing this harness stores has one.
+  const listMessages = vi.fn(async (conversationId: string) => ({ conversationId, messages: [], traces: [], hasMore: false }))
+  const listChatTools = vi.fn(async () => [])
+  const sendMessage = vi.fn((_request: ChatRequest, onEvent: EventSink) => new Promise<RunResult>((resolve) => {
+    handle = { emit: onEvent, settle: resolve }
+  }))
+
+  clientStub = {
+    mode: 'mock',
+    getOnboardingState: async () => ({ completed: true, providerTested: true, agentConfigured: true }),
+    listAgents: async () => [agent],
+    getActiveAgent: () => activeAgent.promise,
+    listConversations,
+    listMessages,
+    createConversation,
+    listChatTools,
+    getAllowedDirectories: async () => [],
+    transcribeAudio: async () => '',
+    sendMessage,
+    retryLast: sendMessage,
+    cancelRun: vi.fn(async () => {}),
+    approve: vi.fn(async () => {}),
+    listSchedules: async () => [],
+    listJobRuns: async () => [],
+  } as unknown as YuriClient
+
+  return {
+    activeAgent,
+    createGate,
+    client: () => clientStub,
+    createConversation,
+    listChatTools,
+    listConversations,
+    listMessages,
+    sendMessage,
+    run: () => {
+      if (!handle) throw new Error('the run has not started yet')
+      return handle
+    },
+  }
+}
+
+/** Boots the shell all the way to a usable composer on the Chat tab. */
+async function bootChat(harness: ReturnType<typeof createHarness>) {
+  render(<App />)
+  await act(async () => {
+    harness.activeAgent.resolve(agent)
+    harness.createGate.resolve()
+  })
+  return screen.findByRole('textbox', { name: 'Сообщение Юри' })
+}
+
+async function startRun(user: ReturnType<typeof userEvent.setup>, harness: ReturnType<typeof createHarness>) {
+  const composer = await bootChat(harness)
+  await user.type(composer, 'Создай заметку')
+  await user.click(screen.getByRole('button', { name: 'Отправить сообщение' }))
+  await waitFor(() => expect(harness.sendMessage).toHaveBeenCalledTimes(1))
+  act(() => {
+    harness.run().emit({ type: 'run.started', runId: 'run-1' })
+    harness.run().emit({ type: 'assistant.delta', runId: 'run-1', messageId: 'msg-1', delta: 'Начало' })
+  })
+}
+
+const goToTasks = (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByRole('button', { name: /Tasks/ }))
+const goToChat = (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByRole('button', { name: /Chat/ }))
+
+beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn()
+  Object.defineProperty(window, 'speechSynthesis', {
+    configurable: true,
+    value: { cancel: vi.fn(), speak: vi.fn() },
+  })
+})
+
+describe('cold start does not double-mount the chat (M-37)', () => {
+  it('waits for the active agent before mounting the chat surface', async () => {
+    const harness = createHarness()
+    await bootChat(harness)
+
+    // One mount, so one round of bootstrap calls instead of the two the
+    // placeholder key used to cause.
+    expect(harness.listConversations).toHaveBeenCalledTimes(1)
+    expect(harness.listChatTools).toHaveBeenCalledTimes(1)
+  })
+
+  it('creates exactly one conversation on an empty first launch', async () => {
+    const harness = createHarness()
+    render(<App />)
+
+    // The first bootstrap is still in flight when the agent arrives: this is the
+    // window in which the remount used to open a second "Новый диалог".
+    await act(async () => { harness.activeAgent.resolve(agent) })
+    await act(async () => { harness.createGate.resolve() })
+
+    await screen.findByRole('textbox', { name: 'Сообщение Юри' })
+    expect(harness.createConversation).toHaveBeenCalledTimes(1)
+    expect(screen.getAllByText('Новый диалог', { selector: '.conversation-item strong' })).toHaveLength(1)
+  })
+})
+
+describe('the transcript is not re-fetched on every visit to Chat (M-35)', () => {
+  it('keeps the loaded history across a tab round-trip, still windowed', async () => {
+    const user = userEvent.setup()
+    const harness = createHarness({
+      conversations: [{
+        id: 'conv-1',
+        title: 'Длинный диалог',
+        preview: '',
+        updatedAt: '2026-08-29T10:00:00.000Z',
+        messages: Array.from({ length: 200 }, (_, index) => ({
+          id: `history-${index}`,
+          role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
+          content: `Реплика ${index}`,
+          status: 'complete' as const,
+          createdAt: new Date(Date.UTC(2026, 7, 29, 9, 0, index)).toISOString(),
+        })),
+        traces: [],
+      }],
+    })
+    await bootChat(harness)
+
+    const windowed = () => document.querySelectorAll('.messages .message__content').length
+    expect(windowed()).toBe(40)
+
+    await goToTasks(user)
+    await goToChat(user)
+
+    // The chat surface is hidden rather than unmounted (H-9), so returning to
+    // the tab re-reads nothing: no `ListConversations`, no re-normalization of
+    // every trace, and no rebuild of the timeline.
+    expect(harness.listConversations).toHaveBeenCalledTimes(1)
+    expect(harness.listChatTools).toHaveBeenCalledTimes(1)
+    // The window survives the round-trip too, rather than the whole history
+    // being re-mounted.
+    expect(windowed()).toBe(40)
+    expect(screen.getByText('Реплика 199')).toBeInTheDocument()
+    expect(screen.queryByText('Реплика 0')).not.toBeInTheDocument()
+  })
+})
+
+describe('an active run survives leaving the Chat tab (H-9)', () => {
+  it('keeps streaming while the user is away and shows the whole answer on return', async () => {
+    const user = userEvent.setup()
+    const harness = createHarness()
+    await startRun(user, harness)
+
+    await goToTasks(user)
+    expect(screen.queryByRole('textbox', { name: 'Сообщение Юри' })).not.toBeInTheDocument()
+
+    // Tokens that arrive while the chat is off-screen must still land.
+    act(() => {
+      harness.run().emit({ type: 'assistant.delta', runId: 'run-1', messageId: 'msg-1', delta: ' ответа' })
+      harness.run().emit({ type: 'assistant.delta', runId: 'run-1', messageId: 'msg-1', delta: ' целиком' })
+    })
+
+    await goToChat(user)
+    expect(screen.getByText('Начало ответа целиком')).toBeInTheDocument()
+    expect(screen.getByText('Печатает')).toBeInTheDocument()
+
+    act(() => {
+      harness.run().emit({ type: 'assistant.completed', runId: 'run-1', messageId: 'msg-1' })
+      harness.run().emit({ type: 'run.completed', runId: 'run-1', status: 'complete' })
+    })
+
+    expect(screen.queryByText('Печатает')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Начало ответа целиком')).toHaveLength(1)
+  })
+
+  it('still stops the run after a tab round-trip', async () => {
+    const user = userEvent.setup()
+    const harness = createHarness()
+    await startRun(user, harness)
+
+    await goToTasks(user)
+    await goToChat(user)
+
+    await user.click(screen.getByRole('button', { name: 'Остановить запуск' }))
+    await waitFor(() => expect(harness.client().cancelRun).toHaveBeenCalledWith('run-1'))
+  })
+
+  it('presents an approval that arrives while the user is on another tab', async () => {
+    const user = userEvent.setup()
+    const harness = createHarness()
+    await startRun(user, harness)
+
+    await goToTasks(user)
+    act(() => {
+      harness.run().emit({ type: 'approval.required', runId: 'run-1', approval })
+    })
+
+    // The whole point of H-9: the decision reaches the user where they are,
+    // instead of waiting for a return that may never happen.
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Записать файл в Documents')
+    expect(screen.getByText(/Запуск идёт на вкладке «Чат»/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Разрешить действие' }))
+    await waitFor(() => expect(harness.client().approve).toHaveBeenCalledWith('approval-1', 'approve'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('takes the user back to the chat when an undelivered decision is dismissed', async () => {
+    const user = userEvent.setup()
+    const approve = vi.fn(async () => { throw new Error('Мост недоступен') })
+    const harness = createHarness()
+    await startRun(user, harness)
+    ;(clientStub as unknown as { approve: typeof approve }).approve = approve
+
+    await goToTasks(user)
+    act(() => {
+      harness.run().emit({ type: 'approval.required', runId: 'run-1', approval })
+    })
+    await screen.findByRole('dialog')
+
+    await user.click(screen.getByRole('button', { name: 'Разрешить действие' }))
+    await waitFor(() => expect(approve).toHaveBeenCalled())
+    await user.click(screen.getByRole('button', { name: 'Закрыть' }))
+
+    // The explanation of what just failed lives in the chat, so the chat is
+    // where the user has to end up.
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByText(/Решение по подтверждению не было передано агенту/)).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Сообщение Юри' })).toBeInTheDocument()
+  })
+})
