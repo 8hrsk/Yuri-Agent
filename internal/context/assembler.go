@@ -263,7 +263,10 @@ func boundedTranscript(messages []agent.Message, budget int) []agent.Message {
 		if message.Role != agent.RoleUser && message.Role != agent.RoleAssistant && message.Role != agent.RoleTool {
 			continue
 		}
-		size := utf8.RuneCountInString(message.Content)
+		// Images have no character count, but they are not free context. Charge a
+		// fixed unit so a transcript made only of multimodal turns is still
+		// bounded and older images fall out of the recent window.
+		size := utf8.RuneCountInString(message.Content) + len(message.Parts)*1024
 		if used+size > budget {
 			if len(result) == 0 {
 				message.Content = truncate(clean(message.Content), budget)

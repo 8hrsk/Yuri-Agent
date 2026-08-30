@@ -1,4 +1,4 @@
-import { memo, useEffect } from 'react'
+import { memo, useEffect, useRef, type ChangeEvent } from 'react'
 
 import { useVoice } from '../hooks/useVoice'
 import { Icon } from './Icon'
@@ -17,6 +17,7 @@ type ComposerToolbarProps = {
   onCancel: () => void
   onCapture: (blob: Blob) => void
   onRecordingChange: (recording: boolean) => void
+  onSelectAttachments: (files: FileList) => void
   onToggleAutoSpeak: () => void
   running: boolean
   sendDisabled: boolean
@@ -45,11 +46,18 @@ export const ComposerToolbar = memo(function ComposerToolbar({
   sendDisabled,
   speechSupported,
   transcribing,
+  onSelectAttachments,
 }: ComposerToolbarProps) {
   const voice = useVoice()
   const recording = voice.state === 'recording'
   const voiceBlob = voice.blob
   const clearVoice = voice.clear
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files?.length) onSelectAttachments(event.target.files)
+    event.target.value = ''
+  }
 
   useEffect(() => {
     onRecordingChange(recording)
@@ -114,7 +122,8 @@ export const ComposerToolbar = memo(function ComposerToolbar({
         >
           <Icon name="mic" width={16} height={16} />
         </button>
-        <button aria-label="Прикрепить файл" className="composer__attach" disabled title="Вложения подключатся в следующем инкременте" type="button">+</button>
+        <input aria-hidden="true" className="sr-only" multiple onChange={handleFiles} ref={fileInputRef} tabIndex={-1} type="file" />
+        <button aria-label="Прикрепить файл" className="composer__attach" disabled={running || transcribing} onClick={() => fileInputRef.current?.click()} title="Текст, код, JSON или изображение · до 6 файлов" type="button">+</button>
         {running ? (
           <button aria-label="Остановить запуск" className="stop-button" onClick={onCancel} type="button"><Icon name="x" width={16} height={16} /></button>
         ) : (

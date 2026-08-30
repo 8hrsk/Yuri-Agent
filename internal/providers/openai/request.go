@@ -24,14 +24,15 @@ type responsesTool struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
-type responsesTextPart struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+type responsesContentPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 type responsesMessage struct {
-	Role    string              `json:"role"`
-	Content []responsesTextPart `json:"content"`
+	Role    string                 `json:"role"`
+	Content []responsesContentPart `json:"content"`
 }
 
 type responsesFunctionCall struct {
@@ -55,12 +56,23 @@ func responsesInput(messages []agent.Message) []any {
 			result = append(result, responsesFunctionOutput{Type: "function_call_output", CallID: message.ToolCallID, Output: message.Content})
 			continue
 		}
-		if message.Content != "" {
+		if message.Content != "" || len(message.Parts) > 0 {
 			partType := "input_text"
 			if message.Role == agent.RoleAssistant {
 				partType = "output_text"
 			}
-			result = append(result, responsesMessage{Role: string(message.Role), Content: []responsesTextPart{{Type: partType, Text: message.Content}}})
+			parts := make([]responsesContentPart, 0, 1+len(message.Parts))
+			if message.Content != "" {
+				parts = append(parts, responsesContentPart{Type: partType, Text: message.Content})
+			}
+			if message.Role == agent.RoleUser {
+				for _, part := range message.Parts {
+					if part.Type == agent.ContentPartImage {
+						parts = append(parts, responsesContentPart{Type: "input_image", ImageURL: dataURL(part)})
+					}
+				}
+			}
+			result = append(result, responsesMessage{Role: string(message.Role), Content: parts})
 		}
 		for _, call := range message.ToolCalls {
 			result = append(result, responsesFunctionCall{Type: "function_call", ID: call.ID, CallID: call.ID, Name: call.Name, Arguments: string(call.Arguments)})
@@ -90,10 +102,20 @@ type chatRequest struct {
 
 type chatMessage struct {
 	Role       string     `json:"role"`
-	Content    *string    `json:"content,omitempty"`
+	Content    any        `json:"content,omitempty"`
 	Name       string     `json:"name,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	ToolCalls  []chatCall `json:"tool_calls,omitempty"`
+}
+
+type chatContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *chatImageURL `json:"image_url,omitempty"`
+}
+
+type chatImageURL struct {
+	URL string `json:"url"`
 }
 
 type chatCall struct {
@@ -125,10 +147,24 @@ type chatStreamOptions struct {
 func chatMessages(messages []agent.Message) []chatMessage {
 	result := make([]chatMessage, 0, len(messages))
 	for _, message := range messages {
-		content := message.Content
-		item := chatMessage{Role: string(message.Role), Content: &content, Name: message.Name, ToolCallID: message.ToolCallID}
-		if content == "" {
-			item.Content = nil
+		item := chatMessage{Role: string(message.Role), Name: message.Name, ToolCallID: message.ToolCallID}
+		if len(message.Parts) == 0 {
+			if message.Content != "" {
+				item.Content = message.Content
+			}
+		} else {
+			parts := make([]chatContentPart, 0, 1+len(message.Parts))
+			if message.Content != "" {
+				parts = append(parts, chatContentPart{Type: "text", Text: message.Content})
+			}
+			if message.Role == agent.RoleUser {
+				for _, part := range message.Parts {
+					if part.Type == agent.ContentPartImage {
+						parts = append(parts, chatContentPart{Type: "image_url", ImageURL: &chatImageURL{URL: dataURL(part)}})
+					}
+				}
+			}
+			item.Content = parts
 		}
 		for _, call := range message.ToolCalls {
 			item.ToolCalls = append(item.ToolCalls, chatCall{ID: call.ID, Type: "function", Function: chatCallFunction{Name: call.Name, Arguments: string(call.Arguments)}})
@@ -136,6 +172,10 @@ func chatMessages(messages []agent.Message) []chatMessage {
 		result = append(result, item)
 	}
 	return result
+}
+
+func dataURL(part agent.ContentPart) string {
+	return "data:" + part.MediaType + ";base64," + part.Data
 }
 
 func chatTools(tools []agent.ToolDescriptor) []chatTool {

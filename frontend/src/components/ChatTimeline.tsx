@@ -1,7 +1,7 @@
-import { memo, useCallback, useMemo, useState, type MouseEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 
 import { approvalStatusLabel, runStatusLabel, toolStatusLabel, type ChatTimelineEntry } from '../lib/chat-trace'
-import type { ChatMessage, RunTrace, RunTraceStep, ToolCall } from '../lib/contracts'
+import type { ChatAttachment, ChatAttachmentContent, ChatMessage, RunTrace, RunTraceStep, ToolCall } from '../lib/contracts'
 import { formatClock } from '../lib/datetime'
 import { Icon } from './Icon'
 
@@ -150,6 +150,33 @@ type MessageBubbleProps = {
   speaking: boolean
   speechSupported: boolean
   onRetry: (messageId: string) => void
+  loadAttachment: (messageId: string, attachmentId: string) => Promise<ChatAttachmentContent | undefined>
+}
+
+function AttachmentCard({ attachment, messageId, loadAttachment }: {
+  attachment: ChatAttachment
+  messageId: string
+  loadAttachment: MessageBubbleProps['loadAttachment']
+}) {
+  const [dataUrl, setDataUrl] = useState(attachment.previewDataUrl)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    if (attachment.kind !== 'image' || dataUrl || failed) return
+    let active = true
+    void loadAttachment(messageId, attachment.id).then((content) => {
+      if (active && content?.dataUrl) setDataUrl(content.dataUrl)
+      else if (active) setFailed(true)
+    }).catch(() => { if (active) setFailed(true) })
+    return () => { active = false }
+  }, [attachment.id, attachment.kind, dataUrl, failed, loadAttachment, messageId])
+  return (
+    <div className={`message-attachment message-attachment--${attachment.kind}`}>
+      {attachment.kind === 'image' && dataUrl
+        ? <img alt={attachment.name} loading="lazy" src={dataUrl} />
+        : <span className="message-attachment__icon"><Icon name="file" width={16} height={16} /></span>}
+      <span><strong>{attachment.name}</strong><small>{Math.max(1, Math.round(attachment.sizeBytes / 1024))} КБ · {attachment.mediaType}</small></span>
+    </div>
+  )
 }
 
 export const MessageBubble = memo(function MessageBubble({
@@ -160,6 +187,7 @@ export const MessageBubble = memo(function MessageBubble({
   speaking,
   speechSupported,
   onRetry,
+  loadAttachment,
 }: MessageBubbleProps) {
   if (message.role === 'tool' && message.toolCall) return <ToolCallCard toolCall={message.toolCall} />
 
@@ -184,6 +212,11 @@ export const MessageBubble = memo(function MessageBubble({
         {message.content || (message.status === 'streaming' ? <span className="typing-indicator" aria-label={`${agentName} печатает`}><i /><i /><i /></span> : null)}
         {message.status === 'streaming' && message.content && <span className="stream-cursor" aria-hidden="true" />}
       </div>
+      {message.attachments && message.attachments.length > 0 && (
+        <div className="message-attachments">
+          {message.attachments.map((attachment) => <AttachmentCard attachment={attachment} key={attachment.id} loadAttachment={loadAttachment} messageId={message.id} />)}
+        </div>
+      )}
       {/* An interrupted answer keeps its actions even with no text: retrying is
           exactly what the user needs there. */}
       {isAssistant && message.status !== 'streaming' && (message.content || interrupted) && (
@@ -218,6 +251,7 @@ type ChatTimelineProps = {
   onStopSpeaking: () => void
   speakingId?: string
   speechSupported: boolean
+  loadAttachment: MessageBubbleProps['loadAttachment']
 }
 
 /**
@@ -233,6 +267,7 @@ export const ChatTimeline = memo(function ChatTimeline({
   onStopSpeaking,
   speakingId,
   speechSupported,
+  loadAttachment,
 }: ChatTimelineProps) {
   return (
     <>
@@ -242,6 +277,7 @@ export const ChatTimeline = memo(function ChatTimeline({
             agentName={agentName}
             key={entry.key}
             message={entry.message}
+            loadAttachment={loadAttachment}
             onRetry={onRetry}
             onSpeak={onSpeak}
             onStopSpeaking={onStopSpeaking}

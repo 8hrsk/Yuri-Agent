@@ -3,8 +3,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { BackendConnection } from '../lib/backend'
 import { createYuriClient } from '../lib/client'
 import { subscribeConversationUpdates } from '../lib/client/events'
+import { readChatAttachments } from '../lib/chat-attachments'
 import type {
   ApprovalRequest,
+  ChatAttachmentInput,
   ChatEvent,
   ChatTool,
   ChatMessage,
@@ -70,6 +72,7 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
   const [allowedDirectories, setAllowedDirectories] = useState<string[]>([])
   const [toolsLoading, setToolsLoading] = useState(true)
   const [draft, setDraft] = useState('')
+  const [attachments, setAttachments] = useState<ChatAttachmentInput[]>([])
   const [runId, setRunId] = useState<string>()
   const [runStatus, setRunStatus] = useState<RunStatus>('idle')
   const [runLabel, setRunLabel] = useState(labels.idle)
@@ -780,7 +783,8 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
 
   const startRun = useCallback(async (text: string, retryOfMessageId?: string) => {
     const trimmed = text.trim()
-    if (!trimmed || !selectedId || runId) return
+    const outgoingAttachments = retryOfMessageId ? [] : attachments
+    if ((!trimmed && outgoingAttachments.length === 0) || !selectedId || runId) return
     setError(undefined)
     const userMessage: ChatMessage = {
       id: makeId('user'),
@@ -788,22 +792,28 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
       content: trimmed,
       status: 'complete',
       createdAt: new Date().toISOString(),
+      attachments: outgoingAttachments.map(({ dataBase64: _dataBase64, ...attachment }) => ({ ...attachment })),
     }
     if (!retryOfMessageId) {
       setConversations((current) => updateConversation(current, selectedId, (conversation) => ({
         ...conversation,
-        preview: trimmed,
+        preview: trimmed || outgoingAttachments.map((attachment) => attachment.name).join(', '),
         updatedAt: new Date().toISOString(),
         messages: [...conversation.messages, userMessage],
       })))
     }
     setDraft('')
+    if (!retryOfMessageId) setAttachments([])
     setRunStatus('thinking')
     setRunLabel(labels.thinking)
     try {
       await (retryOfMessageId
         ? client.retryLast({ conversationId: selectedId, text: trimmed, retryOfMessageId }, (event) => handleEvent(selectedId, event))
-        : client.sendMessage({ conversationId: selectedId, text: trimmed }, (event) => handleEvent(selectedId, event)))
+        : client.sendMessage({
+            conversationId: selectedId,
+            text: trimmed,
+            attachments: outgoingAttachments.map(({ previewDataUrl: _previewDataUrl, ...attachment }) => attachment),
+          }, (event) => handleEvent(selectedId, event)))
       // Settling the bridge promise is the last signal we get. If the run ended
       // without a terminal event, treat the partial answer as interrupted
       // rather than leaving it streaming forever.
@@ -830,7 +840,7 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
       setRunLabel(labels.error)
       setError(cause instanceof Error ? cause.message : 'Не удалось отправить сообщение.')
     }
-  }, [client, finalizeStreamingMessages, handleEvent, labels, runId, selectedId])
+  }, [attachments, client, finalizeStreamingMessages, handleEvent, labels, runId, selectedId])
 
   const handleRenameConversation = useCallback(async (title: string) => {
     const conversationId = selectedId
@@ -868,6 +878,7 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
       setConversations((current) => [conversation, ...current])
       setSelectedId(conversation.id)
       setDraft('')
+      setAttachments([])
       setError(undefined)
     }).catch(() => setError('Не удалось создать новый диалог.'))
   }
@@ -941,6 +952,16 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
   const handleCancelClick = useCallback(() => { void handleCancel() }, [handleCancel])
   const handleSelectConversation = useCallback((conversationId: string) => setSelectedId(conversationId), [])
   const handleCaptureVoice = useCallback((blob: Blob) => setCapturedVoice(blob), [])
+  const handleSelectAttachments = useCallback((files: FileList) => {
+    void readChatAttachments(files, attachments).then((selected) => {
+      setAttachments((current) => [...current, ...selected])
+      setError(undefined)
+    }).catch((cause) => setError(cause instanceof Error ? cause.message : 'Не удалось прикрепить файл.'))
+  }, [attachments])
+  const handleRemoveAttachment = useCallback((attachmentId: string) => {
+    setAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId))
+  }, [])
+  const loadAttachment = useCallback((messageId: string, attachmentId: string) => client.getChatAttachment(messageId, attachmentId), [client])
   const running = Boolean(runId)
 
   return (
@@ -992,6 +1013,7 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
             followingBottom={followingBottom}
             hasMoreMessages={Boolean(selectedConversation?.hasMoreMessages)}
             hiddenCount={hiddenCount}
+            loadAttachment={loadAttachment}
             messagesEndRef={messagesEndRef}
             messagesRef={messagesRef}
             onJumpToBottom={handleJumpToBottom}
@@ -1025,6 +1047,7 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
 
           <ChatComposer
             agentName={agentName}
+            attachments={attachments}
             autoSpeak={autoSpeak}
             clearVoiceToken={clearVoiceToken}
             connected={backend.status === 'connected'}
@@ -1036,6 +1059,8 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
             onDraftKeyDown={handleDraftKeyDown}
             onOpenSettings={openSettings}
             onRecordingChange={setRecording}
+            onRemoveAttachment={handleRemoveAttachment}
+            onSelectAttachments={handleSelectAttachments}
             onSubmit={handleSubmit}
             onToggleAutoSpeak={toggleAutoSpeak}
             running={running}

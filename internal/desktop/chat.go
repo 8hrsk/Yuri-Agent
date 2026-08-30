@@ -14,19 +14,21 @@ const chatEventName = "yuri:chat"
 const conversationEventName = "yuri:conversation"
 
 type ChatRequest struct {
-	ConversationID   string `json:"conversationId"`
-	Text             string `json:"text"`
-	RetryOfMessageID string `json:"retryOfMessageId,omitempty"`
-	VoiceClip        string `json:"voiceClip,omitempty"`
+	ConversationID   string                `json:"conversationId"`
+	Text             string                `json:"text"`
+	RetryOfMessageID string                `json:"retryOfMessageId,omitempty"`
+	VoiceClip        string                `json:"voiceClip,omitempty"`
+	Attachments      []ChatAttachmentInput `json:"attachments,omitempty"`
 }
 
 type ChatMessageView struct {
-	ID        string `json:"id"`
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	Status    string `json:"status"`
-	CreatedAt string `json:"createdAt"`
-	RunID     string `json:"runId,omitempty"`
+	ID          string               `json:"id"`
+	Role        string               `json:"role"`
+	Content     string               `json:"content"`
+	Status      string               `json:"status"`
+	CreatedAt   string               `json:"createdAt"`
+	RunID       string               `json:"runId,omitempty"`
+	Attachments []ChatAttachmentView `json:"attachments,omitempty"`
 }
 
 type ConversationView struct {

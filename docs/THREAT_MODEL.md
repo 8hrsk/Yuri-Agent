@@ -61,6 +61,7 @@ flowchart TB
 - `core → provider`: сеть и ответы провайдера не считаются доверенными; credentials доступны только адаптеру.
 - `core → plugin`: host mediates process, messages, capabilities и credentials.
 - `content → context`: web/file/mail/tool data не может повысить свой instruction priority.
+- Вложения чата повторно валидируются на Go boundary независимо от MIME/расширения renderer'а, имеют per-file/turn limits, checksum и передаются модели как недоверенные data parts; blob key никогда не принимается от renderer'а.
 - `mutable persona/memory → policy`: memory и persona не могут менять immutable security policy.
 - `Pebble/index → core`: производные данные могут быть потеряны/повреждены и пересоздаются из SQLite.
 

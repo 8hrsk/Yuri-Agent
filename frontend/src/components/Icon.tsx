@@ -7,6 +7,7 @@ export type IconName =
   | 'check'
   | 'chevron-right'
   | 'edit'
+  | 'file'
   | 'clock'
   | 'command'
   | 'lock'
@@ -35,6 +36,7 @@ const paths: Record<IconName, JSX.Element> = {
   check: <path d="m5 12 4.2 4.2L19 6.5" />,
   'chevron-right': <path d="m9 5 7 7-7 7" />,
   edit: <><path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z" /><path d="m13.5 7.5 3 3" /></>,
+  file: <><path d="M6 3h8l4 4v14H6Z" /><path d="M14 3v5h5M9 13h6M9 17h5" /></>,
   clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3.5 2" /></>,
   command: <><path d="M7 3a3 3 0 1 0 0 6h10a3 3 0 1 0 0-6M7 15a3 3 0 1 0 0 6 3 3 0 0 0 3-3V7a3 3 0 1 0-3-3M17 9a3 3 0 1 0 0-6M17 15a3 3 0 1 1 0 6 3 3 0 0 1-3-3V7a3 3 0 1 1 3 3" /></>,
   lock: <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" /></>,

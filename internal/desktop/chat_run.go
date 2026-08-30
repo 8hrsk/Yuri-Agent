@@ -45,8 +45,11 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 		return ChatRunResult{}, errors.New("invalid run kind")
 	}
 	request.Text = strings.TrimSpace(request.Text)
-	if request.Text == "" {
-		return ChatRunResult{}, errors.New("message text is required")
+	if request.Text == "" && len(request.Attachments) == 0 {
+		return ChatRunResult{}, errors.New("message text or attachment is required")
+	}
+	if strings.TrimSpace(request.RetryOfMessageID) != "" && len(request.Attachments) > 0 {
+		return ChatRunResult{}, errors.New("retry uses the attachments already stored on the original user turn")
 	}
 	// Capture ownership before any provider or background work starts. The
 	// active agent may change while this run is in flight, but all durable and
@@ -76,7 +79,19 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	defer cancel()
 
 	now := time.Now().UTC()
-	if err := b.ensureConversation(runContext, conversationID, request.Text, now, agentID); err != nil {
+	attachments, err := b.prepareChatAttachments(request.Attachments)
+	if err != nil {
+		return ChatRunResult{}, err
+	}
+	titleSeed := request.Text
+	if titleSeed == "" {
+		names := make([]string, 0, len(attachments))
+		for _, item := range attachments {
+			names = append(names, item.Name)
+		}
+		titleSeed = "Вложения: " + strings.Join(names, ", ")
+	}
+	if err := b.ensureConversation(runContext, conversationID, titleSeed, now, agentID); err != nil {
 		return ChatRunResult{}, err
 	}
 	var userMessageID domain.ID
@@ -86,9 +101,13 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 			return ChatRunResult{}, createErr
 		}
 		userMessageID = createdID
+		providerMeta, metadataErr := attachmentMetadataJSON(attachments)
+		if metadataErr != nil {
+			return ChatRunResult{}, metadataErr
+		}
 		if err := b.repositories.Messages.Create(runContext, storage.Message{
 			ID: userMessageID, ConversationID: conversationID, Role: string(agent.RoleUser),
-			Content: request.Text, Status: "complete", ProviderMeta: "{}", CreatedAt: now,
+			Content: request.Text, Status: "complete", ProviderMeta: providerMeta, CreatedAt: now,
 		}); err != nil {
 			return ChatRunResult{}, err
 		}
@@ -205,17 +224,8 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
-	currentTranscript := make([]agent.Message, 0, len(transcript))
-	for _, message := range transcript {
-		role := agent.Role(message.Role)
-		if role != agent.RoleUser && role != agent.RoleAssistant {
-			continue
-		}
-		currentTranscript = append(currentTranscript, agent.Message{Role: role, Content: message.Content})
-		if role == agent.RoleUser {
-			userMessageID = message.ID
-		}
-	}
+	payloadMessageID := attachmentPayloadMessageID(transcript, userMessageID, request.RetryOfMessageID)
+	currentTranscript := b.transcriptForModel(transcript, payloadMessageID)
 	// Only the first real user turn on a still-default conversation is eligible.
 	// The durable source check avoids spending a model call for a conversation
 	// whose owner supplied a title before the first turn. The title worker itself
@@ -256,7 +266,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
 	snapshot, err := assembler.Assemble(runContext, contextbuilder.Input{
-		AgentID: profileID, ConversationID: conversationID, Query: request.Text,
+		AgentID: profileID, ConversationID: conversationID, Query: titleSeed,
 		ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, roster),
 		Backstory:      profile.Backstory,
 		MutablePersona: formatMutablePersonaContext(persona), Relationship: formatRelationshipContext(relationship, affect),
@@ -305,11 +315,11 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	}
 	_ = b.touchConversation(runContext, conversationID, finishedAt, agentID)
 	emitter.emitTerminal(ChatEvent{Type: runCompletedEventType, ConversationID: string(conversationID), RunID: string(runID), Status: "complete"})
-	if autoTitleEligible && strings.TrimSpace(request.Text) != "" {
-		b.scheduleConversationTitle(backend, model, agentID, conversationID, request.Text)
+	if autoTitleEligible && strings.TrimSpace(titleSeed) != "" {
+		b.scheduleConversationTitle(backend, model, agentID, conversationID, titleSeed)
 	}
 	turnMessages := []memory.TranscriptMessage{
-		{ID: userMessageID, ConversationID: conversationID, Role: string(agent.RoleUser), Content: request.Text, CreatedAt: now},
+		{ID: payloadMessageID, ConversationID: conversationID, Role: string(agent.RoleUser), Content: request.Text, CreatedAt: now},
 	}
 	turnMessages = append(turnMessages, assistantTurnMessages...)
 	b.reviewTurnInBackground(memoryEngine, backend, model, runKind == domain.RunKindInteractive, memory.Turn{

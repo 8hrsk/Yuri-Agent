@@ -129,6 +129,29 @@ export interface ChatMessage {
   createdAt: string
   runId?: string
   toolCall?: ToolCall
+  attachments?: ChatAttachment[]
+}
+
+export type ChatAttachmentKind = 'text' | 'image'
+
+export interface ChatAttachment {
+  id: string
+  name: string
+  kind: ChatAttachmentKind
+  mediaType: string
+  sizeBytes: number
+  /** Present only for newly selected local files; durable history loads lazily. */
+  previewDataUrl?: string
+}
+
+export interface ChatAttachmentInput extends ChatAttachment {
+  dataBase64: string
+}
+
+export interface ChatAttachmentContent {
+  id: string
+  mediaType: string
+  dataUrl: string
 }
 
 /**

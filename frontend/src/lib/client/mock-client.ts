@@ -6,6 +6,7 @@ import type {
   ApprovalRequest,
   ArchiveSearchRequest,
   ArchiveSearchResponse,
+  ChatAttachmentContent,
   ChatEvent,
   ChatRequest,
   ChatHistoryPage,
@@ -215,6 +216,14 @@ class MockYuriClient implements YuriClient {
 
   async retryLast(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult> {
     return this.run(request, onEvent)
+  }
+
+  async getChatAttachment(messageId: string, attachmentId: string): Promise<ChatAttachmentContent | undefined> {
+    for (const conversation of this.conversations.values()) {
+      const attachment = conversation.messages.find((message) => message.id === messageId)?.attachments?.find((item) => item.id === attachmentId)
+      if (attachment?.previewDataUrl) return { id: attachment.id, mediaType: attachment.mediaType, dataUrl: attachment.previewDataUrl }
+    }
+    return undefined
   }
 
   async cancelRun(runId: string): Promise<void> {
@@ -782,10 +791,11 @@ class MockYuriClient implements YuriClient {
       content: request.text,
       status: 'complete',
       createdAt: nowIso(),
+      attachments: request.attachments?.map(({ dataBase64: _dataBase64, ...attachment }) => ({ ...attachment })),
     }
     conversation.messages.push(userMessage)
     conversation.updatedAt = nowIso()
-    conversation.preview = request.text
+    conversation.preview = request.text || request.attachments?.map((attachment) => attachment.name).join(', ') || 'Вложение'
     emit({ type: 'run.started', runId })
     emit({ type: 'run.status', runId, status: 'thinking', label: 'Yuri формирует ответ…' })
     await sleep(260)

@@ -1,11 +1,13 @@
 import type { FormEvent, KeyboardEvent } from 'react'
 
+import type { ChatAttachmentInput } from '../lib/contracts'
 import { ComposerToolbar } from './ComposerToolbar'
 import { Icon } from './Icon'
 
 type ChatComposerProps = {
   agentName: string
   autoSpeak: boolean
+  attachments: ChatAttachmentInput[]
   /** The backend bridge is live; otherwise the local-preview callout is offered. */
   connected: boolean
   clearVoiceToken: number
@@ -17,6 +19,8 @@ type ChatComposerProps = {
   onDraftKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void
   onOpenSettings: () => void
   onRecordingChange: (recording: boolean) => void
+  onRemoveAttachment: (attachmentId: string) => void
+  onSelectAttachments: (files: FileList) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   onToggleAutoSpeak: () => void
   running: boolean
@@ -27,6 +31,7 @@ type ChatComposerProps = {
 export function ChatComposer({
   agentName,
   autoSpeak,
+  attachments,
   connected,
   clearVoiceToken,
   draft,
@@ -37,6 +42,8 @@ export function ChatComposer({
   onDraftKeyDown,
   onOpenSettings,
   onRecordingChange,
+  onRemoveAttachment,
+  onSelectAttachments,
   onSubmit,
   onToggleAutoSpeak,
   running,
@@ -60,6 +67,19 @@ export function ChatComposer({
           rows={2}
           value={draft}
         />
+        {attachments.length > 0 && (
+          <div aria-label="Прикреплённые файлы" className="composer-attachments">
+            {attachments.map((attachment) => (
+              <div className={`composer-attachment composer-attachment--${attachment.kind}`} key={attachment.id}>
+                {attachment.previewDataUrl
+                  ? <img alt="" src={attachment.previewDataUrl} />
+                  : <Icon name="file" width={15} height={15} />}
+                <span><strong>{attachment.name}</strong><small>{Math.max(1, Math.round(attachment.sizeBytes / 1024))} КБ</small></span>
+                <button aria-label={`Убрать ${attachment.name}`} onClick={() => onRemoveAttachment(attachment.id)} type="button"><Icon name="x" width={13} height={13} /></button>
+              </div>
+            ))}
+          </div>
+        )}
         <ComposerToolbar
           agentName={agentName}
           autoSpeak={autoSpeak}
@@ -68,9 +88,10 @@ export function ChatComposer({
           onCancel={onCancel}
           onCapture={onCaptureVoice}
           onRecordingChange={onRecordingChange}
+          onSelectAttachments={onSelectAttachments}
           onToggleAutoSpeak={onToggleAutoSpeak}
           running={running}
-          sendDisabled={draft.trim() === '' || transcribing}
+          sendDisabled={(draft.trim() === '' && attachments.length === 0) || transcribing}
           speechSupported={speechSupported}
           transcribing={transcribing}
         />

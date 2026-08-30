@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest'
 
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { BackendConnection } from '../lib/backend'
 import type { ApprovalRequest, ChatEvent, ChatRequest, Conversation, RunResult, YuriClient } from '../lib/contracts'
@@ -92,6 +92,38 @@ beforeEach(() => {
   Object.defineProperty(window, 'speechSynthesis', {
     configurable: true,
     value: { cancel: vi.fn(), speak: vi.fn() },
+  })
+})
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe('ChatView attachments', () => {
+  it('shows a selected image and allows an attachment-only message in a Wails-like WebView', async () => {
+    vi.stubGlobal('crypto', {})
+    const user = userEvent.setup()
+    const harness = createHarness()
+    const { container } = render(<ChatView agentName="Yuri" backend={backend} onOpenSettings={vi.fn()} />)
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    const send = await screen.findByRole('button', { name: 'Отправить сообщение' })
+
+    expect(input).not.toBeNull()
+    expect(send).toBeDisabled()
+    await user.upload(input!, new File([
+      new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+    ], 'screen.png', { type: 'image/png' }))
+
+    expect(await screen.findByText('screen.png')).toBeInTheDocument()
+    expect(container.querySelector<HTMLImageElement>('.composer-attachment img')?.src).toMatch(/^data:image\/png;base64,/)
+    expect(send).toBeEnabled()
+
+    await user.click(send)
+    await waitFor(() => expect(harness.sendMessage).toHaveBeenCalledTimes(1))
+    expect(await screen.findByRole('img', { name: 'screen.png' })).toHaveAttribute('src', expect.stringMatching(/^data:image\/png;base64,/))
+    expect(harness.sendMessage.mock.calls[0][0]).toMatchObject({
+      conversationId: 'conv-1',
+      text: '',
+      attachments: [{ name: 'screen.png', kind: 'image', mediaType: 'image/png' }],
+    })
   })
 })
 

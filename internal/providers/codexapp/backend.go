@@ -68,7 +68,7 @@ func (backend *Backend) Start(ctx context.Context, request agent.ModelRequest) (
 		return nil, err
 	}
 	turn, err := backend.Client.StartTurnWithOptions(ctx, TurnOptions{
-		ThreadID: thread.ID, Text: prompt, CWD: backend.CWD, Model: model,
+		ThreadID: thread.ID, Text: prompt, Images: conversationImages(request.Messages), CWD: backend.CWD, Model: model,
 		ReadableRoots: backend.ReadableRoots,
 	})
 	if err != nil {
@@ -83,17 +83,27 @@ func (backend *Backend) Start(ctx context.Context, request agent.ModelRequest) (
 }
 
 func encodeConversation(messages []agent.Message) (string, error) {
+	type attachment struct {
+		Type      agent.ContentPartType `json:"type"`
+		Name      string                `json:"name,omitempty"`
+		MediaType string                `json:"media_type"`
+	}
 	type transcriptMessage struct {
-		Role       agent.Role       `json:"role"`
-		Content    string           `json:"content,omitempty"`
-		Name       string           `json:"name,omitempty"`
-		ToolCallID string           `json:"tool_call_id,omitempty"`
-		ToolCalls  []agent.ToolCall `json:"tool_calls,omitempty"`
+		Role        agent.Role       `json:"role"`
+		Content     string           `json:"content,omitempty"`
+		Attachments []attachment     `json:"attachments,omitempty"`
+		Name        string           `json:"name,omitempty"`
+		ToolCallID  string           `json:"tool_call_id,omitempty"`
+		ToolCalls   []agent.ToolCall `json:"tool_calls,omitempty"`
 	}
 	transcript := make([]transcriptMessage, 0, len(messages))
 	for _, message := range messages {
+		attachments := make([]attachment, 0, len(message.Parts))
+		for _, part := range message.Parts {
+			attachments = append(attachments, attachment{Type: part.Type, Name: part.Name, MediaType: part.MediaType})
+		}
 		transcript = append(transcript, transcriptMessage{
-			Role: message.Role, Content: message.Content, Name: message.Name,
+			Role: message.Role, Content: message.Content, Attachments: attachments, Name: message.Name,
 			ToolCallID: message.ToolCallID, ToolCalls: message.ToolCalls,
 		})
 	}
@@ -108,6 +118,21 @@ func encodeConversation(messages []agent.Message) (string, error) {
 		"as a chronological response segment: keep progress messages concise, continue after each tool result, and give the final answer " +
 		"exactly once without repeating content already emitted.\n" +
 		"<conversation-json>" + string(encoded) + "</conversation-json>", nil
+}
+
+func conversationImages(messages []agent.Message) []string {
+	var images []string
+	for _, message := range messages {
+		if message.Role != agent.RoleUser {
+			continue
+		}
+		for _, part := range message.Parts {
+			if part.Type == agent.ContentPartImage {
+				images = append(images, "data:"+part.MediaType+";base64,"+part.Data)
+			}
+		}
+	}
+	return images
 }
 
 type codexModelStream struct {

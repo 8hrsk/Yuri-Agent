@@ -1,4 +1,4 @@
-import type { ChatHistoryPage, Conversation, ConversationTitleSource, PeerDialogue, RunTrace } from '../contracts'
+import type { ChatAttachment, ChatHistoryPage, Conversation, ConversationTitleSource, PeerDialogue, RunTrace } from '../contracts'
 import { normalizeRunTrace, normalizeToolCall, sortRunTraces } from '../chat-trace'
 import { normalizeBoolean, nowIso, optionalString } from './primitives'
 import type { UnknownRecord } from './primitives'
@@ -27,6 +27,23 @@ function normalizeMessages(rawMessages: unknown): Conversation['messages'] {
         const statusValue = String(message.status ?? '').toLowerCase()
         const status = statusValue === 'streaming' || statusValue === 'cancelled' || statusValue === 'error' ? statusValue : 'complete'
         const toolCall = normalizeToolCall(message.toolCall ?? message.tool_call, status === 'error' ? 'failed' : 'completed')
+        const rawAttachments = message.attachments ?? message.files
+        const attachments: ChatAttachment[] = Array.isArray(rawAttachments)
+          ? rawAttachments.flatMap((value) => {
+              if (!value || typeof value !== 'object') return []
+              const attachment = value as UnknownRecord
+              const id = optionalString(attachment, 'id', 'attachmentId', 'attachment_id')
+              const name = optionalString(attachment, 'name', 'fileName', 'file_name')
+              if (!id || !name) return []
+              return [{
+                id,
+                name,
+                kind: String(attachment.kind).toLowerCase() === 'image' ? 'image' as const : 'text' as const,
+                mediaType: optionalString(attachment, 'mediaType', 'media_type', 'mimeType', 'mime_type') ?? 'application/octet-stream',
+                sizeBytes: Math.max(0, Number(attachment.sizeBytes ?? attachment.size_bytes ?? 0) || 0),
+              }]
+            })
+          : []
         return [{
           id: messageId,
           role,
@@ -35,6 +52,7 @@ function normalizeMessages(rawMessages: unknown): Conversation['messages'] {
           createdAt: optionalString(message, 'createdAt', 'created_at', 'timestamp') ?? nowIso(),
           runId: optionalString(message, 'runId', 'run_id'),
           toolCall,
+          attachments: attachments.length > 0 ? attachments : undefined,
         }]
       })
     : []
@@ -110,6 +128,7 @@ function cloneConversation(conversation: Conversation): Conversation {
     messages: conversation.messages.map((message) => ({
       ...message,
       toolCall: message.toolCall ? { ...message.toolCall, args: { ...message.toolCall.args } } : undefined,
+      attachments: message.attachments?.map((attachment) => ({ ...attachment })),
     })),
     traces: conversation.traces?.map(cloneTrace),
   }

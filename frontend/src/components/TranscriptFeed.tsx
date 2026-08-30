@@ -1,6 +1,7 @@
 import type { RefObject, UIEvent } from 'react'
 
 import type { ChatTimelineEntry } from '../lib/chat-trace'
+import type { ChatAttachmentContent } from '../lib/contracts'
 import { ChatTimeline } from './ChatTimeline'
 import { Icon } from './Icon'
 import { YuriAvatar } from './YuriAvatar'
@@ -18,6 +19,7 @@ type TranscriptFeedProps = {
   hiddenCount: number
   messagesEndRef: RefObject<HTMLDivElement>
   messagesRef: RefObject<HTMLDivElement>
+  loadAttachment: (messageId: string, attachmentId: string) => Promise<ChatAttachmentContent | undefined>
   onJumpToBottom: () => void
   onRetry: (messageId: string) => void
   onScroll: (event: UIEvent<HTMLDivElement>) => void
@@ -39,6 +41,7 @@ export function TranscriptFeed({
   hiddenCount,
   messagesEndRef,
   messagesRef,
+  loadAttachment,
   onJumpToBottom,
   onRetry,
   onScroll,
@@ -72,6 +75,7 @@ export function TranscriptFeed({
       <ChatTimeline
         agentName={agentName}
         entries={entries}
+        loadAttachment={loadAttachment}
         onRetry={onRetry}
         onSpeak={onSpeak}
         onStopSpeaking={onStopSpeaking}

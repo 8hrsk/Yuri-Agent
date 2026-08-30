@@ -1,8 +1,11 @@
+import type { ChatAttachmentInput } from './chat'
+
 export interface ChatRequest {
   conversationId: string
   text: string
   retryOfMessageId?: string
   voiceClip?: string
+  attachments?: ChatAttachmentInput[]
 }
 
 export interface UsageLimits {

@@ -7,7 +7,7 @@ function nowIso(): string {
 }
 
 function makeId(prefix: string): string {
-  const suffix = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+  const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2)
 

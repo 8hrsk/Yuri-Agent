@@ -303,7 +303,7 @@ func chatMessageView(message storage.Message) ChatMessageView {
 	return ChatMessageView{
 		ID: string(message.ID), Role: message.Role, Content: message.Content,
 		Status: message.Status, CreatedAt: message.CreatedAt.UTC().Format(time.RFC3339Nano),
-		RunID: messageRunID(message.ProviderMeta),
+		RunID: messageRunID(message.ProviderMeta), Attachments: attachmentViews(message.ProviderMeta),
 	}
 }
 
