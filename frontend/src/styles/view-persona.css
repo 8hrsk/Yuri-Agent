@@ -211,6 +211,67 @@
   background: rgba(var(--accent-rgb), 0.1);
 }
 
+.personality-layer-map {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+  margin-bottom: 13px;
+}
+
+.personality-layer {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.personality-layer--active {
+  border-color: rgba(var(--accent-rgb), 0.2);
+  background: rgba(var(--accent-rgb), 0.045);
+}
+
+.personality-layer--relationship.personality-layer--active,
+.personality-layer--opinion.personality-layer--active {
+  border-color: rgba(var(--rose-rgb), 0.16);
+  background: rgba(var(--rose-rgb), 0.035);
+}
+
+.personality-layer--affect.personality-layer--active {
+  border-color: rgba(var(--mint-rgb), 0.15);
+  background: rgba(var(--mint-rgb), 0.03);
+}
+
+.personality-layer > span,
+.personality-layer > small {
+  overflow: hidden;
+  color: #746e82;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  letter-spacing: 0.045em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personality-layer > strong {
+  overflow: hidden;
+  color: #bbb4c9;
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personality-layer > small {
+  color: #5f596c;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .persona-loading {
   position: relative;
   z-index: 1;
@@ -1106,6 +1167,10 @@
   .persona-safety-note {
     grid-column: span 2;
   }
+
+  .personality-layer-map {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 650px) {
@@ -1170,5 +1235,9 @@
 
   .owner-seed-summary .button {
     justify-content: center;
+  }
+
+  .personality-layer-map {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

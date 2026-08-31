@@ -207,12 +207,26 @@ function normalizeActivityStatus(value: unknown): ActivityStatus {
   return 'unknown'
 }
 
+function normalizeActivityLayer(value: unknown): ActivityEvent['layer'] {
+  const layer = String(value ?? '').toLowerCase().replace(/[-\s]/g, '_')
+  if (['owner_seed', 'mutable_persona', 'relationship', 'opinion', 'affect', 'memory', 'policy', 'task', 'system'].includes(layer)) return layer as NonNullable<ActivityEvent['layer']>
+  return layer ? 'unknown' : undefined
+}
+
 function normalizeActivity(value: unknown): ActivityEvent | undefined {
   if (!value || typeof value !== 'object') return undefined
   const rawValue = value as UnknownRecord
   const source = rawValue.event && typeof rawValue.event === 'object' ? rawValue.event as UnknownRecord : rawValue
   const id = optionalString(source, 'id', 'eventId', 'event_id', 'auditId', 'audit_id')
   if (!id) return undefined
+  const rawChanges = source.changes ?? source.diff ?? source.deltas
+  const changes = Array.isArray(rawChanges) ? rawChanges.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const change = item as UnknownRecord
+    const key = optionalString(change, 'key', 'id', 'name')
+    const delta = optionalNumber(change, 'delta', 'change', 'value')
+    return key && delta !== undefined && Number.isFinite(delta) ? [{ key, delta }] : []
+  }) : []
   return {
     id,
     type: normalizeActivityType(source.type ?? source.activityType ?? source.activity_type ?? source.category),
@@ -226,6 +240,11 @@ function normalizeActivity(value: unknown): ActivityEvent | undefined {
     durationMs: optionalNumber(source, 'durationMs', 'duration_ms', 'elapsedMs', 'elapsed_ms'),
     reason: optionalString(source, 'reason', 'why'),
     provenance: optionalString(source, 'provenance', 'originDetail', 'origin_detail'),
+    layer: normalizeActivityLayer(source.layer ?? source.personalityLayer ?? source.personality_layer),
+    operation: optionalString(source, 'operation', 'op'),
+    version: optionalNumber(source, 'version', 'revisionVersion', 'revision_version'),
+    evidenceCount: optionalNumber(source, 'evidenceCount', 'evidence_count'),
+    changes,
   }
 }
 

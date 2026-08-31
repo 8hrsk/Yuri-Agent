@@ -102,6 +102,13 @@ export type ActivityType = 'job' | 'proactive' | 'system' | 'reflection' | 'memo
 
 export type ActivityStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped' | 'blocked' | 'info' | 'unknown'
 
+export type ActivityLayer = 'owner_seed' | 'mutable_persona' | 'relationship' | 'opinion' | 'affect' | 'memory' | 'policy' | 'task' | 'system' | 'unknown'
+
+export interface ActivityChange {
+  key: string
+  delta: number
+}
+
 export interface ActivityEvent {
   id: string
   type: ActivityType
@@ -115,6 +122,11 @@ export interface ActivityEvent {
   durationMs?: number
   reason?: string
   provenance?: string
+  layer?: ActivityLayer
+  operation?: string
+  version?: number
+  evidenceCount?: number
+  changes?: ActivityChange[]
 }
 
 export interface ActivityListOptions {

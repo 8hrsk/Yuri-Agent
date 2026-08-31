@@ -323,7 +323,7 @@ P6 не сохраняет preview prompt/response в conversations, messages, r
 
 ### P7. Runtime UI и polish
 
-Статус: в работе; P7.1–P7.2 завершены.
+Статус: в работе; P7.1–P7.3 завершены.
 
 **Задача:** сделать развивающуюся личность видимой и управляемой после onboarding.
 
@@ -344,7 +344,7 @@ P6 не сохраняет preview prompt/response в conversations, messages, r
 
 1. **P7.1 — live affect в Chat.** Chat загружает affect именно активного агента, принимает последующие versioned reflection events и передаёт состояние в avatar renderer вместо UI default. Header показывает mood и две доминирующие эмоции; события другого агента отфильтровываются по ID. Реализовано.
 2. **P7.2 — owner seed editor.** Редактирование типизированных Style, Temperament, Emotional dynamics, Relationship seed и Backstory создаёт новую append-only seed revision с явным предупреждением о reset baseline. Реализовано: редактор переиспользует Advanced wizard, блокирует имя/возраст/гендер, требует owner reason и optimistic `expectedVersion`; seed revision и redacted audit фиксируются одной SQLite-транзакцией. Сохранение не сбрасывает текущие persona/relationship/affect. Изменённые backstory episodes версионируют derived fictional memory, а удалённые из нового baseline episodes получают append-only tombstone.
-3. **P7.3 — прозрачные слои и change cards.** Personality/Activity визуально разделяют owner seed, mutable persona, relationship, opinion и affect, показывая reason/evidence/delta.
+3. **P7.3 — прозрачные слои и change cards.** Personality/Activity визуально разделяют owner seed, mutable persona, relationship, opinion и affect, показывая reason/evidence/delta. Реализовано: Personality показывает карту пяти независимых слоёв и числовые дельты persona history; Activity классифицирует versioned audit events как `owner_seed`, `mutable_persona`, `relationship` или `affect`, подтягивает persisted reason/evidence/version и вычисляет компактный diff относительно parent revision. Reason проходит secret-like redaction и не подменяет factual memory.
 4. **P7.4 — evolution controls.** Per-agent toggle, cooldown, budget и locks управляются из одного места и round-trip сохраняются в versioned policy.
 5. **P7.5 — portable profile.** Export/import v2 переносит owner profile без secrets, permissions и runtime histories.
 6. **P7.6 — dogfooding.** Контрастные agents и поддерживаемые providers проходят preview/eval и реальные диалоговые сценарии; найденные различия фиксируются до завершения roadmap.

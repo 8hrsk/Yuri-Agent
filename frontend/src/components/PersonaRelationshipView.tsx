@@ -120,13 +120,15 @@ function RelationshipBar({ dimension }: { dimension: RelationshipDimension }) {
   return <div className="relationship-signal"><div><span>{dimension.label}</span><strong>{percentage(dimension.value)}</strong></div><div className="relationship-signal__scale"><i style={{ width: `${dimension.value * 100}%` }} /></div></div>
 }
 
-function VersionItem({ version, currentVersion, onRollback, busy }: { version: PersonaVersion; currentVersion: number; onRollback: (version: PersonaVersion) => void; busy: boolean }) {
+function VersionItem({ version, currentVersion, labels, onRollback, busy }: { version: PersonaVersion; currentVersion: number; labels: Record<string, string>; onRollback: (version: PersonaVersion) => void; busy: boolean }) {
   const current = version.version === currentVersion
+  const changes = Object.entries(version.diff ?? {}).filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Math.abs(entry[1]) >= .001)
   return <article className={`persona-version${current ? ' persona-version--current' : ''}`}>
     <div className="persona-version__marker"><span>v{version.version}</span><i /></div>
     <div className="persona-version__body">
       <div className="persona-version__heading"><strong>{current ? 'Текущая версия' : `Версия ${version.version}`}</strong><time dateTime={version.createdAt}>{formatDate(version.createdAt)}</time></div>
       <p>{version.reason}</p>
+      {changes.length > 0 && <div className="relationship-version__diff">{changes.map(([id, value]) => <span className={value < 0 ? 'relationship-version__change relationship-version__change--negative' : 'relationship-version__change'} key={id}>{labels[id] ?? id.replaceAll('_', ' ')} {signedPercentage(value)}</span>)}</div>}
       <div className="persona-version__meta"><span>evidence · {version.evidence.length}</span>{version.authorRunId && <span>run · {version.authorRunId}</span>}{version.parentId && <span>parent · {version.parentId}</span>}</div>
       {!current && <button className="button button--quiet persona-version__rollback" disabled={busy} onClick={() => onRollback(version)} type="button"><Icon name="refresh" width={13} height={13} /> Откатить на v{version.version}</button>}
     </div>
@@ -165,6 +167,17 @@ function SnapshotHeader({ snapshot, busy, onEvolution }: { snapshot: Personality
       <p>Это моделируемое внутреннее состояние персонажа, а не утверждение о сознании модели. Affect не влияет на разрешения и security policy.</p>
     </div>
   </section>
+}
+
+function PersonalityLayerMap({ snapshot, ownerSeed, section }: { snapshot: PersonalitySnapshot; ownerSeed?: AgentPersonalizationProfile; section: PersonaRelationshipSection }) {
+  const cards = [
+    { id: 'owner_seed', label: 'OWNER SEED', value: ownerSeed ? `v${ownerSeed.version}` : '—', detail: 'Владелец · reset baseline' },
+    { id: 'mutable_persona', label: 'MUTABLE PERSONA', value: `v${snapshot.currentVersion}`, detail: 'Bounded развитие характера' },
+    { id: 'relationship', label: 'RELATIONSHIP', value: `v${snapshot.relationship.version}`, detail: 'Связь с текущим subject' },
+    { id: 'opinion', label: 'OPINION / INFERENCE', value: String(snapshot.opinions.length), detail: 'Субъективно · может ошибаться' },
+    { id: 'affect', label: 'CURRENT AFFECT', value: snapshot.affect.mood, detail: 'Временное состояние' },
+  ]
+  return <section aria-label="Слои личности агента" className="personality-layer-map">{cards.map((card) => <article className={`personality-layer personality-layer--${card.id}${section === 'relationship' && (card.id === 'relationship' || card.id === 'opinion') ? ' personality-layer--active' : section === 'personality' && (card.id === 'owner_seed' || card.id === 'mutable_persona' || card.id === 'affect') ? ' personality-layer--active' : ''}`} key={card.id}><span>{card.label}</span><strong>{card.value}</strong><small>{card.detail}</small></article>)}</section>
 }
 
 export function PersonaRelationshipView({ section, onSelectSection }: PersonaRelationshipViewProps) {
@@ -316,6 +329,7 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
   const versions = useMemo(() => [...snapshot.versions].sort((a, b) => b.version - a.version), [snapshot.versions])
   const relationshipVersions = useMemo(() => [...snapshot.relationship.versions].sort((a, b) => b.version - a.version), [snapshot.relationship.versions])
   const relationshipLabels = useMemo(() => Object.fromEntries(snapshot.relationship.dimensions.map((dimension) => [dimension.id, dimension.label])), [snapshot.relationship.dimensions])
+  const traitLabels = useMemo(() => Object.fromEntries(snapshot.traits.map((trait) => [trait.id, trait.label])), [snapshot.traits])
   const opinions = snapshot.opinions.length > 0 ? snapshot.opinions : snapshot.relationship.opinions
   const loading = busy === 'loading'
 
@@ -348,6 +362,8 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
       <button aria-selected={!relationship} className={relationship ? 'persona-tab' : 'persona-tab persona-tab--active'} disabled={!onSelectSection} onClick={() => onSelectSection?.('personality')} role="tab" type="button"><Icon name="personality" width={15} height={15} /> Personality</button>
       <button aria-selected={relationship} className={relationship ? 'persona-tab persona-tab--active' : 'persona-tab'} disabled={!onSelectSection} onClick={() => onSelectSection?.('relationship')} role="tab" type="button"><Icon name="relationship" width={15} height={15} /> Relationship</button>
     </div>
+
+    <PersonalityLayerMap ownerSeed={ownerSeed} section={section} snapshot={snapshot} />
 
     {!relationship && ownerSeed && <section className="owner-seed-summary" aria-labelledby="owner-seed-title">
       <div><span className="section-heading__overline">OWNER RESET BASELINE · v{ownerSeed.version}</span><h2 id="owner-seed-title">Исходная персонализация</h2><p>Это append-only baseline владельца. Новая revision задаёт будущие reset-значения и границы рефлексии, но не переписывает текущие persona, affect или relationship.</p></div>
@@ -405,7 +421,7 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
             <section aria-labelledby="persona-history-title" className="persona-panel persona-history-panel">
               <div className="persona-panel__heading"><div><span className="section-heading__overline">VERSION HISTORY</span><h2 id="persona-history-title">История и причины</h2></div><button aria-label="Обновить историю persona" className="icon-button" disabled={busy !== undefined} onClick={() => void load()} type="button"><Icon name="refresh" width={15} height={15} /></button></div>
               <p className="persona-panel__lead">Rollback создаёт наблюдаемое изменение и не удаляет исходные версии. Выберите версию, если нужно вернуть прежний bounded prompt stack.</p>
-              <div className="persona-history">{versions.map((version) => <VersionItem busy={busy !== undefined} currentVersion={snapshot.currentVersion} key={`${version.id}-${version.version}`} onRollback={(next) => void rollback(next)} version={version} />)}</div>
+              <div className="persona-history">{versions.map((version) => <VersionItem busy={busy !== undefined} currentVersion={snapshot.currentVersion} key={`${version.id}-${version.version}`} labels={traitLabels} onRollback={(next) => void rollback(next)} version={version} />)}</div>
             </section>
           </>
         )}

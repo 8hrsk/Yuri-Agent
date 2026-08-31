@@ -33,6 +33,27 @@ const statusLabels: Record<ActivityStatus, string> = {
   unknown: 'неизвестно',
 }
 
+const layerLabels: Record<string, string> = {
+  owner_seed: 'OWNER SEED',
+  mutable_persona: 'MUTABLE PERSONA',
+  relationship: 'RELATIONSHIP',
+  opinion: 'OPINION / INFERENCE',
+  affect: 'CURRENT AFFECT',
+  memory: 'MEMORY',
+  policy: 'POLICY',
+  task: 'TASK',
+  system: 'SYSTEM',
+  unknown: 'UNKNOWN',
+}
+
+const changeLabels: Record<string, string> = {
+  opinion_count: 'мнения',
+  'backstory.episodes': 'эпизоды backstory',
+  warmth: 'теплота', trust: 'доверие', attachment: 'привязанность', jealousy: 'ревность', irritability: 'раздражительность',
+  romantic_tone: 'романтичность', closeness: 'близость', respect: 'уважение', reliability: 'надёжность', gratitude: 'благодарность',
+  anger: 'злость', irritation: 'раздражение', resentment: 'обида', anxiety: 'тревога', fear: 'страх', joy: 'радость', embarrassment: 'смущение',
+}
+
 const defaultSettings: ProactivitySettings = {
   enabled: false,
   quietHoursEnabled: true,
@@ -61,10 +82,26 @@ function formatDuration(durationMs?: number): string {
   return (durationMs / 1000).toFixed(durationMs >= 10000 ? 0 : 1) + ' с'
 }
 
+function changeLabel(key: string): string {
+  if (changeLabels[key]) return changeLabels[key]
+  const short = key.replace(/^(trait|style|dynamics|relationship)\./, '')
+  return changeLabels[short] ?? short.replaceAll('_', ' ')
+}
+
+function changeValue(key: string, delta: number): string {
+  const value = key === 'opinion_count' || key === 'backstory.episodes' ? Math.round(delta) : Math.round(delta * 100)
+  return `${value > 0 ? '+' : ''}${value}${key === 'opinion_count' || key === 'backstory.episodes' ? '' : '%'}`
+}
+
+function isPersonalityLayer(layer?: string): boolean {
+  return layer === 'owner_seed' || layer === 'mutable_persona' || layer === 'relationship' || layer === 'opinion' || layer === 'affect'
+}
+
 function ActivityRow({ event }: { event: ActivityEvent }) {
+  const personalityChange = isPersonalityLayer(event.layer)
   return <article className="activity-row">
     <span className={'activity-row__icon activity-row__icon--' + event.type}><Icon name={event.type === 'job' ? 'tasks' : event.type === 'proactive' ? 'spark' : event.type === 'memory' ? 'memory' : event.type === 'reflection' ? 'relationship' : 'activity'} width={16} height={16} /></span>
-    <div className="activity-row__body"><div className="activity-row__heading"><strong>{event.title}</strong><span className={'activity-status activity-status--' + event.status}><i /> {statusLabels[event.status]}</span></div>{event.detail && <p>{event.detail}</p>}<div className="activity-row__meta"><span>{typeLabels[event.type]}</span>{event.source && <span>{event.source}</span>}{event.reason && <span>Причина: {event.reason}</span>}{event.provenance && <span>Источник: {event.provenance}</span>}</div></div>
+    <div className="activity-row__body"><div className="activity-row__heading"><strong>{event.title}</strong><span className={'activity-status activity-status--' + event.status}><i /> {statusLabels[event.status]}</span></div>{event.detail && <p>{event.detail}</p>}{personalityChange && event.layer && <div className={`activity-change-card activity-change-card--${event.layer}`}><div className="activity-change-card__heading"><span>{layerLabels[event.layer] ?? event.layer}</span><div>{event.version !== undefined && <strong>v{event.version}</strong>}{event.operation && <small>{event.operation}</small>}</div></div>{event.reason && <p><span>Почему</span>{event.reason}</p>}{event.changes && event.changes.length > 0 && <div className="activity-change-card__deltas">{event.changes.slice(0, 8).map((change) => <span className={change.delta < 0 ? 'activity-delta activity-delta--negative' : 'activity-delta'} key={change.key}>{changeLabel(change.key)} <strong>{changeValue(change.key, change.delta)}</strong></span>)}{event.changes.length > 8 && <span className="activity-delta">ещё {event.changes.length - 8}</span>}</div>}<div className="activity-change-card__evidence"><span>evidence · {event.evidenceCount ?? 0}</span><span>{event.provenance}</span></div></div>}<div className="activity-row__meta"><span>{typeLabels[event.type]}</span>{event.source && <span>{event.source}</span>}{!personalityChange && event.reason && <span>Причина: {event.reason}</span>}{!personalityChange && event.provenance && <span>Источник: {event.provenance}</span>}</div></div>
     <div className="activity-row__time"><time dateTime={event.createdAt}>{formatDate(event.createdAt)}</time>{event.durationMs !== undefined && <small>{formatDuration(event.durationMs)}</small>}</div>
   </article>
 }
