@@ -150,6 +150,25 @@ func memoryProvenance(sources []domain.MemorySource) string {
 	}
 }
 
+func (b *Bridge) recalledFictionalMemories(ctx context.Context, agentID domain.ID, ids []domain.ID) []memory.RecalledMemory {
+	result := make([]memory.RecalledMemory, 0, len(ids))
+	for _, id := range ids {
+		item, err := b.repositories.Memories.GetForAgent(ctx, agentID, id)
+		if err != nil || item.Nature != domain.MemoryNatureFiction || item.Lifecycle == domain.MemoryLifecycleDeleted {
+			continue
+		}
+		provenance, err := memory.FictionProvenance(item)
+		if err != nil {
+			continue
+		}
+		result = append(result, memory.RecalledMemory{
+			ID: item.ID, Version: item.Version, Nature: item.Nature,
+			Content: item.Content, Provenance: provenance,
+		})
+	}
+	return result
+}
+
 func (b *Bridge) emitMemoryUpdated(writes int) {
 	if b == nil || writes <= 0 {
 		return

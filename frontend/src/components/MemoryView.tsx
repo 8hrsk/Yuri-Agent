@@ -38,7 +38,14 @@ const contentKindLabels: Record<MemoryContentKind, string> = {
   opinion: 'мнение',
   emotion: 'эмоция',
   inference: 'вывод',
+  fiction: 'вымышленное прошлое',
 }
+
+const fictionProvenanceLabels = {
+  owner_seed: 'Исходник владельца',
+  interpreted: 'Интерпретация агента',
+  uncertain: 'Неуверенная версия',
+} as const
 
 const scopeLabels: Record<MemoryScope, string> = {
   agent_private: 'Личная память агента',
@@ -76,6 +83,8 @@ function formatPercent(value: number): string {
 
 function sourceLabel(source: MemorySource): string {
   if (source.conversationTitle) return source.conversationTitle
+  if (source.sourceType === 'identity_seed') return 'Версия персонализации владельца'
+  if (source.sourceType === 'fiction_interpretation') return 'Вспомненный fictional-эпизод'
   if (source.sourceType === 'peer_dialogue') return 'Межагентный диалог'
   if (source.sourceType === 'peer_dialogue_message') return 'Реплика агента'
   if (source.sourceType === 'message' && source.messageId) return `Сообщение ${source.messageId.slice(0, 8)}`
@@ -102,9 +111,11 @@ type MemoryCardProps = {
   onLifecycle: (memory: MemoryRecord, state: MemoryLifecycleState) => void
   onScope: (memory: MemoryRecord, scope: MemoryScope) => void
   onDelete: (memory: MemoryRecord) => void
+  onDisableBackstory: (memory: MemoryRecord) => void
+  onRehydrateBackstory: (memory: MemoryRecord) => void
 }
 
-function MemoryCard({ memory, busy, onPin, onEdit, onLifecycle, onScope, onDelete }: MemoryCardProps) {
+function MemoryCard({ memory, busy, onPin, onEdit, onLifecycle, onScope, onDelete, onDisableBackstory, onRehydrateBackstory }: MemoryCardProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(memory.content)
 
@@ -123,6 +134,8 @@ function MemoryCard({ memory, busy, onPin, onEdit, onLifecycle, onScope, onDelet
     setEditing(false)
   }
 
+  const ownerSeed = memory.fiction?.provenance === 'owner_seed'
+
   return (
     <article className={`memory-card memory-card--${memory.lifecycleState}`}>
       <header className="memory-card__header">
@@ -137,9 +150,9 @@ function MemoryCard({ memory, busy, onPin, onEdit, onLifecycle, onScope, onDelet
           aria-label={memory.pinned ? 'Открепить воспоминание' : 'Закрепить воспоминание'}
           aria-pressed={memory.pinned}
           className={`memory-icon-button${memory.pinned ? ' memory-icon-button--active' : ''}`}
-          disabled={busy}
+          disabled={busy || Boolean(memory.fiction)}
           onClick={() => onPin(memory)}
-          title={memory.pinned ? 'Открепить' : 'Закрепить в core context'}
+          title={memory.fiction ? 'Fictional memory загружается только по релевантности' : memory.pinned ? 'Открепить' : 'Закрепить в core context'}
           type="button"
         >
           <Icon name="shield" width={15} height={15} />
@@ -159,6 +172,20 @@ function MemoryCard({ memory, busy, onPin, onEdit, onLifecycle, onScope, onDelet
         </div>
       ) : (
         <p className="memory-card__content">{memory.content || 'Пустая запись'}</p>
+      )}
+
+      {memory.fiction && (
+        <div className="memory-card__fiction" aria-label="Происхождение вымышленного воспоминания">
+          <div>
+            <span className={`memory-fiction-badge memory-fiction-badge--${memory.fiction.provenance}`}>{fictionProvenanceLabels[memory.fiction.provenance]}</span>
+            {memory.fiction.recallState === 'remembered' && <span className="memory-fiction-badge memory-fiction-badge--remembered">Вспомнено агентом</span>}
+          </div>
+          <small>
+            {ownerSeed
+              ? `Owner seed${memory.fiction.episodeId ? ` · episode ${memory.fiction.episodeId}` : ''}. Агент может осмыслить его отдельно, но не переписать.`
+              : `Производная версия${memory.fiction.sourceMemoryId ? ` · источник ${memory.fiction.sourceMemoryId.slice(0, 12)}` : ''}. Это субъективная интерпретация, не факт.`}
+          </small>
+        </div>
       )}
 
       <div className="memory-card__signals" aria-label="Сигналы памяти">
@@ -181,7 +208,7 @@ function MemoryCard({ memory, busy, onPin, onEdit, onLifecycle, onScope, onDelet
         <span><strong>Видимость</strong><small>{memory.scope === 'agent_private' ? `Только ${memory.agentName || 'этот агент'}` : 'Доступно всем локальным агентам'}</small></span>
         <select
           aria-label="Видимость воспоминания"
-          disabled={busy}
+          disabled={busy || Boolean(memory.fiction)}
           onChange={(event) => onScope(memory, event.target.value as MemoryScope)}
           value={memory.scope}
         >
@@ -203,12 +230,28 @@ function MemoryCard({ memory, busy, onPin, onEdit, onLifecycle, onScope, onDelet
         ) : <span className="memory-card__no-source">Источник не указан</span>}
       </div>
 
+      {memory.history.length > 0 && (
+        <details className="memory-card__history">
+          <summary><Icon name="chevron-right" width={12} height={12} />История происхождения · {memory.history.length}</summary>
+          <ol>
+            {memory.history.map((entry) => (
+              <li key={`${entry.version}-${entry.operation}`}>
+                <span>v{entry.version} · {entry.operation}</span>
+                <small>{entry.reason || 'Изменение памяти'} · {formatDate(entry.createdAt)}</small>
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
+
       <footer className="memory-card__actions">
-        {!editing && <button className="memory-button" disabled={busy} onClick={() => setEditing(true)} type="button">Изменить</button>}
-        {memory.lifecycleState === 'active' && <button className="memory-button" disabled={busy} onClick={() => onLifecycle(memory, 'dormant')} type="button">Забыть</button>}
-        {memory.lifecycleState === 'dormant' && <button className="memory-button memory-button--accent" disabled={busy} onClick={() => onLifecycle(memory, 'active')} type="button">Вспомнить</button>}
-        {memory.lifecycleState === 'deleted' && <button className="memory-button memory-button--accent" disabled={busy} onClick={() => onLifecycle(memory, 'active')} type="button">Восстановить</button>}
-        <button className="memory-button memory-button--danger" disabled={busy} onClick={() => onDelete(memory)} type="button">Удалить</button>
+        {!editing && (!ownerSeed || memory.lifecycleState !== 'deleted') && <button className="memory-button" disabled={busy} onClick={() => setEditing(true)} type="button">Изменить</button>}
+        {ownerSeed && memory.lifecycleState !== 'deleted' && <button className="memory-button memory-button--danger" disabled={busy} onClick={() => onDisableBackstory(memory)} type="button">Отключить эпизод</button>}
+        {ownerSeed && memory.lifecycleState === 'deleted' && <button className="memory-button memory-button--accent" disabled={busy} onClick={() => onRehydrateBackstory(memory)} type="button">Перегидратировать из backstory</button>}
+        {!ownerSeed && memory.lifecycleState === 'active' && <button className="memory-button" disabled={busy} onClick={() => onLifecycle(memory, 'dormant')} type="button">Забыть</button>}
+        {!ownerSeed && memory.lifecycleState === 'dormant' && <button className="memory-button memory-button--accent" disabled={busy} onClick={() => onLifecycle(memory, 'active')} type="button">Вспомнить</button>}
+        {!ownerSeed && memory.lifecycleState === 'deleted' && <button className="memory-button memory-button--accent" disabled={busy} onClick={() => onLifecycle(memory, 'active')} type="button">Восстановить</button>}
+        {!ownerSeed && <button className="memory-button memory-button--danger" disabled={busy} onClick={() => onDelete(memory)} type="button">Удалить</button>}
       </footer>
     </article>
   )
@@ -372,7 +415,9 @@ export function MemoryView() {
   }
 
   const handleEdit = (memory: MemoryRecord, content: string) => {
-    void runMutation(memory.id, () => client.updateMemory(memory.id, { content }))
+    void runMutation(memory.id, () => memory.fiction?.provenance === 'owner_seed'
+      ? client.updateBackstoryMemory(memory.id, content)
+      : client.updateMemory(memory.id, { content }))
   }
 
   const handleLifecycle = (memory: MemoryRecord, state: MemoryLifecycleState) => {
@@ -395,6 +440,16 @@ export function MemoryView() {
       await client.deleteMemory(memory.id)
       return undefined
     })
+  }
+
+  const handleDisableBackstory = (memory: MemoryRecord) => {
+    const confirmed = globalThis.confirm(`Отключить этот эпизод backstory? Он перестанет вспоминаться, но останется в owner seed и истории.\n\n${memory.content.slice(0, 160)}`)
+    if (!confirmed) return
+    void runMutation(memory.id, () => client.disableBackstoryMemory(memory.id))
+  }
+
+  const handleRehydrateBackstory = (memory: MemoryRecord) => {
+    void runMutation(memory.id, () => client.rehydrateBackstoryMemory(memory.id))
   }
 
   const visibleCountLabel = loading ? '…' : String(records.length).padStart(2, '0')
@@ -459,7 +514,7 @@ export function MemoryView() {
           {error && <div className="memory-feedback memory-feedback--error" role="alert"><Icon name="warning" width={14} height={14} /> {error}<button aria-label="Закрыть ошибку" className="icon-button icon-button--small" onClick={() => setError(undefined)} type="button"><Icon name="x" width={13} height={13} /></button></div>}
           {loading && <div className="memory-state memory-state--loading"><span className="memory-spinner" /> Загружаю память Yuri…</div>}
           {!loading && !error && records.length === 0 && <div className="memory-state memory-state--empty"><Icon name="memory" width={22} height={22} /><strong>{query ? 'Ничего не найдено' : lifecycle === 'dormant' ? 'Спящих записей нет' : 'Память пока пуста'}</strong><span>{query ? 'Измените фильтр или выполните поиск по архиву сессий.' : 'После содержательного диалога Yuri сама выберет материал, который может пригодиться в будущем.'}</span></div>}
-          {!loading && records.length > 0 && <div className="memory-grid">{records.map((memory) => <MemoryCard busy={busyIds.has(memory.id)} key={memory.id} memory={memory} onDelete={handleDelete} onEdit={handleEdit} onLifecycle={handleLifecycle} onPin={handlePin} onScope={handleScope} />)}</div>}
+          {!loading && records.length > 0 && <div className="memory-grid">{records.map((memory) => <MemoryCard busy={busyIds.has(memory.id)} key={memory.id} memory={memory} onDelete={handleDelete} onDisableBackstory={handleDisableBackstory} onEdit={handleEdit} onLifecycle={handleLifecycle} onPin={handlePin} onRehydrateBackstory={handleRehydrateBackstory} onScope={handleScope} />)}</div>}
         </section>
       )}
     </div>

@@ -19,7 +19,10 @@ import (
 func newMemoryTestBridge(t *testing.T) *Bridge {
 	t.Helper()
 	root := t.TempDir()
-	paths := config.Paths{DataDirectory: root, DatabaseFile: filepath.Join(root, "yuri.db")}
+	paths := config.Paths{
+		ConfigDirectory: filepath.Join(root, "config"), ConfigFile: filepath.Join(root, "config", "config.json"),
+		DataDirectory: root, DatabaseFile: filepath.Join(root, "yuri.db"),
+	}
 	database, err := storage.Open(context.Background(), paths.DatabaseFile)
 	if err != nil {
 		t.Fatal(err)
@@ -165,6 +168,90 @@ func TestMemoryBridgeRejectsPublishingHighlySensitiveMemory(t *testing.T) {
 	}
 	if _, err := bridge.SetMemoryScope(SetMemoryScopeInput{MemoryID: string(memoryID), Scope: string(domain.MemoryScopeInstallationShared)}); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("publish highly-sensitive memory error = %v", err)
+	}
+}
+
+func seedBackstoryMemoryTest(t *testing.T, bridge *Bridge) domain.ID {
+	t.Helper()
+	if _, err := bridge.CreateAgent(CreateAgentInput{Name: "Emily", Age: 21, Gender: "female"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	agentID := bridge.personaProfileID()
+	seed, err := bridge.repositories.Personalization.Get(ctx, agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if !now.After(seed.UpdatedAt) {
+		now = seed.UpdatedAt.Add(time.Nanosecond)
+	}
+	previousVersion := seed.Version
+	seed.Version++
+	seed.RevisionID = domain.ID(fmt.Sprintf("%s:personalization:v%d", seed.AgentID, seed.Version))
+	seed.ParentID = seed.RevisionID
+	seed.ParentVersion = previousVersion
+	seed.Operation = domain.PersonalizationOperationUpdate
+	seed.Reason = "test backstory episode"
+	seed.UpdatedAt = now
+	seed.Backstory.Episodes = []domain.BackstoryEpisode{{
+		ID: "violet-garden", Title: "Фиолетовый сад", Content: "Я впервые увидела фиолетовый сад.",
+		Kind: "childhood", EmotionalValence: .5, Sequence: 1,
+	}}
+	seed, err = bridge.repositories.Personalization.AppendVersion(ctx, seed, previousVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := memory.NewEngine(memory.Config{AgentID: agentID, Store: sqliteMemoryAdapter{repositories: bridge.repositories, agentID: agentID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, err := engine.HydrateBackstory(ctx, seed)
+	if err != nil || len(results) != 1 {
+		t.Fatalf("hydrate = %#v, %v", results, err)
+	}
+	return results[0].Memory.ID
+}
+
+func TestMemoryBridgeCuratesOwnerBackstoryWithoutOrdinaryMemoryMutation(t *testing.T) {
+	bridge := newMemoryTestBridge(t)
+	id := seedBackstoryMemoryTest(t, bridge)
+	ctx := context.Background()
+
+	items, err := bridge.ListMemories(MemoryListInput{LifecycleState: "all"})
+	if err != nil || len(items) != 1 || items[0].Fiction == nil || items[0].Fiction.Provenance != memory.FictionProvenanceOwnerSeed || len(items[0].History) != 1 {
+		t.Fatalf("fiction view = %#v, %v", items, err)
+	}
+	content := "Нельзя переписать исходник обычным memory edit."
+	if _, err := bridge.UpdateMemory(UpdateMemoryInput{MemoryID: string(id), Content: &content}); !errors.Is(err, domain.ErrNotPermitted) {
+		t.Fatalf("ordinary update error = %v", err)
+	}
+	if _, err := bridge.SetMemoryScope(SetMemoryScopeInput{MemoryID: string(id), Scope: string(domain.MemoryScopeOwnerShared)}); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("fiction publish error = %v", err)
+	}
+	if _, err := bridge.SetMemoryLifecycle(SetMemoryLifecycleInput{MemoryID: string(id), State: "dormant"}); !errors.Is(err, domain.ErrNotPermitted) {
+		t.Fatalf("ordinary lifecycle error = %v", err)
+	}
+	if err := bridge.DeleteMemory(DeleteMemoryInput{MemoryID: string(id)}); !errors.Is(err, domain.ErrNotPermitted) {
+		t.Fatalf("ordinary delete error = %v", err)
+	}
+
+	editedText := "Я впервые увидела фиолетовый сад и решила стать художницей."
+	edited, err := bridge.UpdateBackstoryMemory(BackstoryMemoryInput{MemoryID: string(id), Content: editedText})
+	if err != nil || edited.Content != editedText || edited.Fiction == nil || edited.Fiction.OwnerAuthored == false {
+		t.Fatalf("backstory edit = %#v, %v", edited, err)
+	}
+	seed, err := bridge.repositories.Personalization.Get(ctx, bridge.personaProfileID())
+	if err != nil || len(seed.Backstory.Episodes) != 1 || seed.Backstory.Episodes[0].Content != editedText {
+		t.Fatalf("owner seed after edit = %#v, %v", seed.Backstory, err)
+	}
+	disabled, err := bridge.DisableBackstoryMemory(BackstoryMemoryInput{MemoryID: string(id)})
+	if err != nil || disabled.Lifecycle != string(domain.MemoryLifecycleDeleted) {
+		t.Fatalf("disable = %#v, %v", disabled, err)
+	}
+	restored, err := bridge.RehydrateBackstoryMemory(BackstoryMemoryInput{MemoryID: string(id)})
+	if err != nil || restored.Lifecycle != string(domain.MemoryLifecycleActive) || restored.Content != editedText || len(restored.History) != 4 {
+		t.Fatalf("rehydrate = %#v, %v", restored, err)
 	}
 }
 

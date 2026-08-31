@@ -49,6 +49,9 @@ export type {
 export type {
   MemoryKind,
   MemoryContentKind,
+  FictionProvenance,
+  FictionMemoryMetadata,
+  MemoryHistoryEntry,
   MemoryLifecycleState,
   MemoryScope,
   MemorySource,

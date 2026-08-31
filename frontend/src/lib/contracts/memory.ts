@@ -5,7 +5,27 @@
  */
 export type MemoryKind = 'core' | 'user_model' | 'episodic' | 'semantic' | 'relationship' | 'procedural'
 
-export type MemoryContentKind = 'fact' | 'opinion' | 'emotion' | 'inference'
+export type MemoryContentKind = 'fact' | 'opinion' | 'emotion' | 'inference' | 'fiction'
+
+export type FictionProvenance = 'owner_seed' | 'interpreted' | 'uncertain'
+
+export interface FictionMemoryMetadata {
+  provenance: FictionProvenance
+  recallState?: 'remembered'
+  epistemicStatus: 'fictional'
+  ownerAuthored: boolean
+  episodeId?: string
+  personalizationRevisionId?: string
+  sourceMemoryId?: string
+  sourceVersion?: number
+}
+
+export interface MemoryHistoryEntry {
+  version: number
+  operation: string
+  reason?: string
+  createdAt: string
+}
 
 export type MemoryLifecycleState = 'active' | 'dormant' | 'deleted'
 
@@ -44,6 +64,8 @@ export interface MemoryRecord {
   createdAt: string
   updatedAt: string
   sources: MemorySource[]
+  fiction?: FictionMemoryMetadata
+  history: MemoryHistoryEntry[]
 }
 
 export interface MemoryListOptions {

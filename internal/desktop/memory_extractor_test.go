@@ -87,3 +87,30 @@ func TestModelMemoryExtractorCannotMintFictionalIdentitySeed(t *testing.T) {
 		t.Fatalf("untrusted extractor minted fictional seed: %#v", candidates)
 	}
 }
+
+func TestModelMemoryExtractorProposesBoundedInterpretationReference(t *testing.T) {
+	extractor := modelMemoryExtractor{backend: memoryExtractorBackend{output: `{"memories":[],"interpretations":[
+		{"source_memory_id":"backstory-1","status":"uncertain","content":"Возможно, поэтому я настороженно отношусь к пустым библиотекам.","confidence":0.8,"salience":0.7,"valence":-0.2,"reason":"new subjective meaning"},
+		{"source_memory_id":"backstory-2","status":"fact","content":"invalid status"}
+	]}`}, model: "test-model"}
+	now := time.Now().UTC()
+	candidates, err := extractor.Extract(context.Background(), memory.Turn{
+		RunID: "run-interpret", ConversationID: "conversation-interpret", Now: now,
+		RecalledMemories: []memory.RecalledMemory{{
+			ID: "backstory-1", Version: 2, Nature: domain.MemoryNatureFiction,
+			Content: "Я одна закрывала старую библиотеку.", Provenance: memory.FictionProvenanceOwnerSeed,
+		}},
+	})
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("candidates = %#v, %v", candidates, err)
+	}
+	if candidates[0].Interpretation == nil || candidates[0].Interpretation.SourceMemoryID != "backstory-1" ||
+		candidates[0].Interpretation.Status != memory.FictionProvenanceUncertain {
+		t.Fatalf("interpretation = %#v", candidates[0])
+	}
+	// The model proposal is not trusted to choose the final nature or payload;
+	// those are forced only by Engine after source validation.
+	if candidates[0].Memory.Nature == domain.MemoryNatureFiction || candidates[0].Memory.ContentJSON != "" {
+		t.Fatalf("extractor bypassed engine provenance validation: %#v", candidates[0].Memory)
+	}
+}

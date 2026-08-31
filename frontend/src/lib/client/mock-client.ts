@@ -488,6 +488,18 @@ class MockYuriClient implements YuriClient {
     return undefined
   }
 
+  async updateBackstoryMemory(_memoryId: string, _content: string): Promise<MemoryRecord | undefined> {
+    return undefined
+  }
+
+  async disableBackstoryMemory(_memoryId: string): Promise<MemoryRecord | undefined> {
+    return undefined
+  }
+
+  async rehydrateBackstoryMemory(_memoryId: string): Promise<MemoryRecord | undefined> {
+    return undefined
+  }
+
   async setMemoryScope(_memoryId: string, _scope: MemoryScope): Promise<MemoryRecord | undefined> {
     return undefined
   }

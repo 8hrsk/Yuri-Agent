@@ -16,9 +16,14 @@ import (
 )
 
 const (
-	BackstoryMemorySchemaVersion = 1
-	BackstorySourceIdentitySeed  = "identity_seed"
-	BackstoryEpistemicFictional  = "fictional"
+	BackstoryMemorySchemaVersion  = 1
+	BackstorySourceIdentitySeed   = "identity_seed"
+	BackstorySourceInterpretation = "fiction_interpretation"
+	BackstoryEpistemicFictional   = "fictional"
+	FictionProvenanceOwnerSeed    = "owner_seed"
+	FictionProvenanceRemembered   = "remembered"
+	FictionProvenanceInterpreted  = "interpreted"
+	FictionProvenanceUncertain    = "uncertain"
 )
 
 // BackstoryMemoryPayload is the typed, inspectable metadata stored beside a
@@ -39,6 +44,56 @@ type BackstoryMemoryPayload struct {
 	Sequence                  int       `json:"sequence,omitempty"`
 	PersonalizationRevisionID domain.ID `json:"personalization_revision_id"`
 	PersonalizationVersion    uint64    `json:"personalization_version"`
+}
+
+// BackstoryInterpretationPayload describes a subjective derivative. It keeps
+// the owner's episode immutable and points back to the exact source revision
+// that the agent interpreted.
+type BackstoryInterpretationPayload struct {
+	SchemaVersion   int       `json:"schema_version"`
+	EpistemicStatus string    `json:"epistemic_status"`
+	Provenance      string    `json:"provenance"`
+	OwnerAuthored   bool      `json:"owner_authored"`
+	AgentID         domain.ID `json:"agent_id"`
+	SourceMemoryID  domain.ID `json:"source_memory_id"`
+	SourceVersion   uint64    `json:"source_version"`
+	SourceDigest    string    `json:"source_digest"`
+	RootEpisodeID   string    `json:"root_episode_id,omitempty"`
+}
+
+func ParseBackstoryInterpretationPayload(value string) (BackstoryInterpretationPayload, error) {
+	var payload BackstoryInterpretationPayload
+	if err := json.Unmarshal([]byte(value), &payload); err != nil {
+		return BackstoryInterpretationPayload{}, fmt.Errorf("decode backstory interpretation metadata: %w", err)
+	}
+	if payload.SchemaVersion != BackstoryMemorySchemaVersion ||
+		payload.EpistemicStatus != BackstoryEpistemicFictional || payload.OwnerAuthored ||
+		(payload.Provenance != FictionProvenanceInterpreted && payload.Provenance != FictionProvenanceUncertain) ||
+		payload.AgentID.Empty() || payload.SourceMemoryID.Empty() || payload.SourceVersion == 0 ||
+		strings.TrimSpace(payload.SourceDigest) == "" {
+		return BackstoryInterpretationPayload{}, fmt.Errorf("%w: invalid backstory interpretation metadata", domain.ErrInvalidArgument)
+	}
+	return payload, nil
+}
+
+// FictionProvenance returns the durable epistemic origin for a fictional
+// memory. "remembered" is intentionally not stored: it is a runtime recall
+// state derived from AccessCount while owner_seed remains the immutable origin.
+func FictionProvenance(item domain.Memory) (string, error) {
+	if item.Nature != domain.MemoryNatureFiction {
+		return "", fmt.Errorf("%w: memory is not fictional", domain.ErrInvalidArgument)
+	}
+	if payload, err := ParseBackstoryMemoryPayload(item.ContentJSON); err == nil && payload.AgentID == item.AgentID {
+		return FictionProvenanceOwnerSeed, nil
+	}
+	payload, err := ParseBackstoryInterpretationPayload(item.ContentJSON)
+	if err != nil || payload.AgentID != item.AgentID {
+		if err == nil {
+			err = fmt.Errorf("%w: fictional provenance owner mismatch", domain.ErrInvalidArgument)
+		}
+		return "", err
+	}
+	return payload.Provenance, nil
 }
 
 // ParseBackstoryMemoryPayload only accepts metadata produced by the trusted
@@ -168,6 +223,98 @@ func (e *Engine) hydrateBackstoryEpisode(ctx context.Context, seed domain.Person
 		return WriteResult{Memory: current, Operation: OperationTouch, Changed: false, Reason: "backstory episode was concurrently hydrated"}, nil
 	}
 	return WriteResult{}, err
+}
+
+// DisableBackstoryMemory records an owner tombstone after verifying that the
+// target is an authentic identity-seed projection. Automatic hydration will
+// respect the tombstone until RehydrateBackstoryEpisode is called explicitly.
+func (e *Engine) DisableBackstoryMemory(ctx context.Context, id domain.ID) (WriteResult, error) {
+	if err := contextErr(ctx); err != nil {
+		return WriteResult{}, err
+	}
+	if e == nil || e.store == nil {
+		return WriteResult{}, ErrNoStore
+	}
+	current, err := e.store.GetMemory(ctx, id)
+	if err != nil {
+		return WriteResult{}, err
+	}
+	if !e.agentID.Empty() && current.AgentID != e.agentID {
+		return WriteResult{}, domain.ErrConflict
+	}
+	payload, err := ParseBackstoryMemoryPayload(current.ContentJSON)
+	if err != nil || current.Nature != domain.MemoryNatureFiction || payload.AgentID != current.AgentID {
+		return WriteResult{}, fmt.Errorf("%w: only owner-seed backstory memories can be disabled", domain.ErrNotPermitted)
+	}
+	if current.Lifecycle == domain.MemoryLifecycleDeleted {
+		return WriteResult{Memory: current, Operation: OperationTouch, Changed: false, Reason: "backstory memory is already disabled"}, nil
+	}
+	now := e.now().UTC()
+	previous := current
+	current.Version++
+	current.Lifecycle = domain.MemoryLifecycleDeleted
+	current.DormantAt = time.Time{}
+	current.DeletedAt = now
+	current.UpdatedAt = now
+	return e.commit(ctx, current, &previous, nil, OperationForget, "owner disabled fictional backstory memory", now, false)
+}
+
+// RehydrateBackstoryEpisode is the sole resurrection path for an owner-seed
+// memory. It restores the exact episode from the current personalization seed,
+// never content from the tombstone or a model-produced interpretation.
+func (e *Engine) RehydrateBackstoryEpisode(ctx context.Context, seed domain.PersonalizationSeed, episodeID string) (WriteResult, error) {
+	if err := contextErr(ctx); err != nil {
+		return WriteResult{}, err
+	}
+	if e == nil || e.store == nil {
+		return WriteResult{}, ErrNoStore
+	}
+	if err := seed.Validate(); err != nil {
+		return WriteResult{}, err
+	}
+	if !e.agentID.Empty() && seed.AgentID != e.agentID {
+		return WriteResult{}, domain.ErrConflict
+	}
+	episodeID = strings.TrimSpace(episodeID)
+	var episode domain.BackstoryEpisode
+	found := false
+	for _, candidate := range seed.Backstory.Episodes {
+		if strings.TrimSpace(candidate.ID) == episodeID {
+			episode, found = normalizeBackstoryEpisode(candidate), true
+			break
+		}
+	}
+	if !found {
+		return WriteResult{}, fmt.Errorf("%w: backstory episode %q not found in current owner seed", domain.ErrNotFound, episodeID)
+	}
+	now := e.now().UTC()
+	desired, source, desiredPayload, err := buildBackstoryMemory(seed, episode, now)
+	if err != nil {
+		return WriteResult{}, err
+	}
+	current, err := e.store.GetMemory(ctx, desired.ID)
+	if err != nil {
+		return WriteResult{}, err
+	}
+	currentPayload, parseErr := ParseBackstoryMemoryPayload(current.ContentJSON)
+	if parseErr != nil || current.AgentID != seed.AgentID || current.Nature != domain.MemoryNatureFiction ||
+		currentPayload.AgentID != current.AgentID || currentPayload.EpisodeID != episodeID {
+		return WriteResult{}, fmt.Errorf("%w: backstory memory provenance mismatch", domain.ErrConflict)
+	}
+	if current.Lifecycle == domain.MemoryLifecycleActive && currentPayload.EpisodeDigest == desiredPayload.EpisodeDigest {
+		return WriteResult{Memory: current, Operation: OperationTouch, Changed: false, Reason: "backstory memory is already hydrated"}, nil
+	}
+	desired.Version = current.Version + 1
+	desired.CreatedAt = current.CreatedAt
+	desired.UpdatedAt = now
+	desired.Scope = domain.MemoryScopeAgentPrivate
+	desired.Lifecycle = domain.MemoryLifecycleActive
+	desired.Pinned = current.Pinned
+	desired.HiddenFromCore = current.HiddenFromCore
+	desired.AccessCount = current.AccessCount
+	desired.LastAccessedAt = current.LastAccessedAt
+	desired.LastRecalledAt = current.LastRecalledAt
+	return e.commit(ctx, desired, &current, []domain.MemorySource{source}, OperationRestore, "owner explicitly rehydrated fictional backstory memory", now, false)
 }
 
 func buildBackstoryMemory(seed domain.PersonalizationSeed, episode domain.BackstoryEpisode, now time.Time) (domain.Memory, domain.MemorySource, BackstoryMemoryPayload, error) {

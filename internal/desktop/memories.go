@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/OrdoAI/yuri-agent/internal/domain"
+	memorycore "github.com/OrdoAI/yuri-agent/internal/memory"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 )
 
@@ -38,27 +39,47 @@ type MemorySourceView struct {
 }
 
 type MemoryView struct {
-	ID               string             `json:"id"`
-	AgentID          string             `json:"agentId"`
-	AgentName        string             `json:"agentName,omitempty"`
-	Scope            string             `json:"scope"`
-	Version          uint64             `json:"version"`
-	Kind             string             `json:"kind"`
-	Nature           string             `json:"nature"`
-	Content          string             `json:"content"`
-	Confidence       float64            `json:"confidence"`
-	Salience         float64            `json:"salience"`
-	Valence          float64            `json:"valence"`
-	Sensitivity      string             `json:"sensitivity"`
-	Lifecycle        string             `json:"lifecycle"`
-	Pinned           bool               `json:"pinned"`
-	AccessCount      int64              `json:"accessCount"`
-	LastRecalledAt   string             `json:"lastRecalledAt,omitempty"`
-	DecayPolicy      string             `json:"decayPolicy,omitempty"`
-	EmbeddingVersion string             `json:"embeddingVersion,omitempty"`
-	CreatedAt        string             `json:"createdAt"`
-	UpdatedAt        string             `json:"updatedAt"`
-	Sources          []MemorySourceView `json:"sources"`
+	ID               string              `json:"id"`
+	AgentID          string              `json:"agentId"`
+	AgentName        string              `json:"agentName,omitempty"`
+	Scope            string              `json:"scope"`
+	Version          uint64              `json:"version"`
+	Kind             string              `json:"kind"`
+	Nature           string              `json:"nature"`
+	Content          string              `json:"content"`
+	Confidence       float64             `json:"confidence"`
+	Salience         float64             `json:"salience"`
+	Valence          float64             `json:"valence"`
+	Sensitivity      string              `json:"sensitivity"`
+	Lifecycle        string              `json:"lifecycle"`
+	Pinned           bool                `json:"pinned"`
+	AccessCount      int64               `json:"accessCount"`
+	LastRecalledAt   string              `json:"lastRecalledAt,omitempty"`
+	DecayPolicy      string              `json:"decayPolicy,omitempty"`
+	EmbeddingVersion string              `json:"embeddingVersion,omitempty"`
+	CreatedAt        string              `json:"createdAt"`
+	UpdatedAt        string              `json:"updatedAt"`
+	Sources          []MemorySourceView  `json:"sources"`
+	Fiction          *FictionMemoryView  `json:"fiction,omitempty"`
+	History          []MemoryHistoryView `json:"history,omitempty"`
+}
+
+type FictionMemoryView struct {
+	Provenance                string `json:"provenance"`
+	RecallState               string `json:"recallState,omitempty"`
+	EpistemicStatus           string `json:"epistemicStatus"`
+	OwnerAuthored             bool   `json:"ownerAuthored"`
+	EpisodeID                 string `json:"episodeId,omitempty"`
+	PersonalizationRevisionID string `json:"personalizationRevisionId,omitempty"`
+	SourceMemoryID            string `json:"sourceMemoryId,omitempty"`
+	SourceVersion             uint64 `json:"sourceVersion,omitempty"`
+}
+
+type MemoryHistoryView struct {
+	Version   uint64 `json:"version"`
+	Operation string `json:"operation"`
+	Reason    string `json:"reason,omitempty"`
+	CreatedAt string `json:"createdAt"`
 }
 
 type UpdateMemoryInput struct {
@@ -91,6 +112,12 @@ type SetMemoryScopeInput struct {
 	ID       string `json:"id"`
 	MemoryID string `json:"memoryId"`
 	Scope    string `json:"scope"`
+}
+
+type BackstoryMemoryInput struct {
+	ID       string `json:"id"`
+	MemoryID string `json:"memoryId"`
+	Content  string `json:"content,omitempty"`
 }
 
 type ArchiveSearchInput struct {
@@ -204,6 +231,9 @@ func (b *Bridge) SetMemoryScope(input SetMemoryScopeInput) (MemoryView, error) {
 	if scope.Shared() && current.Sensitivity == domain.MemorySensitivityHighlySensitive {
 		return MemoryView{}, fmt.Errorf("%w: highly sensitive memory cannot be shared", domain.ErrInvalidArgument)
 	}
+	if scope.Shared() && current.Nature == domain.MemoryNatureFiction {
+		return MemoryView{}, fmt.Errorf("%w: fictional identity memory cannot be shared", domain.ErrInvalidArgument)
+	}
 	if current.Scope == scope {
 		return b.memoryView(ctx, current)
 	}
@@ -234,6 +264,12 @@ func (b *Bridge) UpdateMemory(input UpdateMemoryInput) (MemoryView, error) {
 	current, err := b.repositories.Memories.GetForAgent(ctx, b.personaProfileID(), id)
 	if err != nil {
 		return MemoryView{}, err
+	}
+	if _, parseErr := memorycore.ParseBackstoryMemoryPayload(current.ContentJSON); current.Nature == domain.MemoryNatureFiction && parseErr == nil {
+		return MemoryView{}, fmt.Errorf("%w: use backstory curation actions for fictional identity memory", domain.ErrNotPermitted)
+	}
+	if current.Nature == domain.MemoryNatureFiction && (input.Kind != nil || input.Nature != nil || input.ContentKind != nil) {
+		return MemoryView{}, fmt.Errorf("%w: fictional memory provenance fields are immutable", domain.ErrNotPermitted)
 	}
 	if input.Content != nil {
 		current.Content = strings.TrimSpace(*input.Content)
@@ -272,6 +308,129 @@ func (b *Bridge) UpdateMemory(input UpdateMemoryInput) (MemoryView, error) {
 	return b.memoryView(ctx, current)
 }
 
+func (b *Bridge) UpdateBackstoryMemory(input BackstoryMemoryInput) (MemoryView, error) {
+	ctx, cancel := b.context()
+	defer cancel()
+	content := strings.TrimSpace(input.Content)
+	if content == "" {
+		return MemoryView{}, fmt.Errorf("%w: backstory episode content is required", domain.ErrInvalidArgument)
+	}
+	id := memoryInputID(input.ID, input.MemoryID)
+	current, err := b.repositories.Memories.GetForAgent(ctx, b.personaProfileID(), id)
+	if err != nil {
+		return MemoryView{}, err
+	}
+	payload, err := memorycore.ParseBackstoryMemoryPayload(current.ContentJSON)
+	if err != nil || current.Nature != domain.MemoryNatureFiction || payload.AgentID != current.AgentID {
+		return MemoryView{}, fmt.Errorf("%w: memory is not an owner-authored backstory episode", domain.ErrNotPermitted)
+	}
+	seed, _, err := b.repositories.Personalization.MigrateLegacyBackstory(ctx, current.AgentID, time.Now().UTC())
+	if err != nil {
+		return MemoryView{}, err
+	}
+	found := false
+	for index := range seed.Backstory.Episodes {
+		if strings.TrimSpace(seed.Backstory.Episodes[index].ID) == payload.EpisodeID {
+			if strings.TrimSpace(seed.Backstory.Episodes[index].Content) == content {
+				return b.memoryView(ctx, current)
+			}
+			seed.Backstory.Episodes[index].Content = content
+			found = true
+			break
+		}
+	}
+	if !found {
+		return MemoryView{}, fmt.Errorf("%w: backstory episode is absent from current owner seed", domain.ErrNotFound)
+	}
+	now := time.Now().UTC()
+	if !now.After(seed.UpdatedAt) {
+		now = seed.UpdatedAt.Add(time.Nanosecond)
+	}
+	previousVersion := seed.Version
+	previousRevisionID := seed.RevisionID
+	seed.Version++
+	seed.RevisionID = domain.ID(fmt.Sprintf("%s:personalization:v%d", seed.AgentID, seed.Version))
+	seed.ParentID = previousRevisionID
+	seed.ParentVersion = previousVersion
+	seed.Operation = domain.PersonalizationOperationUpdate
+	seed.Reason = "owner edited fictional backstory episode " + payload.EpisodeID
+	seed.UpdatedAt = now
+	seed, err = b.repositories.Personalization.AppendVersion(ctx, seed, previousVersion)
+	if err != nil {
+		return MemoryView{}, err
+	}
+	engine, err := memorycore.NewEngine(memorycore.Config{AgentID: current.AgentID, Store: sqliteMemoryAdapter{repositories: b.repositories, agentID: current.AgentID}})
+	if err != nil {
+		return MemoryView{}, err
+	}
+	results, err := engine.HydrateBackstory(ctx, seed)
+	if err != nil {
+		return MemoryView{}, err
+	}
+	result := memorycore.WriteResult{}
+	for _, candidate := range results {
+		if candidate.Memory.ID == current.ID {
+			result = candidate
+			break
+		}
+	}
+	if result.Memory.ID.Empty() {
+		return MemoryView{}, fmt.Errorf("%w: updated backstory episode was not hydrated", domain.ErrNotFound)
+	}
+	b.emitMemoryUpdated(1)
+	return b.memoryView(ctx, result.Memory)
+}
+
+func (b *Bridge) DisableBackstoryMemory(input BackstoryMemoryInput) (MemoryView, error) {
+	ctx, cancel := b.context()
+	defer cancel()
+	id := memoryInputID(input.ID, input.MemoryID)
+	agentID := b.personaProfileID()
+	engine, err := memorycore.NewEngine(memorycore.Config{AgentID: agentID, Store: sqliteMemoryAdapter{repositories: b.repositories, agentID: agentID}})
+	if err != nil {
+		return MemoryView{}, err
+	}
+	result, err := engine.DisableBackstoryMemory(ctx, id)
+	if err != nil {
+		return MemoryView{}, err
+	}
+	if result.Changed {
+		b.emitMemoryUpdated(1)
+	}
+	return b.memoryView(ctx, result.Memory)
+}
+
+func (b *Bridge) RehydrateBackstoryMemory(input BackstoryMemoryInput) (MemoryView, error) {
+	ctx, cancel := b.context()
+	defer cancel()
+	id := memoryInputID(input.ID, input.MemoryID)
+	agentID := b.personaProfileID()
+	current, err := b.repositories.Memories.GetForAgent(ctx, agentID, id)
+	if err != nil {
+		return MemoryView{}, err
+	}
+	payload, err := memorycore.ParseBackstoryMemoryPayload(current.ContentJSON)
+	if err != nil || current.Nature != domain.MemoryNatureFiction || payload.AgentID != current.AgentID {
+		return MemoryView{}, fmt.Errorf("%w: only owner-seed backstory memories can be rehydrated", domain.ErrNotPermitted)
+	}
+	seed, _, err := b.repositories.Personalization.MigrateLegacyBackstory(ctx, agentID, time.Now().UTC())
+	if err != nil {
+		return MemoryView{}, err
+	}
+	engine, err := memorycore.NewEngine(memorycore.Config{AgentID: agentID, Store: sqliteMemoryAdapter{repositories: b.repositories, agentID: agentID}})
+	if err != nil {
+		return MemoryView{}, err
+	}
+	result, err := engine.RehydrateBackstoryEpisode(ctx, seed, payload.EpisodeID)
+	if err != nil {
+		return MemoryView{}, err
+	}
+	if result.Changed {
+		b.emitMemoryUpdated(1)
+	}
+	return b.memoryView(ctx, result.Memory)
+}
+
 func (b *Bridge) SetMemoryLifecycle(input SetMemoryLifecycleInput) (MemoryView, error) {
 	ctx, cancel := b.context()
 	defer cancel()
@@ -279,6 +438,9 @@ func (b *Bridge) SetMemoryLifecycle(input SetMemoryLifecycleInput) (MemoryView, 
 	current, err := b.repositories.Memories.GetForAgent(ctx, b.personaProfileID(), id)
 	if err != nil {
 		return MemoryView{}, err
+	}
+	if _, parseErr := memorycore.ParseBackstoryMemoryPayload(current.ContentJSON); current.Nature == domain.MemoryNatureFiction && parseErr == nil {
+		return MemoryView{}, fmt.Errorf("%w: use backstory disable or rehydrate for owner-seed memory", domain.ErrNotPermitted)
 	}
 	state := domain.MemoryLifecycle(firstNonEmpty(input.State, input.LifecycleState, input.Lifecycle))
 	now := time.Now().UTC()
@@ -308,6 +470,9 @@ func (b *Bridge) DeleteMemory(input DeleteMemoryInput) error {
 	current, err := b.repositories.Memories.GetForAgent(ctx, b.personaProfileID(), id)
 	if err != nil {
 		return err
+	}
+	if _, parseErr := memorycore.ParseBackstoryMemoryPayload(current.ContentJSON); current.Nature == domain.MemoryNatureFiction && parseErr == nil {
+		return fmt.Errorf("%w: use backstory disable for owner-seed memory", domain.ErrNotPermitted)
 	}
 	if current.IsDeleted() {
 		return nil
@@ -426,6 +591,34 @@ func (b *Bridge) memoryView(ctx context.Context, item domain.Memory) (MemoryView
 	}
 	if !item.LastRecalledAt.IsZero() {
 		result.LastRecalledAt = item.LastRecalledAt.UTC().Format(time.RFC3339Nano)
+	}
+	if item.Nature == domain.MemoryNatureFiction {
+		if payload, parseErr := memorycore.ParseBackstoryMemoryPayload(item.ContentJSON); parseErr == nil && payload.AgentID == item.AgentID {
+			result.Fiction = &FictionMemoryView{
+				Provenance: memorycore.FictionProvenanceOwnerSeed, EpistemicStatus: payload.EpistemicStatus,
+				OwnerAuthored: true, EpisodeID: payload.EpisodeID,
+				PersonalizationRevisionID: string(payload.PersonalizationRevisionID),
+			}
+		} else if payload, parseErr := memorycore.ParseBackstoryInterpretationPayload(item.ContentJSON); parseErr == nil && payload.AgentID == item.AgentID {
+			result.Fiction = &FictionMemoryView{
+				Provenance: payload.Provenance, EpistemicStatus: payload.EpistemicStatus,
+				SourceMemoryID: string(payload.SourceMemoryID), SourceVersion: payload.SourceVersion,
+			}
+		}
+		if result.Fiction != nil && item.AccessCount > 0 {
+			result.Fiction.RecallState = memorycore.FictionProvenanceRemembered
+		}
+		versions, versionErr := b.repositories.Memories.ListVersionsForAgent(ctx, item.AgentID, item.ID, 12)
+		if versionErr != nil {
+			return MemoryView{}, versionErr
+		}
+		result.History = make([]MemoryHistoryView, 0, len(versions))
+		for _, version := range versions {
+			result.History = append(result.History, MemoryHistoryView{
+				Version: version.Memory.Version, Operation: version.Operation, Reason: version.Reason,
+				CreatedAt: version.Memory.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			})
+		}
 	}
 	return result, nil
 }

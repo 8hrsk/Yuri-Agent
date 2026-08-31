@@ -357,6 +357,51 @@
   white-space: pre-wrap;
 }
 
+.memory-card__fiction {
+  display: grid;
+  gap: 7px;
+  margin: -5px 0 15px;
+  padding: 10px;
+  border: 1px solid rgba(189, 156, 255, 0.18);
+  border-radius: 9px;
+  background: rgba(140, 103, 220, 0.055);
+}
+
+.memory-card__fiction > div {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.memory-card__fiction small {
+  color: #81798f;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.memory-fiction-badge {
+  padding: 3px 6px;
+  border: 1px solid rgba(189, 156, 255, 0.22);
+  border-radius: 999px;
+  color: #c8b4ef;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  letter-spacing: 0.04em;
+  background: rgba(189, 156, 255, 0.08);
+}
+
+.memory-fiction-badge--uncertain {
+  border-color: rgba(235, 183, 96, 0.25);
+  color: #cdae7c;
+  background: rgba(235, 183, 96, 0.07);
+}
+
+.memory-fiction-badge--remembered {
+  border-color: rgba(112, 214, 183, 0.22);
+  color: #8bcab7;
+  background: rgba(112, 214, 183, 0.07);
+}
+
 .memory-card__editor {
   margin: 15px 0 16px;
 }
@@ -479,6 +524,60 @@
 .memory-card__provenance {
   min-height: 45px;
   padding: 12px 0 11px;
+}
+
+.memory-card__history {
+  margin: 0 0 11px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.memory-card__history summary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #817a91;
+  cursor: pointer;
+  font-size: 8px;
+  list-style: none;
+}
+
+.memory-card__history summary::-webkit-details-marker {
+  display: none;
+}
+
+.memory-card__history summary svg {
+  transition: transform 150ms ease;
+}
+
+.memory-card__history[open] summary svg {
+  transform: rotate(90deg);
+}
+
+.memory-card__history ol {
+  display: grid;
+  gap: 6px;
+  margin: 9px 0 0;
+  padding: 0 0 0 18px;
+}
+
+.memory-card__history li {
+  color: #777084;
+  font-size: 8px;
+}
+
+.memory-card__history li span,
+.memory-card__history li small {
+  display: block;
+}
+
+.memory-card__history li span {
+  color: #a099af;
+}
+
+.memory-card__history li small {
+  margin-top: 2px;
+  line-height: 1.4;
 }
 
 .memory-card__section-label {

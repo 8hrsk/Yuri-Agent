@@ -176,3 +176,103 @@ func TestMemoryNatureFictionIsAValidDomainNature(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBackstoryDisableRequiresExplicitRehydrateFromOwnerSeed(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	clock := &testClock{current: now}
+	store := newMemoryTestStore()
+	engine := newBackstoryTestEngine(t, store, clock)
+	seed := backstoryTestSeed(t, now)
+	created, err := engine.HydrateBackstory(context.Background(), seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := created[0].Memory
+	clock.current = now.Add(time.Minute)
+	disabled, err := engine.DisableBackstoryMemory(context.Background(), target.ID)
+	if err != nil || !disabled.Changed || disabled.Memory.Lifecycle != domain.MemoryLifecycleDeleted {
+		t.Fatalf("disable = %#v, %v", disabled, err)
+	}
+	clock.current = now.Add(2 * time.Minute)
+	automatic, err := engine.HydrateBackstory(context.Background(), seed)
+	if err != nil || automatic[0].Changed || automatic[0].Memory.Lifecycle != domain.MemoryLifecycleDeleted {
+		t.Fatalf("automatic hydration resurrected owner-disabled memory: %#v, %v", automatic[0], err)
+	}
+	clock.current = now.Add(3 * time.Minute)
+	restored, err := engine.RehydrateBackstoryEpisode(context.Background(), seed, "first-book")
+	if err != nil || !restored.Changed || restored.Operation != OperationRestore || restored.Memory.Lifecycle != domain.MemoryLifecycleActive || restored.Memory.Content != target.Content {
+		t.Fatalf("explicit rehydrate = %#v, %v", restored, err)
+	}
+	versions, _ := store.ListMemoryVersions(context.Background(), target.ID, 0)
+	if len(versions) != 3 || versions[1].Operation != OperationForget || versions[2].Operation != OperationRestore {
+		t.Fatalf("curation history = %#v", versions)
+	}
+}
+
+func TestProcessTurnCreatesSeparateValidatedFictionInterpretation(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	clock := &testClock{current: now}
+	store := newMemoryTestStore()
+	seedEngine := newBackstoryTestEngine(t, store, clock)
+	seed := backstoryTestSeed(t, now)
+	created, err := seedEngine.HydrateBackstory(context.Background(), seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := created[0].Memory
+	interpreter, err := NewEngine(Config{
+		AgentID: seed.AgentID, Store: store, Now: clock.Now, IDs: &testIDs{},
+		Extractor: testExtractor{candidates: []Candidate{{
+			Memory:         domain.Memory{Content: "Теперь я понимаю тот вечер как первый самостоятельный выбор.", Confidence: .78, Salience: .7},
+			Interpretation: &FictionInterpretationCandidate{SourceMemoryID: source.ID, Status: FictionProvenanceInterpreted},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := Turn{
+		RunID: "run-interpret", AgentID: seed.AgentID, ConversationID: "conversation-interpret", Now: now.Add(time.Minute),
+		RecalledMemories: []RecalledMemory{{ID: source.ID, Version: source.Version, Nature: source.Nature, Content: source.Content, Provenance: FictionProvenanceOwnerSeed}},
+	}
+	results, err := interpreter.ProcessTurn(context.Background(), turn)
+	if err != nil || len(results) != 1 {
+		t.Fatalf("ProcessTurn() = %#v, %v", results, err)
+	}
+	derived := results[0].Memory
+	if derived.ID == source.ID || derived.Nature != domain.MemoryNatureFiction || derived.Content == source.Content || source.Content != created[0].Memory.Content {
+		t.Fatalf("source was not preserved or derivative is invalid: source=%#v derived=%#v", source, derived)
+	}
+	payload, err := ParseBackstoryInterpretationPayload(derived.ContentJSON)
+	if err != nil || payload.Provenance != FictionProvenanceInterpreted || payload.SourceMemoryID != source.ID || payload.SourceVersion != source.Version || payload.OwnerAuthored {
+		t.Fatalf("interpretation payload = %#v, %v", payload, err)
+	}
+	sources, _ := store.ListMemorySources(context.Background(), derived.ID)
+	if len(sources) == 0 || sources[0].SourceType != BackstorySourceInterpretation || sources[0].SourceID != source.ID {
+		t.Fatalf("interpretation sources = %#v", sources)
+	}
+}
+
+func TestProcessTurnRejectsUnrecalledFictionInterpretation(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	store := newMemoryTestStore()
+	engine := newBackstoryTestEngine(t, store, &testClock{current: now})
+	seed := backstoryTestSeed(t, now)
+	created, err := engine.HydrateBackstory(context.Background(), seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interpreter, err := NewEngine(Config{
+		AgentID: seed.AgentID, Store: store, IDs: &testIDs{},
+		Extractor: testExtractor{candidates: []Candidate{{
+			Memory:         domain.Memory{Content: "Поддельная интерпретация"},
+			Interpretation: &FictionInterpretationCandidate{SourceMemoryID: created[0].Memory.ID, Status: FictionProvenanceUncertain},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = interpreter.ProcessTurn(context.Background(), Turn{AgentID: seed.AgentID, ConversationID: "conversation", Now: now})
+	if !errors.Is(err, ErrCandidateRejected) {
+		t.Fatalf("unrecalled interpretation error = %v", err)
+	}
+}

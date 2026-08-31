@@ -208,7 +208,7 @@ Filesystem tools доступны модели даже при пустом сп
 7. Procedural memory — изученные способы выполнения задач и пользовательские правила.
 8. Session archive — полные неизменённые сообщения всех диалогов с FTS5 и vector index, загружаемые только по необходимости.
 
-Каждая memory record содержит: UUID, kind, content/structure, `fact|opinion|emotion|inference`, source/provenance, timestamps, confidence, salience, valence, sensitivity, access count, last recalled time, decay policy, lifecycle state, embedding version и связи с исходными сообщениями.
+Каждая memory record содержит: UUID, kind, content/structure, `fact|opinion|emotion|inference|fiction`, source/provenance, timestamps, confidence, salience, valence, sensitivity, access count, last recalled time, decay policy, lifecycle state, embedding version и связи с исходными сообщениями.
 
 Пайплайн записи:
 
@@ -227,6 +227,8 @@ Filesystem tools доступны модели даже при пустом сп
 - агент может сознательно вызвать поиск по прошлым сессиям и прокрутить найденный диалог вокруг совпадения;
 - в prompt попадают только выбранные фрагменты в пределах отдельного token budget и с маркированным provenance;
 - результат retrieval не становится фактом автоматически: воспоминание может быть ошибочным, устаревшим или субъективным.
+
+Fictional backstory хранится отдельно от фактов о пользователе и мире. Owner-authored episode является неизменяемым `owner_seed`: агент может вспомнить его и сохранить отдельную субъективную `interpreted` или `uncertain` производную со ссылкой на конкретную версию источника, но не переписать первоисточник. Владелец редактирует episode через новую версию personalization seed, может отключить его tombstone-записью и явно rehydrate из текущего seed; автоматическая hydration отключённые episodes не воскрешает. Memory UI показывает вымышленную природу, состояние recall и append-only provenance.
 
 Завершённый межагентный диалог создаёт отдельную `agent_private` episodic memory для каждого участника. Эпизод сохраняет воспроизводимый bounded digest факта разговора и последних реплик, получает provenance на aggregate и immutable peer messages, не входит в always-on core и извлекается только релевантным recall. Идентификатор проекции детерминирован; startup reconciliation дозаполняет пропущенные после crash эпизоды без дублей. Независимый social-reflection pass хранит направленное `observer → peer` мнение отдельно от фактов и owner relationship, может добавить bounded affect event с decay и фиксирует terminal marker атомарно с версиями состояния. Failed, cancelled и expired exchanges не создают ни эпизод, ни social reflection.
 

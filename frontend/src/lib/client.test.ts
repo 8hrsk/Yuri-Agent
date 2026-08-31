@@ -712,24 +712,46 @@ describe('Yuri client contract', () => {
           calls.push(['list', input])
           return [{
             id: 'memory-1', agentId: 'agent-yuri', agentName: 'Yuri', scope: 'owner_shared',
-            kind: 'semantic', nature: 'fact', content: 'Владелец любит сенчу', confidence: .9,
+            kind: 'episodic', nature: 'fiction', content: 'Владелец любит сенчу', confidence: .9,
             salience: .8, lifecycle: 'active', createdAt: '2026-08-30T00:00:00Z', updatedAt: '2026-08-30T00:00:00Z',
+            fiction: { provenance: 'owner_seed', recallState: 'remembered', epistemicStatus: 'fictional', ownerAuthored: true, episodeId: 'tea' },
+            history: [{ version: 1, operation: 'create', reason: 'owner seed', createdAt: '2026-08-30T00:00:00Z' }],
           }]
         },
         SetMemoryScope: (input: unknown) => {
           calls.push(['scope', input])
           return { id: 'memory-1', scope: 'agent_private', kind: 'semantic', nature: 'fact', content: 'Владелец любит сенчу', lifecycle: 'active' }
         },
+        UpdateBackstoryMemory: (input: unknown) => {
+          calls.push(['backstory-update', input])
+          return { id: 'memory-1', scope: 'agent_private', kind: 'episodic', nature: 'fiction', content: 'Новая версия', lifecycle: 'active' }
+        },
+        DisableBackstoryMemory: (input: unknown) => {
+          calls.push(['backstory-disable', input])
+          return { id: 'memory-1', scope: 'agent_private', kind: 'episodic', nature: 'fiction', content: 'Новая версия', lifecycle: 'deleted' }
+        },
+        RehydrateBackstoryMemory: (input: unknown) => {
+          calls.push(['backstory-rehydrate', input])
+          return { id: 'memory-1', scope: 'agent_private', kind: 'episodic', nature: 'fiction', content: 'Новая версия', lifecycle: 'active' }
+        },
       } } },
     }, async () => {
       const client = createYuriClient()
       await expect(client.listMemories({ scope: 'owner_shared' })).resolves.toMatchObject([{
-        id: 'memory-1', agentId: 'agent-yuri', agentName: 'Yuri', scope: 'owner_shared',
+        id: 'memory-1', agentId: 'agent-yuri', agentName: 'Yuri', scope: 'owner_shared', contentKind: 'fiction',
+        fiction: { provenance: 'owner_seed', recallState: 'remembered', episodeId: 'tea' },
+        history: [{ version: 1, operation: 'create' }],
       }])
       await expect(client.setMemoryScope('memory-1', 'agent_private')).resolves.toMatchObject({ scope: 'agent_private' })
+      await expect(client.updateBackstoryMemory('memory-1', 'Новая версия')).resolves.toMatchObject({ content: 'Новая версия' })
+      await expect(client.disableBackstoryMemory('memory-1')).resolves.toMatchObject({ lifecycleState: 'deleted' })
+      await expect(client.rehydrateBackstoryMemory('memory-1')).resolves.toMatchObject({ lifecycleState: 'active' })
       expect(calls).toEqual([
         ['list', expect.objectContaining({ scope: 'owner_shared' })],
         ['scope', { id: 'memory-1', memoryId: 'memory-1', scope: 'agent_private' }],
+        ['backstory-update', { id: 'memory-1', memoryId: 'memory-1', content: 'Новая версия' }],
+        ['backstory-disable', { id: 'memory-1', memoryId: 'memory-1' }],
+        ['backstory-rehydrate', { id: 'memory-1', memoryId: 'memory-1' }],
       ])
     })
   })

@@ -82,6 +82,9 @@ export interface YuriClient {
   listMemories(options?: MemoryListOptions): Promise<MemoryRecord[]>
   searchArchive(request: ArchiveSearchRequest): Promise<ArchiveSearchResponse>
   updateMemory(memoryId: string, update: MemoryUpdate): Promise<MemoryRecord | undefined>
+  updateBackstoryMemory(memoryId: string, content: string): Promise<MemoryRecord | undefined>
+  disableBackstoryMemory(memoryId: string): Promise<MemoryRecord | undefined>
+  rehydrateBackstoryMemory(memoryId: string): Promise<MemoryRecord | undefined>
   setMemoryScope(memoryId: string, scope: MemoryScope): Promise<MemoryRecord | undefined>
   setMemoryLifecycle(memoryId: string, state: MemoryLifecycleState): Promise<MemoryRecord | undefined>
   deleteMemory(memoryId: string): Promise<void>

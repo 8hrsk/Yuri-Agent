@@ -554,6 +554,18 @@ class WailsYuriClient implements YuriClient {
     return normalizeMemory(result)
   }
 
+  async updateBackstoryMemory(memoryId: string, content: string): Promise<MemoryRecord | undefined> {
+    return normalizeMemory(await callBridge<unknown>(['UpdateBackstoryMemory'], [{ id: memoryId, memoryId, content }]))
+  }
+
+  async disableBackstoryMemory(memoryId: string): Promise<MemoryRecord | undefined> {
+    return normalizeMemory(await callBridge<unknown>(['DisableBackstoryMemory'], [{ id: memoryId, memoryId }]))
+  }
+
+  async rehydrateBackstoryMemory(memoryId: string): Promise<MemoryRecord | undefined> {
+    return normalizeMemory(await callBridge<unknown>(['RehydrateBackstoryMemory'], [{ id: memoryId, memoryId }]))
+  }
+
   async setMemoryScope(memoryId: string, scope: MemoryScope): Promise<MemoryRecord | undefined> {
     return normalizeMemory(await callBridge<unknown>(['SetMemoryScope'], [{ id: memoryId, memoryId, scope }]))
   }

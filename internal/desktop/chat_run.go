@@ -354,7 +354,8 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	turnMessages = append(turnMessages, assistantTurnMessages...)
 	b.reviewTurnInBackground(memoryEngine, backend, model, runKind == domain.RunKindInteractive, memory.Turn{
 		RunID: runID, AgentID: profileID, ConversationID: conversationID, Now: finishedAt,
-		Messages: turnMessages,
+		Messages:         turnMessages,
+		RecalledMemories: b.recalledFictionalMemories(runContext, profileID, snapshot.RecalledMemoryIDs),
 	}, agentID)
 	return ChatRunResult{RunID: string(runID), Status: "complete", Events: emitter.Events()}, nil
 }

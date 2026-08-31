@@ -21,7 +21,7 @@ function normalizeMemoryKind(value: unknown): MemoryKind {
 
 function normalizeMemoryContentKind(value: unknown): MemoryContentKind {
   const kind = String(value ?? '').toLowerCase()
-  if (kind === 'fact' || kind === 'opinion' || kind === 'emotion' || kind === 'inference') return kind
+  if (kind === 'fact' || kind === 'opinion' || kind === 'emotion' || kind === 'inference' || kind === 'fiction') return kind
   return 'fact'
 }
 
@@ -78,6 +78,33 @@ function normalizeMemory(value: unknown): MemoryRecord | undefined {
     }
   }
   const valenceValue = source.valence === undefined ? undefined : Number(source.valence)
+  const rawFiction = source.fiction && typeof source.fiction === 'object' ? source.fiction as UnknownRecord : undefined
+  const provenance = String(rawFiction?.provenance ?? '')
+  const fiction = rawFiction && (provenance === 'owner_seed' || provenance === 'interpreted' || provenance === 'uncertain')
+    ? {
+        provenance,
+        recallState: rawFiction.recallState === 'remembered' || rawFiction.recall_state === 'remembered' ? 'remembered' as const : undefined,
+        epistemicStatus: 'fictional' as const,
+        ownerAuthored: Boolean(rawFiction.ownerAuthored ?? rawFiction.owner_authored),
+        episodeId: rawFiction.episodeId || rawFiction.episode_id ? String(rawFiction.episodeId ?? rawFiction.episode_id) : undefined,
+        personalizationRevisionId: rawFiction.personalizationRevisionId || rawFiction.personalization_revision_id ? String(rawFiction.personalizationRevisionId ?? rawFiction.personalization_revision_id) : undefined,
+        sourceMemoryId: rawFiction.sourceMemoryId || rawFiction.source_memory_id ? String(rawFiction.sourceMemoryId ?? rawFiction.source_memory_id) : undefined,
+        sourceVersion: Number(rawFiction.sourceVersion ?? rawFiction.source_version) || undefined,
+      }
+    : undefined
+  const historyValues = Array.isArray(source.history) ? source.history : []
+  const history = historyValues.flatMap((value) => {
+    if (!value || typeof value !== 'object') return []
+    const entry = value as UnknownRecord
+    const version = Number(entry.version)
+    if (!Number.isFinite(version) || version <= 0) return []
+    return [{
+      version,
+      operation: String(entry.operation ?? 'update'),
+      reason: entry.reason ? String(entry.reason) : undefined,
+      createdAt: String(entry.createdAt ?? entry.created_at ?? ''),
+    }]
+  })
   return {
     id,
     agentId: source.agentId || source.agent_id ? String(source.agentId ?? source.agent_id) : undefined,
@@ -99,6 +126,8 @@ function normalizeMemory(value: unknown): MemoryRecord | undefined {
     createdAt: String(source.createdAt ?? source.created_at ?? ''),
     updatedAt: String(source.updatedAt ?? source.updated_at ?? source.createdAt ?? source.created_at ?? ''),
     sources,
+    fiction,
+    history,
   }
 }
 

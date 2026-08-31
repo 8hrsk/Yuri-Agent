@@ -241,7 +241,20 @@ type Turn struct {
 	AgentID        domain.ID
 	ConversationID domain.ID
 	Messages       []TranscriptMessage
-	Now            time.Time
+	// RecalledMemories is the bounded set of memories that actually influenced
+	// this turn. It lets the post-turn reviewer create a subjective
+	// interpretation only from an authoritative memory the agent just recalled;
+	// transcript text cannot invent an identity-seed reference.
+	RecalledMemories []RecalledMemory
+	Now              time.Time
+}
+
+type RecalledMemory struct {
+	ID         domain.ID   `json:"id"`
+	Version    uint64      `json:"version"`
+	Nature     ContentType `json:"nature"`
+	Content    string      `json:"content"`
+	Provenance string      `json:"provenance"`
 }
 
 func (t Turn) Valid() error {
@@ -278,6 +291,15 @@ type Candidate struct {
 	DedupKey  string                `json:"dedup_key,omitempty"`
 	Reason    string                `json:"reason,omitempty"`
 	Sources   []domain.MemorySource `json:"sources,omitempty"`
+	// Interpretation is model-proposed but engine-validated. The engine accepts
+	// it only when SourceMemoryID appears in Turn.RecalledMemories and resolves
+	// to a current fictional memory owned by the same agent.
+	Interpretation *FictionInterpretationCandidate `json:"interpretation,omitempty"`
+}
+
+type FictionInterpretationCandidate struct {
+	SourceMemoryID domain.ID `json:"source_memory_id"`
+	Status         string    `json:"status"`
 }
 
 // RecallMode controls whether dormant records are eligible. Normal

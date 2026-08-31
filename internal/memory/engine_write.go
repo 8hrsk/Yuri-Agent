@@ -2,6 +2,9 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -54,6 +57,12 @@ func (e *Engine) ProcessTurn(ctx context.Context, turn Turn) ([]WriteResult, err
 		if candidate.Operation == CandidateNoop {
 			continue
 		}
+		if candidate.Interpretation != nil {
+			candidate, err = e.prepareFictionInterpretation(ctx, candidate, turn)
+			if err != nil {
+				return results, err
+			}
+		}
 		candidate.Sources = e.completeTurnSources(candidate, turn)
 		result, err := e.applyCandidate(ctx, candidate, turn.Now)
 		if err != nil {
@@ -65,6 +74,69 @@ func (e *Engine) ProcessTurn(ctx context.Context, turn Turn) ([]WriteResult, err
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+func (e *Engine) prepareFictionInterpretation(ctx context.Context, candidate Candidate, turn Turn) (Candidate, error) {
+	reference := candidate.Interpretation
+	if reference == nil || reference.SourceMemoryID.Empty() {
+		return Candidate{}, fmt.Errorf("%w: fictional interpretation source is required", ErrCandidateRejected)
+	}
+	status := strings.TrimSpace(reference.Status)
+	if status != FictionProvenanceInterpreted && status != FictionProvenanceUncertain {
+		return Candidate{}, fmt.Errorf("%w: invalid fictional interpretation status", ErrCandidateRejected)
+	}
+	allowed := false
+	for _, recalled := range turn.RecalledMemories {
+		if recalled.ID == reference.SourceMemoryID && recalled.Nature == domain.MemoryNatureFiction {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return Candidate{}, fmt.Errorf("%w: interpretation source was not recalled for this turn", ErrCandidateRejected)
+	}
+	source, err := e.store.GetMemory(ctx, reference.SourceMemoryID)
+	if err != nil {
+		return Candidate{}, err
+	}
+	if source.AgentID != firstAgentID(turn.AgentID, e.agentID) || source.Nature != domain.MemoryNatureFiction ||
+		source.Lifecycle == domain.MemoryLifecycleDeleted {
+		return Candidate{}, fmt.Errorf("%w: invalid fictional interpretation source", ErrCandidateRejected)
+	}
+	rootEpisodeID := ""
+	if ownerPayload, parseErr := ParseBackstoryMemoryPayload(source.ContentJSON); parseErr == nil && ownerPayload.AgentID == source.AgentID {
+		rootEpisodeID = ownerPayload.EpisodeID
+	} else if derivedPayload, derivedErr := ParseBackstoryInterpretationPayload(source.ContentJSON); derivedErr == nil && derivedPayload.AgentID == source.AgentID {
+		rootEpisodeID = derivedPayload.RootEpisodeID
+	} else {
+		return Candidate{}, fmt.Errorf("%w: untrusted fictional memory provenance", ErrCandidateRejected)
+	}
+	digest := sha256.Sum256([]byte(source.Content))
+	payload := BackstoryInterpretationPayload{
+		SchemaVersion: BackstoryMemorySchemaVersion, EpistemicStatus: BackstoryEpistemicFictional,
+		Provenance: status, OwnerAuthored: false, AgentID: source.AgentID,
+		SourceMemoryID: source.ID, SourceVersion: source.Version,
+		SourceDigest: "sha256:" + hex.EncodeToString(digest[:]), RootEpisodeID: rootEpisodeID,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return Candidate{}, fmt.Errorf("encode backstory interpretation metadata: %w", err)
+	}
+	candidate.Memory.AgentID = source.AgentID
+	candidate.Memory.Scope = domain.MemoryScopeAgentPrivate
+	candidate.Memory.Kind = domain.MemoryKindEpisodic
+	candidate.Memory.Nature = domain.MemoryNatureFiction
+	candidate.Memory.ContentJSON = string(encoded)
+	candidate.Memory.Sensitivity = domain.MemorySensitivityPrivate
+	candidate.Memory.Retention = domain.MemoryRetentionDecay
+	if status == FictionProvenanceUncertain && (candidate.Memory.Confidence <= 0 || candidate.Memory.Confidence > .6) {
+		candidate.Memory.Confidence = .6
+	}
+	candidate.DedupKey = "fiction-interpretation:" + source.ID.String() + ":" + canonicalText(candidate.Memory.Content)
+	candidate.Sources = append(candidate.Sources, domain.MemorySource{
+		SourceType: BackstorySourceInterpretation, SourceID: source.ID, ExcerptHash: hashExcerpt(source.Content), CreatedAt: turn.Now,
+	})
+	return candidate, nil
 }
 
 // Remember applies one explicitly supplied candidate through the same
