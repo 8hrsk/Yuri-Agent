@@ -45,6 +45,7 @@ describe('AgentProfileForm', () => {
       'Упрямство', 'Оптимизм', 'Любопытство', 'Подозрительность', 'Доверчивость', 'Привязанность', 'Формальность', 'Цундере',
     ]
     for (const trait of traits) expect(screen.getByRole('slider', { name: trait })).toBeInTheDocument()
+    expect(screen.getByText(/заминки, самоисправления, многоточия/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Эмоции/ }))
     expect(screen.getByRole('heading', { name: 'Как возникают и проходят чувства?' })).toBeInTheDocument()
@@ -54,6 +55,14 @@ describe('AgentProfileForm', () => {
     expect(screen.getByRole('combobox', { name: 'Стиль конфликта' })).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: /Фоновая рефлексия/ })).toBeChecked()
     expect(screen.getByRole('spinbutton', { name: /Cooldown устойчивых изменений/ })).toHaveValue(60)
+  })
+
+  it('explains that explicit speech habits have roleplay priority', () => {
+    render(<ProfileHarness />)
+    fireEvent.click(screen.getByRole('button', { name: /Продолжить/ }))
+
+    expect(screen.getByText(/заикание, паузы или характерные обращения/)).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /Короткое описание/ })).toHaveAttribute('aria-describedby', 'agent-preferences-hint')
   })
 
   it('keeps free-form and structured backstory in one controlled draft', () => {

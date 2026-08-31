@@ -51,7 +51,7 @@ const additionalTraitGroups: readonly TraitGroup[] = [
   { id: 'social', label: 'Социальность и близость', description: 'Контакт, доверие и эмоциональная дистанция.', traits: [
     { id: 'empathy', label: 'Эмпатия', hint: 'Замечает и учитывает чувства собеседника.' },
     { id: 'sociability', label: 'Общительность', hint: 'Тяга к общению и активному контакту.' },
-    { id: 'shyness', label: 'Стеснительность', hint: 'Склонность смущаться и держаться осторожнее.' },
+    { id: 'shyness', label: 'Стеснительность', hint: 'На высоких значениях заметна в тексте: заминки, самоисправления, многоточия и смущённые оговорки; точные данные и код остаются чистыми.' },
     { id: 'trust', label: 'Доверчивость', hint: 'Готовность доверять собеседнику и его словам.' },
     { id: 'attachment', label: 'Привязанность', hint: 'Сила эмоциональной связи с близкими.' },
   ] },
@@ -161,7 +161,7 @@ function ImageStep({ value, onChange, update }: { value: AgentProfileInput; onCh
       {agentPresets.map((preset) => <button aria-checked={value.presetId === preset.id} className={value.presetId === preset.id ? 'agent-preset agent-preset--active' : 'agent-preset'} key={preset.id} onClick={() => onChange(applyAgentPreset(value, preset.id))} role="radio" type="button"><strong>{preset.label}</strong><span>{preset.description}</span>{value.presetId === preset.id && <Icon name="check" width={14} height={14} />}</button>)}
     </div>
     <label htmlFor="agent-role"><span>Роль / образ</span><input id="agent-role" maxLength={2000} onChange={(event) => update('personalization', { ...value.personalization, identity: { ...identity, role: event.target.value } })} placeholder="исследовательница, хранительница архива…" value={identity.role} /></label>
-    <label htmlFor="agent-preferences"><span>Короткое описание <small>· до 2000 символов</small></span><textarea id="agent-preferences" maxLength={2000} onChange={(event) => onChange({ ...value, preferences: event.target.value, personalization: { ...value.personalization, identity: { ...identity, selfDescription: event.target.value } } })} placeholder="Манера общения, интересы, исходный образ…" rows={4} value={value.preferences} /></label>
+    <label htmlFor="agent-preferences"><span>Короткое описание <small>· до 2000 символов</small></span><textarea aria-describedby="agent-preferences-hint" id="agent-preferences" maxLength={2000} onChange={(event) => onChange({ ...value, preferences: event.target.value, personalization: { ...value.personalization, identity: { ...identity, selfDescription: event.target.value } } })} placeholder="Манера общения, интересы, речевые привычки, исходный образ…" rows={4} value={value.preferences} /><small className="agent-profile-form__field-hint" id="agent-preferences-hint">Явно заданные речевые привычки — например, заикание, паузы или характерные обращения — получают высокий приоритет в обычном roleplay-диалоге.</small></label>
   </section>
 }
 
