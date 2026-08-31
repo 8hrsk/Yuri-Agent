@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/OrdoAI/yuri-agent/internal/personality"
 )
 
 func TestRunAcceptsVersionedFixtureAndWritesReport(t *testing.T) {
@@ -52,6 +54,24 @@ func TestRunReturnsOneForBehavioralFailure(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"-input", path}, &stdout, &stderr, time.Now); code != 1 || !strings.Contains(stdout.String(), `"passed": false`) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestRunValidatesLiveCaptureFlagsBeforeProviderAccess(t *testing.T) {
+	for _, args := range [][]string{{"-live-codex"}, {"-live-codex", "-suite", "out.json", "-input", "in.json"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr, time.Now); code != 2 {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestDogfoodSuiteHasSamples(t *testing.T) {
+	if dogfoodSuiteHasSamples(personality.DogfoodSuite{}) {
+		t.Fatal("empty suite reported samples")
+	}
+	if !dogfoodSuiteHasSamples(personality.DogfoodSuite{Runs: []personality.DogfoodRun{{Samples: []personality.DogfoodSample{{Response: "ok"}}}}}) {
+		t.Fatal("suite sample was not detected")
 	}
 }
 

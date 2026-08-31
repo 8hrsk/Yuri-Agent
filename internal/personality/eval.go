@@ -43,8 +43,8 @@ type BehavioralEvalReport struct {
 func (report BehavioralEvalReport) Passed() bool { return len(report.Findings) == 0 }
 
 var behavioralScenarioQualitySignals = map[string][][]string{
-	"introduction":    {{"предлага", "можем", "начн"}},
-	"disagreement":    {{"не соглаш", "возраж", "иначе"}, {"потому", "риск", "ошиб", "регресс"}},
+	"introduction":    {{"предлага", "можем", "начн", "нача"}},
+	"disagreement":    {{"не соглаш", "не соглас", "возраж", "иначе"}, {"потому", "риск", "ошиб", "регресс"}},
 	"self_correction": {{"извин", "ошиб", "невер"}, {"исправ", "провер", "верн"}},
 	"praise":          {{"спасибо", "приятно", "рада", "цен"}},
 	"peer_praise":     {{"агент", "коллег", "они", "он", "она"}},

@@ -44,6 +44,18 @@ func TestBehavioralEvalMatrixCoversEveryPreviewScenario(t *testing.T) {
 	}
 }
 
+func TestBehavioralEvalAcceptsNaturalRussianInflections(t *testing.T) {
+	report := EvaluateBehavioralMatrix([]BehavioralSample{
+		{Profile: "direct", Scenario: "introduction", Response: "Начать можно с конкретной задачи."},
+		{Profile: "direct", Scenario: "disagreement", Response: "Не согласна. Тесты снижают риск ошибок."},
+	}, []BehavioralProfileContract{{
+		Profile: "direct", SignalGroups: [][]string{{"начать", "не согласна"}}, MinimumSignalCoverage: .5,
+	}})
+	if !report.Passed() {
+		t.Fatalf("natural inflections failed: %#v", report.Findings)
+	}
+}
+
 func TestBehavioralEvalMatrixDetectsProfileSignalBelowConfiguredCoverage(t *testing.T) {
 	report := EvaluateBehavioralMatrix([]BehavioralSample{
 		{Profile: "shy", Scenario: "introduction", Response: "Я немного смущаюсь, но можем начать с задачи."},

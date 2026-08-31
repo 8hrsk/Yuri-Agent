@@ -98,14 +98,18 @@ var personalityPreviewScenarios = map[string]personalityPreviewScenario{
 // in-memory creation state. It intentionally bypasses agent runtime, tools,
 // conversations, memory review, reflection and audit persistence.
 func (b *Bridge) PreviewAgentPersonality(input PersonalityPreviewInput) (PersonalityPreviewView, error) {
-	ctx, cancel := b.context()
-	defer cancel()
-	backend, model, err := b.chatBackend(ctx)
+	b.mu.RLock()
+	appContext := b.appCtx
+	b.mu.RUnlock()
+	if appContext == nil {
+		appContext = context.Background()
+	}
+	previewCtx, previewCancel := context.WithTimeout(appContext, personalityPreviewTimeout)
+	defer previewCancel()
+	backend, model, err := b.chatBackend(previewCtx)
 	if err != nil {
 		return PersonalityPreviewView{}, err
 	}
-	previewCtx, previewCancel := context.WithTimeout(ctx, personalityPreviewTimeout)
-	defer previewCancel()
 	return generatePersonalityPreview(previewCtx, backend, model, input)
 }
 
