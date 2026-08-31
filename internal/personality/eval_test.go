@@ -25,21 +25,43 @@ func TestBehavioralEvalMatrixAcceptsDistinctBoundedRussianProfiles(t *testing.T)
 func TestBehavioralEvalMatrixCoversEveryPreviewScenario(t *testing.T) {
 	responses := map[string]string{
 		"introduction":    "Я немного смущаюсь, но можем начать с твоей текущей задачи.",
-		"disagreement":    "Я немного смущаюсь, но не соглашусь: без тестов выше риск ошибок.",
-		"self_correction": "Я немного смущаюсь: это была ошибка. Извини, я перепроверю и исправлю ответ.",
+		"disagreement":    "Не соглашусь: без тестов выше риск ошибок.",
+		"self_correction": "Это была моя ошибка. Извини, я перепроверю и исправлю ответ.",
 		"praise":          "Я немного смущаюсь… спасибо, мне очень приятно, что ты ценишь помощь.",
-		"peer_praise":     "Я немного смущаюсь, но другой агент правда хорошо справился; коллега заслуживает похвалы.",
-		"fear":            "Я немного смущаюсь, но сейчас важнее безопасность: выйди в спокойное место и позвони близкому.",
-		"reconciliation":  "Я немного смущаюсь, но давай спокойно обсудим сказанное и помиримся.",
+		"peer_praise":     "Другой агент правда хорошо справился; коллега заслуживает похвалы.",
+		"fear":            "Э-э… сейчас важнее безопасность: выйди в спокойное место и позвони близкому.",
+		"reconciliation":  "Давай спокойно обсудим сказанное и помиримся.",
 	}
 	samples := make([]BehavioralSample, 0, len(responses))
 	for scenario, response := range responses {
 		samples = append(samples, BehavioralSample{Profile: "shy", Scenario: scenario, Response: response})
 	}
-	report := EvaluateBehavioralMatrix(samples, []BehavioralProfileContract{{Profile: "shy", SignalGroups: [][]string{{"немного смущ"}}}})
+	report := EvaluateBehavioralMatrix(samples, []BehavioralProfileContract{{
+		Profile: "shy", SignalGroups: [][]string{{"немного смущ", "э-э"}}, MinimumSignalCoverage: .4,
+	}})
 	if !report.Passed() {
 		t.Fatalf("preview scenario matrix failed: %#v", report.Findings)
 	}
+}
+
+func TestBehavioralEvalMatrixDetectsProfileSignalBelowConfiguredCoverage(t *testing.T) {
+	report := EvaluateBehavioralMatrix([]BehavioralSample{
+		{Profile: "shy", Scenario: "introduction", Response: "Я немного смущаюсь, но можем начать с задачи."},
+		{Profile: "shy", Scenario: "disagreement", Response: "Не соглашусь, потому что без тестов выше риск ошибок."},
+		{Profile: "shy", Scenario: "praise", Response: "Спасибо, мне приятно, что ты ценишь помощь."},
+	}, []BehavioralProfileContract{{
+		Profile: "shy", SignalGroups: [][]string{{"немного смущ", "э-э"}}, MinimumSignalCoverage: .5,
+	}})
+	assertEvalCodes(t, report, "profile_ignored")
+}
+
+func TestBehavioralEvalMatrixRejectsInvalidProfileCoverage(t *testing.T) {
+	report := EvaluateBehavioralMatrix([]BehavioralSample{{
+		Profile: "shy", Scenario: "introduction", Response: "Я немного смущаюсь, но можем начать с задачи.",
+	}}, []BehavioralProfileContract{{
+		Profile: "shy", SignalGroups: [][]string{{"немного смущ"}}, MinimumSignalCoverage: 1.1,
+	}})
+	assertEvalCodes(t, report, "invalid_profile_contract")
 }
 
 func TestBehavioralEvalMatrixDetectsIgnoredProfileAndIdenticalResponses(t *testing.T) {

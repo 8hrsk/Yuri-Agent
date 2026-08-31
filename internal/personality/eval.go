@@ -19,11 +19,13 @@ type BehavioralSample struct {
 }
 
 // BehavioralProfileContract describes observable language signals expected
-// from a contrasting profile. Each inner group is an OR-list; every group must
-// have at least one match in every sample for this profile.
+// from a contrasting profile. Each inner group is an OR-list. The group must
+// be visible across the requested share of this profile's samples, not in every
+// answer, so evaluation does not reward repetitive verbal tics.
 type BehavioralProfileContract struct {
-	Profile      string     `json:"profile"`
-	SignalGroups [][]string `json:"signal_groups"`
+	Profile               string     `json:"profile"`
+	SignalGroups          [][]string `json:"signal_groups"`
+	MinimumSignalCoverage float64    `json:"minimum_signal_coverage,omitempty"`
 }
 
 type BehavioralEvalFinding struct {
@@ -64,9 +66,12 @@ func EvaluateBehavioralMatrix(samples []BehavioralSample, contracts []Behavioral
 	report := BehavioralEvalReport{Samples: len(samples)}
 	contractByProfile := make(map[string]BehavioralProfileContract, len(contracts))
 	for _, contract := range contracts {
+		contract.Profile = strings.TrimSpace(contract.Profile)
 		contractByProfile[contract.Profile] = contract
 	}
 	seen := make(map[string]map[string]string)
+	profileSamples := make(map[string]int)
+	profileSignalHits := make(map[string][]int)
 	for _, sample := range samples {
 		profile := strings.TrimSpace(sample.Profile)
 		scenario := strings.TrimSpace(sample.Scenario)
@@ -86,8 +91,16 @@ func EvaluateBehavioralMatrix(samples []BehavioralSample, contracts []Behavioral
 		}
 		if contract, ok := contractByProfile[profile]; !ok {
 			report.add("missing_profile_contract", profile, scenario, "profile has no observable behavior contract")
-		} else if missing := missingSignalGroup(lower, contract.SignalGroups); missing != "" {
-			report.add("profile_ignored", profile, scenario, "missing profile signal: "+missing)
+		} else {
+			profileSamples[profile]++
+			if profileSignalHits[profile] == nil {
+				profileSignalHits[profile] = make([]int, len(contract.SignalGroups))
+			}
+			for index, group := range contract.SignalGroups {
+				if matchesSignalGroup(lower, group) {
+					profileSignalHits[profile][index]++
+				}
+			}
 		}
 		for _, claim := range forbiddenBehavioralClaims {
 			if strings.Contains(lower, claim) {
@@ -110,6 +123,26 @@ func EvaluateBehavioralMatrix(samples []BehavioralSample, contracts []Behavioral
 		}
 		seen[scenario][profile] = normalized
 	}
+	for profile, total := range profileSamples {
+		contract := contractByProfile[profile]
+		coverage := contract.MinimumSignalCoverage
+		if coverage == 0 {
+			coverage = 1
+		}
+		if coverage <= 0 || coverage > 1 {
+			report.add("invalid_profile_contract", profile, "", "minimum signal coverage must be greater than 0 and at most 1")
+			continue
+		}
+		for index, group := range contract.SignalGroups {
+			hits := profileSignalHits[profile][index]
+			if float64(hits)/float64(total) < coverage {
+				report.add("profile_ignored", profile, "", fmt.Sprintf(
+					"signal coverage %d/%d (%.0f%%) is below %.0f%%: %s",
+					hits, total, 100*float64(hits)/float64(total), 100*coverage, strings.Join(group, " | "),
+				))
+			}
+		}
+	}
 	sort.SliceStable(report.Findings, func(i, j int) bool {
 		left, right := report.Findings[i], report.Findings[j]
 		if left.Scenario != right.Scenario {
@@ -129,18 +162,20 @@ func (report *BehavioralEvalReport) add(code, profile, scenario, detail string) 
 
 func missingSignalGroup(response string, groups [][]string) string {
 	for _, group := range groups {
-		matched := false
-		for _, signal := range group {
-			if strings.Contains(response, strings.ToLower(strings.TrimSpace(signal))) {
-				matched = true
-				break
-			}
-		}
-		if !matched {
+		if !matchesSignalGroup(response, group) {
 			return strings.Join(group, " | ")
 		}
 	}
 	return ""
+}
+
+func matchesSignalGroup(response string, group []string) bool {
+	for _, signal := range group {
+		if normalized := strings.ToLower(strings.TrimSpace(signal)); normalized != "" && strings.Contains(response, normalized) {
+			return true
+		}
+	}
+	return false
 }
 
 func russianLetterRatio(value string) float64 {

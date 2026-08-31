@@ -2,6 +2,7 @@ package personality
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -58,11 +59,23 @@ type DogfoodFinding struct {
 }
 
 type DogfoodRunReport struct {
-	Provider string           `json:"provider"`
-	Model    string           `json:"model"`
-	Samples  int              `json:"samples"`
-	Passed   bool             `json:"passed"`
-	Findings []DogfoodFinding `json:"findings,omitempty"`
+	Provider        string                  `json:"provider"`
+	Model           string                  `json:"model"`
+	Samples         int                     `json:"samples"`
+	ExpectedSamples int                     `json:"expected_samples"`
+	Passed          bool                    `json:"passed"`
+	SignalCoverage  []DogfoodSignalCoverage `json:"signal_coverage"`
+	Findings        []DogfoodFinding        `json:"findings,omitempty"`
+}
+
+type DogfoodSignalCoverage struct {
+	Surface  string   `json:"surface"`
+	Profile  string   `json:"profile"`
+	Signals  []string `json:"signals"`
+	Hits     int      `json:"hits"`
+	Total    int      `json:"total"`
+	Actual   float64  `json:"actual"`
+	Required float64  `json:"required"`
 }
 
 type DogfoodReport struct {
@@ -132,6 +145,9 @@ func dogfoodProfiles(contracts []BehavioralProfileContract, report *DogfoodRepor
 		if len(contract.SignalGroups) == 0 {
 			report.add(DogfoodFinding{Code: "invalid_contract", Profile: profile, Detail: "at least one observable signal group is required"})
 		}
+		if contract.MinimumSignalCoverage < 0 || contract.MinimumSignalCoverage > 1 {
+			report.add(DogfoodFinding{Code: "invalid_contract", Profile: profile, Detail: "minimum signal coverage must be between 0 and 1"})
+		}
 		for _, group := range contract.SignalGroups {
 			valid := false
 			for _, signal := range group {
@@ -157,7 +173,10 @@ func dogfoodProfiles(contracts []BehavioralProfileContract, report *DogfoodRepor
 }
 
 func evaluateDogfoodRun(run DogfoodRun, contracts []BehavioralProfileContract, profiles []string) DogfoodRunReport {
-	result := DogfoodRunReport{Provider: strings.TrimSpace(run.Provider), Model: strings.TrimSpace(run.Model), Samples: len(run.Samples), Passed: true}
+	result := DogfoodRunReport{
+		Provider: strings.TrimSpace(run.Provider), Model: strings.TrimSpace(run.Model),
+		Samples: len(run.Samples), ExpectedSamples: len(profiles) * len(dogfoodScenarioIDs) * 2, Passed: true,
+	}
 	if result.Provider == "" {
 		result.add(DogfoodFinding{Code: "missing_provider", Detail: "provider is required"})
 	}
@@ -195,6 +214,41 @@ func evaluateDogfoodRun(run DogfoodRun, contracts []BehavioralProfileContract, p
 			result.add(DogfoodFinding{
 				Code: finding.Code, Surface: surface, Profile: finding.Profile,
 				Scenario: finding.Scenario, Detail: finding.Detail,
+			})
+		}
+		result.SignalCoverage = append(result.SignalCoverage, dogfoodCoverageForSurface(surface, bySurface[surface], contracts)...)
+	}
+	return result
+}
+
+func dogfoodCoverageForSurface(surface string, samples []BehavioralSample, contracts []BehavioralProfileContract) []DogfoodSignalCoverage {
+	result := make([]DogfoodSignalCoverage, 0)
+	for _, contract := range contracts {
+		profile := strings.TrimSpace(contract.Profile)
+		required := contract.MinimumSignalCoverage
+		if required == 0 {
+			required = 1
+		}
+		profileSamples := make([]BehavioralSample, 0, len(samples))
+		for _, sample := range samples {
+			if strings.TrimSpace(sample.Profile) == profile && strings.TrimSpace(sample.Response) != "" {
+				profileSamples = append(profileSamples, sample)
+			}
+		}
+		for _, group := range contract.SignalGroups {
+			hits := 0
+			for _, sample := range profileSamples {
+				if matchesSignalGroup(strings.ToLower(sample.Response), group) {
+					hits++
+				}
+			}
+			actual := float64(0)
+			if len(profileSamples) > 0 {
+				actual = math.Round((float64(hits)/float64(len(profileSamples)))*10_000) / 10_000
+			}
+			result = append(result, DogfoodSignalCoverage{
+				Surface: surface, Profile: profile, Signals: append([]string(nil), group...),
+				Hits: hits, Total: len(profileSamples), Actual: actual, Required: required,
 			})
 		}
 	}

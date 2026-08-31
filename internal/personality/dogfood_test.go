@@ -15,6 +15,14 @@ func TestDogfoodSuiteAcceptsCompletePreviewAndChatMatrix(t *testing.T) {
 	if report.Format != DogfoodReportFormat || report.Runs[0].Samples != 28 {
 		t.Fatalf("report metadata = %#v", report)
 	}
+	if report.Runs[0].ExpectedSamples != 28 || len(report.Runs[0].SignalCoverage) != 4 {
+		t.Fatalf("coverage summary = %#v", report.Runs[0])
+	}
+	for _, coverage := range report.Runs[0].SignalCoverage {
+		if coverage.Hits != 7 || coverage.Total != 7 || coverage.Actual != 1 || coverage.Required != 1 {
+			t.Fatalf("coverage = %#v", coverage)
+		}
+	}
 }
 
 func TestDogfoodSuiteFindsMissingSurfaceDuplicateAndBehaviorRegression(t *testing.T) {
@@ -42,6 +50,7 @@ func TestDogfoodSuiteValidatesEnvelopeContrastAndRunIdentity(t *testing.T) {
 	suite.Format = "other"
 	suite.Version = 99
 	suite.Contracts = suite.Contracts[:1]
+	suite.Contracts[0].MinimumSignalCoverage = 1.1
 	suite.Runs[0].Provider = ""
 	suite.Runs[0].Model = ""
 	report := EvaluateDogfoodSuite(suite, time.Now())
@@ -52,7 +61,7 @@ func TestDogfoodSuiteValidatesEnvelopeContrastAndRunIdentity(t *testing.T) {
 	for _, finding := range report.Runs[0].Findings {
 		codes = append(codes, finding.Code)
 	}
-	for _, expected := range []string{"invalid_format", "unsupported_version", "insufficient_contrast", "missing_provider", "missing_model"} {
+	for _, expected := range []string{"invalid_format", "unsupported_version", "insufficient_contrast", "invalid_contract", "missing_provider", "missing_model"} {
 		if !slices.Contains(codes, expected) {
 			t.Fatalf("missing %q in %#v", expected, report)
 		}
