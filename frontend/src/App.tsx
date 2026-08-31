@@ -37,6 +37,8 @@ function App() {
   const [agentDraft, setAgentDraft] = useState<AgentProfileInput>(() => loadAgentDraft(newAgentDraft({ name: '', preferences: '' })))
   const [agentBusy, setAgentBusy] = useState(false)
   const [agentError, setAgentError] = useState<string>()
+  const [agentNotice, setAgentNotice] = useState<string>()
+  const [importedProfilePath, setImportedProfilePath] = useState<string>()
   const backend = useBackendConnection()
   const sidebar = useSidebarCollapse()
   const activeItem = useMemo(() => navItems.find((item) => item.id === activeId) ?? navItems[0], [activeId])
@@ -92,7 +94,47 @@ function App() {
   const openAgentForm = () => {
     setAgentDraft(loadAgentDraft(newAgentDraft({ name: '', preferences: '' })))
     setAgentError(undefined)
+    setAgentNotice(undefined)
+    setImportedProfilePath(undefined)
     setAgentFormOpen(true)
+  }
+
+  const closeAgentForm = () => {
+    if (importedProfilePath) clearAgentDraft()
+    setAgentFormOpen(false)
+    setImportedProfilePath(undefined)
+  }
+
+  const handleExportAgent = async () => {
+    setAgentBusy(true)
+    setAgentError(undefined)
+    setAgentNotice(undefined)
+    try {
+      const exported = await client.exportActiveAgentProfile()
+      if (!exported) throw new Error('Backend не вернул сведения об экспортированном профиле.')
+      setAgentNotice(`Профиль ${exported.profile.name} экспортирован: ${exported.path}`)
+    } catch (cause) {
+      setAgentError(cause instanceof Error ? cause.message : 'Не удалось экспортировать профиль.')
+    } finally {
+      setAgentBusy(false)
+    }
+  }
+
+  const handleImportAgent = async () => {
+    setAgentBusy(true)
+    setAgentError(undefined)
+    setAgentNotice(undefined)
+    try {
+      const imported = await client.openPortableAgentProfile()
+      if (!imported) throw new Error('Backend не вернул portable profile.')
+      setAgentDraft(imported.profile)
+      setImportedProfilePath(imported.path)
+      setAgentFormOpen(true)
+    } catch (cause) {
+      setAgentError(cause instanceof Error ? cause.message : 'Не удалось открыть portable profile.')
+    } finally {
+      setAgentBusy(false)
+    }
   }
 
   const handleCreateAgent = async () => {
@@ -103,6 +145,7 @@ function App() {
       setActiveAgent(created)
       setAgents((current) => [...current.map((agent) => ({ ...agent, active: false })), { ...created, active: true }])
       clearAgentDraft()
+      setImportedProfilePath(undefined)
       setAgentFormOpen(false)
     } catch (cause) {
       setAgentError(cause instanceof Error ? cause.message : 'Не удалось создать агента.')
@@ -126,11 +169,14 @@ function App() {
         activeAgent={activeAgent}
         activeId={activeId}
         agentError={agentError}
+        agentNotice={agentNotice}
         agents={agents}
         agentBusy={agentBusy}
         collapsed={sidebar.collapsed}
         connectionStatus={backend.status}
         onCreateAgent={openAgentForm}
+        onExportAgent={() => void handleExportAgent()}
+        onImportAgent={() => void handleImportAgent()}
         onNavigate={setActiveId}
         onSelectAgent={(agentId) => void handleSelectAgent(agentId)}
         onToggleCollapsed={sidebar.toggle}
@@ -193,13 +239,13 @@ function App() {
         </footer>
       </main>
       {agentFormOpen && (
-        <div className="approval-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !agentBusy) setAgentFormOpen(false) }}>
+        <div className="approval-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !agentBusy) closeAgentForm() }}>
           <section aria-labelledby="agent-create-title" aria-modal="true" className="approval-dialog agent-dialog" role="dialog">
             <div className="approval-dialog__mark"><Icon name="personality" width={22} height={22} /></div>
-            <span className="section-heading__overline">AGENT ROSTER</span>
-            <h2 id="agent-create-title">Создать нового агента</h2>
-            <p>У каждого агента будет собственная личность, память и отношения. После создания он станет активным.</p>
-            <AgentProfileForm busy={agentBusy} onBack={() => setAgentFormOpen(false)} onChange={setAgentDraft} onSubmit={() => void handleCreateAgent()} submitLabel="Создать и выбрать" value={agentDraft} />
+            <span className="section-heading__overline">{importedProfilePath ? 'PORTABLE PROFILE REVIEW' : 'AGENT ROSTER'}</span>
+            <h2 id="agent-create-title">{importedProfilePath ? 'Проверить импортируемого агента' : 'Создать нового агента'}</h2>
+            <p>{importedProfilePath ? `Источник: ${importedProfilePath}. Переносится только owner profile; память, runtime histories, разрешения и secrets не импортируются.` : 'У каждого агента будет собственная личность, память и отношения. После создания он станет активным.'}</p>
+            <AgentProfileForm busy={agentBusy} onBack={closeAgentForm} onChange={setAgentDraft} onSubmit={() => void handleCreateAgent()} submitLabel={importedProfilePath ? 'Импортировать и выбрать' : 'Создать и выбрать'} value={agentDraft} />
             {agentError && <div className="agent-dialog__error" role="alert">{agentError}</div>}
           </section>
         </div>

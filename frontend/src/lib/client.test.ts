@@ -320,6 +320,7 @@ describe('Yuri client contract', () => {
       personalization: defaultAgentDraft.personalization,
       reason: 'Owner adjusted the reset baseline',
     }
+    const portableProfile = { path: '/tmp/yuri-agent-profile.json', exportedAt: '2026-08-31T12:00:00Z', sizeBytes: 2048, checksum: 'sha256:abc', profile: defaultAgentDraft }
     const bridge = {
       ListConversations: () => [],
       ListAgents: () => { calls.push({ name: 'ListAgents', args: [] }); return [wireAgent] },
@@ -327,6 +328,8 @@ describe('Yuri client contract', () => {
       GetActiveAgentPersonalization: () => { calls.push({ name: 'GetActiveAgentPersonalization', args: [] }); return wirePersonalization },
       UpdateActiveAgentPersonalization: (input: unknown) => { calls.push({ name: 'UpdateActiveAgentPersonalization', args: [input] }); return { ...wirePersonalization, version: 2, revisionId: 'revision-2' } },
       CreateAgent: (input: unknown) => { calls.push({ name: 'CreateAgent', args: [input] }); return wireAgent },
+      ExportActiveAgentProfile: (input: unknown) => { calls.push({ name: 'ExportActiveAgentProfile', args: [input] }); return portableProfile },
+      OpenPortableAgentProfile: (input: unknown) => { calls.push({ name: 'OpenPortableAgentProfile', args: [input] }); return portableProfile },
       SetActiveAgent: (input: unknown) => { calls.push({ name: 'SetActiveAgent', args: [input] }); return wireAgent },
     }
     const previousWindow = (globalThis as { window?: unknown }).window
@@ -339,6 +342,8 @@ describe('Yuri client contract', () => {
       await expect(client.getActiveAgentPersonalization()).resolves.toMatchObject({ agentId: 'agent-yuri', schemaVersion: 2, revisionId: 'revision-1' })
       await expect(client.updateActiveAgentPersonalization(personalizationUpdate)).resolves.toMatchObject({ agentId: 'agent-yuri', version: 2, revisionId: 'revision-2' })
       await expect(client.createAgent(defaultAgentDraft)).resolves.toMatchObject({ id: 'agent-yuri', backstory: 'Выросла среди старых карт.' })
+      await expect(client.exportActiveAgentProfile()).resolves.toMatchObject({ path: '/tmp/yuri-agent-profile.json', profile: { name: 'Yuri', creationMode: 'advanced', presetId: 'custom' } })
+      await expect(client.openPortableAgentProfile()).resolves.toMatchObject({ checksum: 'sha256:abc', profile: { name: 'Yuri', creationMode: 'advanced' } })
       await expect(client.setActiveAgent('agent-yuri')).resolves.toMatchObject({ id: 'agent-yuri', active: true })
       expect(calls).toEqual([
         { name: 'ListAgents', args: [] },
@@ -346,6 +351,8 @@ describe('Yuri client contract', () => {
         { name: 'GetActiveAgentPersonalization', args: [] },
         { name: 'UpdateActiveAgentPersonalization', args: [personalizationUpdate] },
         { name: 'CreateAgent', args: [defaultAgentDraft] },
+        { name: 'ExportActiveAgentProfile', args: [{}] },
+        { name: 'OpenPortableAgentProfile', args: [{}] },
         { name: 'SetActiveAgent', args: [{ id: 'agent-yuri' }] },
       ])
     } finally {

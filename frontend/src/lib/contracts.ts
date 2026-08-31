@@ -49,6 +49,7 @@ export type {
   PersonalityPreviewScenario,
   PersonalityPreviewInfluence,
   PersonalityPreview,
+  PortableAgentProfile,
 } from './contracts/agents'
 export type {
   MemoryKind,

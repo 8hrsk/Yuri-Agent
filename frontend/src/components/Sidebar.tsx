@@ -12,6 +12,7 @@ type SidebarProps = {
   agents: AgentProfile[]
   agentBusy?: boolean
   agentError?: string
+  agentNotice?: string
   /** The rail is showing icons only: either the owner collapsed it or the window is too narrow. */
   collapsed?: boolean
   connectionStatus: BackendStatus
@@ -23,11 +24,13 @@ type SidebarProps = {
   onNavigate: Dispatch<SetStateAction<NavId>>
   onSelectAgent: (agentId: string) => void
   onCreateAgent: () => void
+  onExportAgent: () => void
+  onImportAgent: () => void
 }
 
 const iconName = (name: string): IconName => name as IconName
 
-export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agentError, collapsed = false, connectionStatus, onToggleCollapsed, onNavigate, onSelectAgent, onCreateAgent }: SidebarProps) {
+export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agentError, agentNotice, collapsed = false, connectionStatus, onToggleCollapsed, onNavigate, onSelectAgent, onCreateAgent, onExportAgent, onImportAgent }: SidebarProps) {
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const agentName = activeAgent?.name ?? 'Агент'
   const initial = Array.from(agentName.trim())[0]?.toLocaleUpperCase('ru-RU') ?? 'A'
@@ -91,7 +94,12 @@ export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agen
             <button className="sidebar__agent-create" disabled={agentBusy} onClick={() => { setAgentMenuOpen(false); onCreateAgent() }} type="button">
               <Icon name="plus" width={14} height={14} /> Создать агента
             </button>
+            <div className="sidebar__agent-portable">
+              <button disabled={agentBusy || !activeAgent} onClick={() => { setAgentMenuOpen(false); onExportAgent() }} type="button"><Icon name="file" width={13} height={13} /> Экспорт</button>
+              <button disabled={agentBusy} onClick={() => { setAgentMenuOpen(false); onImportAgent() }} type="button"><Icon name="file" width={13} height={13} /> Импорт</button>
+            </div>
             {agentError && <span className="sidebar__agent-error" role="alert">{agentError}</span>}
+            {agentNotice && <span className="sidebar__agent-notice" role="status">{agentNotice}</span>}
           </div>
         )}
       </div>

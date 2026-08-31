@@ -7,6 +7,7 @@ import type {
   AgentPersonalizationUpdate,
   PersonalityPreview,
   PersonalityPreviewScenario,
+  PortableAgentProfile,
   AgentPersonalizationProfile,
   ArchiveSearchRequest,
   ArchiveSearchResponse,
@@ -54,7 +55,7 @@ import type {
   WebSearchSettings,
   YuriClient,
 } from '../contracts'
-import { normalizeAgentPersonalizationProfile, normalizeAgentProfile } from '../agents'
+import { normalizeAgentPersonalizationProfile, normalizeAgentProfile, normalizeAgentProfileInput } from '../agents'
 import { pluginEnablePayload } from '../plugin-consent'
 import { normalizePersonalitySnapshot } from '../personality'
 import { callBridge, callBridgeSafe, findBridgeMethod, subscribeRuntimeEvent } from './bridge'
@@ -83,6 +84,18 @@ import {
   onboardingSettingsWire,
   proactivityWire,
 } from './settings'
+
+function normalizePortableAgentProfile(value: unknown): PortableAgentProfile | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const source = value as UnknownRecord
+  const profile = normalizeAgentProfileInput(source.profile)
+  const path = optionalString(source, 'path')
+  const exportedAt = optionalString(source, 'exportedAt', 'exported_at')
+  const checksum = optionalString(source, 'checksum')
+  const sizeBytes = Number(source.sizeBytes ?? source.size_bytes)
+  if (!profile || !path || !exportedAt || !checksum || !Number.isFinite(sizeBytes) || sizeBytes < 0) return undefined
+  return { path, exportedAt, checksum, sizeBytes, profile }
+}
 
 /**
  * Chat run multiplexer.
@@ -304,6 +317,14 @@ class WailsYuriClient implements YuriClient {
     const result = normalizeAgentProfile(await callBridge<unknown>(['CreateAgent', 'CreateAgentProfile'], [input]))
     if (!result) throw new Error('Backend не вернул созданного агента.')
     return result
+  }
+
+  async exportActiveAgentProfile(): Promise<PortableAgentProfile | undefined> {
+    return normalizePortableAgentProfile(await callBridge<unknown>(['ExportActiveAgentProfile'], [{}]))
+  }
+
+  async openPortableAgentProfile(): Promise<PortableAgentProfile | undefined> {
+    return normalizePortableAgentProfile(await callBridge<unknown>(['OpenPortableAgentProfile'], [{}]))
   }
 
   async previewAgentPersonality(input: AgentProfileInput, scenario: PersonalityPreviewScenario): Promise<PersonalityPreview | undefined> {

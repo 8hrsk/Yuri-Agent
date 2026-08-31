@@ -199,6 +199,26 @@ export function loadAgentDraft(fallback: AgentProfileInput = defaultAgentDraft):
   }
 }
 
+export function normalizeAgentProfileInput(value: unknown): AgentProfileInput | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const source = value as UnknownRecord
+  const name = text(source, 'name')
+  const gender = text(source, 'gender')
+  if (!name || !gender || !source.personalization) return undefined
+  const numericAge = Number(source.age)
+  return {
+    name,
+    age: Number.isFinite(numericAge) && numericAge >= 1 && numericAge <= 200 ? Math.round(numericAge) : undefined,
+    gender,
+    preferences: typeof source.preferences === 'string' ? limitRunes(source.preferences, 2_000) : '',
+    backstory: typeof source.backstory === 'string' ? limitRunes(source.backstory, AGENT_BACKSTORY_MAX_LENGTH) : '',
+    traits: { ...defaultAgentTraits, ...normalizeAgentTraits(source.traits) },
+    personalization: normalizePersonalizationInput(source.personalization),
+    creationMode: 'advanced',
+    presetId: 'custom',
+  }
+}
+
 export function clearAgentDraft(): void {
   if (typeof window === 'undefined') return
   try { window.localStorage.removeItem(draftStorageKey) } catch { /* best effort */ }

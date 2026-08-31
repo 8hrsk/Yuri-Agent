@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
+import { cloneAgentDraft, defaultAgentDraft } from './lib/agents'
 import type {
   AgentProfile,
   ApprovalRequest,
@@ -309,5 +310,42 @@ describe('an active run survives leaving the Chat tab (H-9)', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(screen.getByText(/Решение по подтверждению не было передано агенту/)).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Сообщение Юри' })).toBeInTheDocument()
+  })
+})
+
+describe('portable agent profiles', () => {
+  it('opens a validated profile in the ordinary creation review without creating it', async () => {
+    const user = userEvent.setup()
+    const harness = createHarness()
+    const importedDraft = cloneAgentDraft({ ...defaultAgentDraft, name: 'Эмили', creationMode: 'advanced', presetId: 'custom' })
+    const openPortableAgentProfile = vi.fn(async () => ({ path: '/tmp/emily.json', exportedAt: '2026-08-31T12:00:00Z', sizeBytes: 2048, checksum: 'sha256:abc', profile: importedDraft }))
+    const createAgent = vi.fn(async () => ({ ...agent, id: 'agent-imported', name: 'Эмили' }))
+    ;(clientStub as unknown as { openPortableAgentProfile: typeof openPortableAgentProfile; createAgent: typeof createAgent }).openPortableAgentProfile = openPortableAgentProfile
+    ;(clientStub as unknown as { createAgent: typeof createAgent }).createAgent = createAgent
+    await bootChat(harness)
+
+    await user.click(document.querySelector('.sidebar__profile') as HTMLElement)
+    await user.click(screen.getByRole('button', { name: /Импорт/ }))
+
+    expect(await screen.findByRole('heading', { name: 'Проверить импортируемого агента' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /Имя агента/ })).toHaveValue('Эмили')
+    expect(screen.getByText(/память, runtime histories, разрешения и secrets не импортируются/)).toBeInTheDocument()
+    expect(openPortableAgentProfile).toHaveBeenCalledTimes(1)
+    expect(createAgent).not.toHaveBeenCalled()
+  })
+
+  it('exports the active owner profile from the roster menu', async () => {
+    const user = userEvent.setup()
+    const harness = createHarness()
+    const exportActiveAgentProfile = vi.fn(async () => ({ path: '/tmp/yuri.json', exportedAt: '2026-08-31T12:00:00Z', sizeBytes: 1024, checksum: 'sha256:def', profile: defaultAgentDraft }))
+    ;(clientStub as unknown as { exportActiveAgentProfile: typeof exportActiveAgentProfile }).exportActiveAgentProfile = exportActiveAgentProfile
+    await bootChat(harness)
+
+    await user.click(document.querySelector('.sidebar__profile') as HTMLElement)
+    await user.click(screen.getByRole('button', { name: /Экспорт/ }))
+
+    await waitFor(() => expect(exportActiveAgentProfile).toHaveBeenCalledTimes(1))
+    await user.click(document.querySelector('.sidebar__profile') as HTMLElement)
+    expect(await screen.findByText(/Профиль Yuri экспортирован/)).toBeInTheDocument()
   })
 })

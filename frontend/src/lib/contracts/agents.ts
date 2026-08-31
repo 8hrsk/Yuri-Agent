@@ -140,6 +140,14 @@ export interface AgentProfileInput {
   presetId: string
 }
 
+export interface PortableAgentProfile {
+  path: string
+  exportedAt: string
+  sizeBytes: number
+  checksum: string
+  profile: AgentProfileInput
+}
+
 export type PersonalityPreviewScenario =
   | 'introduction'
   | 'disagreement'
