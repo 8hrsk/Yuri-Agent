@@ -297,6 +297,19 @@ type PersonalizationEvolutionPolicy struct {
 	TraitBounds               map[string]NumericRange       `json:"trait_bounds,omitempty"`
 	ReflectionMode            PersonalizationReflectionMode `json:"reflection_mode,omitempty"`
 	ReflectionCooldownMinutes int                           `json:"reflection_cooldown_minutes,omitempty"`
+	ReflectionMaxTokens       int64                         `json:"reflection_max_tokens,omitempty"`
+	ReflectionMaxDurationSecs int                           `json:"reflection_max_duration_seconds,omitempty"`
+	ReflectionMaxEvidence     int                           `json:"reflection_max_evidence,omitempty"`
+}
+
+func (policy PersonalizationEvolutionPolicy) FieldLocked(field string) bool {
+	field = strings.TrimSpace(field)
+	for _, candidate := range policy.LockedFields {
+		if strings.TrimSpace(candidate) == field {
+			return true
+		}
+	}
+	return false
 }
 
 func (policy PersonalizationEvolutionPolicy) ReflectionEnabled(fallback bool) bool {
@@ -382,6 +395,7 @@ func defaultPersonalizationEvolutionPolicy(temperament Temperament) Personalizat
 	return PersonalizationEvolutionPolicy{
 		LockedFields: []string{"identity", "backstory"}, TraitBounds: bounds,
 		ReflectionMode: PersonalizationReflectionEnabled, ReflectionCooldownMinutes: 60,
+		ReflectionMaxTokens: 2_500, ReflectionMaxDurationSecs: 60, ReflectionMaxEvidence: 8,
 	}
 }
 
@@ -674,6 +688,15 @@ func validateEvolutionPolicy(policy PersonalizationEvolutionPolicy, temperament 
 	}
 	if policy.ReflectionCooldownMinutes < 0 || policy.ReflectionCooldownMinutes > 7*24*60 {
 		return fmt.Errorf("%w: personalization reflection cooldown is out of range", ErrInvalidArgument)
+	}
+	if policy.ReflectionMaxTokens < 0 || policy.ReflectionMaxTokens > 10_000 || (policy.ReflectionMaxTokens > 0 && policy.ReflectionMaxTokens < 256) {
+		return fmt.Errorf("%w: personalization reflection token budget is out of range", ErrInvalidArgument)
+	}
+	if policy.ReflectionMaxDurationSecs < 0 || policy.ReflectionMaxDurationSecs > 120 || (policy.ReflectionMaxDurationSecs > 0 && policy.ReflectionMaxDurationSecs < 5) {
+		return fmt.Errorf("%w: personalization reflection duration budget is out of range", ErrInvalidArgument)
+	}
+	if policy.ReflectionMaxEvidence < 0 || policy.ReflectionMaxEvidence > 32 {
+		return fmt.Errorf("%w: personalization reflection evidence budget is out of range", ErrInvalidArgument)
 	}
 	for name, valueRange := range policy.TraitBounds {
 		if _, ok := traits[name]; !ok || !finite(valueRange.Min) || !finite(valueRange.Max) || valueRange.Min < 0 || valueRange.Max > 1 || valueRange.Min > valueRange.Max {

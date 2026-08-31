@@ -79,6 +79,9 @@ export interface AgentEvolutionPolicy {
   traitBounds: Record<string, NumericRange>
   reflectionMode: 'enabled' | 'disabled'
   reflectionCooldownMinutes: number
+  reflectionMaxTokens: number
+  reflectionMaxDurationSeconds: number
+  reflectionMaxEvidence: number
 }
 
 export interface AgentPersonalizationInput {

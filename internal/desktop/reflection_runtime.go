@@ -68,7 +68,9 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 	config.MaxDelta = .10
 	config.MinimumEvidence = 1
 	config.MinimumEvidenceWeight = .5
-	config.Budget = reflection.ReflectionBudget{MaxDuration: 60 * time.Second, MaxTokens: 2_500, MaxInputBytes: 64 * 1024, MaxOutputBytes: 16 * 1024, MaxEvidence: 8}
+	config.Budget = reflectionBudgetForPolicy(domainState.personalization.EvolutionPolicy, reflection.ReflectionBudget{
+		MaxDuration: 60 * time.Second, MaxTokens: 2_500, MaxInputBytes: 64 * 1024, MaxOutputBytes: 16 * 1024, MaxEvidence: 8,
+	})
 	config.TraitRanges = rangesFor(state.Persona.Traits, 0, 1)
 	config.RelationshipRanges = rangesFor(state.Relationship.Dimensions, 0, 1)
 	config.AffectRanges = rangesFor(state.Affect.Dimensions, 0, 1)
@@ -86,6 +88,11 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 	config.PinnedTraits = make(map[string]bool, len(state.Persona.PinnedTraits))
 	for _, name := range state.Persona.PinnedTraits {
 		config.PinnedTraits[name] = true
+	}
+	for _, field := range domainState.personalization.EvolutionPolicy.LockedFields {
+		if name, ok := strings.CutPrefix(strings.TrimSpace(field), "temperament."); ok && name != "" {
+			config.PinnedTraits[name] = true
+		}
 	}
 	engine, err := reflection.New(config)
 	if err != nil {
@@ -117,8 +124,11 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 	if !result.Changed() && !result.CanPersistAffectDecay() {
 		return
 	}
-	mutation, err := reflectionMutation(result, domainState, evidence)
+	mutation, err := reflectionMutation(result, domainState, evidence, domainState.personalization.EvolutionPolicy)
 	if err != nil {
+		if errors.Is(err, domain.ErrNotPermitted) {
+			return
+		}
 		b.logReflectionFailure(ctx, turn.RunID, err)
 		return
 	}
@@ -132,6 +142,20 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 	if b.logger != nil {
 		b.logger.InfoContext(ctx, "post-turn reflection applied", "run_id", turn.RunID, "decision", result.Decision)
 	}
+}
+
+func reflectionBudgetForPolicy(policy domain.PersonalizationEvolutionPolicy, fallback reflection.ReflectionBudget) reflection.ReflectionBudget {
+	budget := fallback
+	if policy.ReflectionMaxTokens > 0 {
+		budget.MaxTokens = policy.ReflectionMaxTokens
+	}
+	if policy.ReflectionMaxDurationSecs > 0 {
+		budget.MaxDuration = time.Duration(policy.ReflectionMaxDurationSecs) * time.Second
+	}
+	if policy.ReflectionMaxEvidence > 0 {
+		budget.MaxEvidence = policy.ReflectionMaxEvidence
+	}
+	return budget
 }
 
 func sortedRangeKeys(values map[string]reflection.ValueRange) []string {
@@ -223,7 +247,11 @@ func (b *Bridge) reflectionSnapshot(ctx context.Context, turn memory.Turn, agent
 	return state, reflectionDomainState{persona: persona, relationship: relationship, affect: affect, personalization: personalization}, evidence, nil
 }
 
-func reflectionMutation(result reflection.ReflectionResult, current reflectionDomainState, evidence []reflection.Evidence) (storage.ReflectionStateMutation, error) {
+func reflectionMutation(result reflection.ReflectionResult, current reflectionDomainState, evidence []reflection.Evidence, policies ...domain.PersonalizationEvolutionPolicy) (storage.ReflectionStateMutation, error) {
+	policy := current.personalization.EvolutionPolicy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
 	if result.Proposal.Persona != nil && (looksLikeSecret(result.Proposal.Persona.Prompt) || looksLikeSecret(result.Proposal.Persona.PromptDelta)) {
 		return storage.ReflectionStateMutation{}, errors.New("reflection persona proposal contains secret-like material")
 	}
@@ -244,7 +272,7 @@ func reflectionMutation(result reflection.ReflectionResult, current reflectionDo
 		}
 	}
 	mutation := storage.ReflectionStateMutation{}
-	if result.Proposal.Persona != nil {
+	if result.Proposal.Persona != nil && !policy.FieldLocked("mutable_persona") {
 		next := current.persona
 		next.Version = result.State.Persona.Version
 		next.RevisionID = ""
@@ -260,7 +288,7 @@ func reflectionMutation(result reflection.ReflectionResult, current reflectionDo
 		next.AuthorRunID, next.UpdatedAt = result.RunID, result.FinishedAt
 		mutation.Persona, mutation.ExpectedPersona = &next, current.persona.Version
 	}
-	if result.Proposal.Relationship != nil {
+	if result.Proposal.Relationship != nil && !policy.FieldLocked("relationship") {
 		next := current.relationship
 		next.Version = result.State.Relationship.Version
 		next.RevisionID = ""
@@ -274,7 +302,7 @@ func reflectionMutation(result reflection.ReflectionResult, current reflectionDo
 		next.AuthorRunID, next.UpdatedAt = result.RunID, result.FinishedAt
 		mutation.Relationship, mutation.ExpectedRelationship = &next, current.relationship.Version
 	}
-	if result.Proposal.Affect != nil || result.CanPersistAffectDecay() {
+	if (result.Proposal.Affect != nil || result.CanPersistAffectDecay()) && !policy.FieldLocked("affect") {
 		next := current.affect
 		next.Version = current.affect.Version + 1
 		next.RevisionID = ""
@@ -323,7 +351,7 @@ func reflectionMutation(result reflection.ReflectionResult, current reflectionDo
 		}
 	}
 	if mutation.Persona == nil && mutation.Relationship == nil && mutation.Affect == nil {
-		return storage.ReflectionStateMutation{}, errors.New("reflection result contains no mutable targets")
+		return storage.ReflectionStateMutation{}, domain.ErrNotPermitted
 	}
 	return mutation, nil
 }

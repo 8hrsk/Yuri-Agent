@@ -146,6 +146,9 @@ type CreateAgentEvolutionPolicyInput struct {
 	TraitBounds               map[string]CreateAgentNumericRangeInput `json:"traitBounds"`
 	ReflectionMode            string                                  `json:"reflectionMode"`
 	ReflectionCooldownMinutes int                                     `json:"reflectionCooldownMinutes"`
+	ReflectionMaxTokens       int64                                   `json:"reflectionMaxTokens"`
+	ReflectionMaxDurationSecs int                                     `json:"reflectionMaxDurationSeconds"`
+	ReflectionMaxEvidence     int                                     `json:"reflectionMaxEvidence"`
 }
 
 func (input CreateAgentPersonalizationInput) domainValues() (domain.IdentityPersonalization, domain.CommunicationStyle, domain.EmotionalDynamics, domain.RelationshipSeed, domain.StructuredBackstory, domain.PersonalizationEvolutionPolicy) {
@@ -198,6 +201,18 @@ func (input CreateAgentPersonalizationInput) domainValues() (domain.IdentityPers
 	policy := domain.PersonalizationEvolutionPolicy{
 		LockedFields: append([]string(nil), input.EvolutionPolicy.LockedFields...), TraitBounds: bounds,
 		ReflectionMode: reflectionMode, ReflectionCooldownMinutes: reflectionCooldownMinutes,
+		ReflectionMaxTokens:       input.EvolutionPolicy.ReflectionMaxTokens,
+		ReflectionMaxDurationSecs: input.EvolutionPolicy.ReflectionMaxDurationSecs,
+		ReflectionMaxEvidence:     input.EvolutionPolicy.ReflectionMaxEvidence,
+	}
+	if policy.ReflectionMaxTokens == 0 {
+		policy.ReflectionMaxTokens = 2_500
+	}
+	if policy.ReflectionMaxDurationSecs == 0 {
+		policy.ReflectionMaxDurationSecs = 60
+	}
+	if policy.ReflectionMaxEvidence == 0 {
+		policy.ReflectionMaxEvidence = 8
 	}
 	return identity, style, dynamics, relationship, backstory, policy
 }

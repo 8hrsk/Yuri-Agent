@@ -22,7 +22,7 @@ const ownerSeed: AgentPersonalizationProfile = {
   operation: 'owner_create', reason: 'initial owner seed', createdAt: activeAgent.createdAt, updatedAt: activeAgent.updatedAt,
   temperament: { ...defaultAgentDraft.traits },
 }
-const updateActiveAgentPersonalization = vi.fn(async () => ({ ...ownerSeed, version: 2, revisionId: 'seed-2' }))
+const updateActiveAgentPersonalization = vi.fn(async (input: { personalization: AgentPersonalizationProfile }) => ({ ...ownerSeed, ...clonePersonalization(input.personalization), version: 2, revisionId: 'seed-2' }))
 
 const clientStub = {
   mode: 'mock',
@@ -101,5 +101,26 @@ describe('Personality and Relationship are two destinations, not one page', () =
       reason: 'Сделать исходный стиль мягче',
     }))
     expect(await screen.findByText(/Owner baseline сохранён как revision v2/)).toBeInTheDocument()
+  })
+
+  it('saves per-agent reflection budget and layer locks as one owner revision', async () => {
+    const user = userEvent.setup()
+    updateActiveAgentPersonalization.mockClear()
+    render(<PersonaRelationshipView section="personality" />)
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Границы развития' })).toBeInTheDocument())
+
+    const tokenBudget = screen.getByRole('spinbutton', { name: 'Token budget рефлексии' })
+    await user.clear(tokenBudget)
+    await user.type(tokenBudget, '1800')
+    await user.click(screen.getByRole('checkbox', { name: /Mutable persona/ }))
+    await user.click(screen.getByRole('button', { name: /Сохранить policy revision/ }))
+
+    await waitFor(() => expect(updateActiveAgentPersonalization).toHaveBeenCalledTimes(1))
+    expect(updateActiveAgentPersonalization).toHaveBeenCalledWith(expect.objectContaining({
+      expectedVersion: 1,
+      reason: 'Владелец обновил policy развития агента',
+      personalization: expect.objectContaining({ evolutionPolicy: expect.objectContaining({ reflectionMaxTokens: 1800, lockedFields: expect.arrayContaining(['identity', 'backstory', 'mutable_persona']) }) }),
+    }))
+    expect(await screen.findByText(/Evolution policy сохранена как owner revision v2/)).toBeInTheDocument()
   })
 })

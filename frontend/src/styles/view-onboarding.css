@@ -738,6 +738,12 @@
   background: rgba(0, 0, 0, 0.1);
 }
 
+.agent-reflection-budget {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .onboarding-form .agent-reflection-toggle {
   display: flex;
   align-items: center;
@@ -1025,6 +1031,7 @@
   .agent-traits__grid,
   .agent-trigger-grid,
   .agent-reflection-controls,
+  .agent-reflection-budget,
   .agent-review,
   .agent-preview__heading,
   .agent-preview__grid {

@@ -148,7 +148,7 @@ func (b *Bridge) reflectOnPeerDialogue(ctx context.Context, backend agent.ModelB
 	config := reflection.DefaultConfig()
 	config.Analyzer, config.Coordinator, config.Cooldown = modelAnalyzer, b.reflectionRuns, 0
 	config.MaxDelta, config.MinimumEvidence, config.MinimumEvidenceWeight = .08, 1, .5
-	config.Budget = reflection.ReflectionBudget{MaxDuration: 45 * time.Second, MaxTokens: 1_200, MaxInputBytes: 32 * 1024, MaxOutputBytes: 8 * 1024, MaxEvidence: 8}
+	config.Budget = reflectionBudgetForPolicy(personalization.EvolutionPolicy, reflection.ReflectionBudget{MaxDuration: 45 * time.Second, MaxTokens: 1_200, MaxInputBytes: 32 * 1024, MaxOutputBytes: 8 * 1024, MaxEvidence: 8})
 	config.TraitRanges = rangesFor(persona.Traits, 0, 1)
 	config.RelationshipRanges = rangesFor(relationship.Dimensions, 0, 1)
 	config.AffectRanges = rangesFor(affectValues(affect), 0, 1)
@@ -191,14 +191,14 @@ func (b *Bridge) reflectOnPeerDialogue(ctx context.Context, backend agent.ModelB
 			}
 		}
 	}
-	mutation, err := peerSocialMutation(result, relationship, affect, evidence, dialogue, observerID, subjectID)
+	mutation, err := peerSocialMutation(result, relationship, affect, evidence, dialogue, observerID, subjectID, personalization.EvolutionPolicy)
 	if err != nil {
 		return false, err
 	}
 	if err := b.repositories.PeerSocial.Apply(ctx, mutation); err != nil {
 		return false, err
 	}
-	return result.Changed() || result.CanPersistAffectDecay(), nil
+	return mutation.Relationship != nil || mutation.Affect != nil, nil
 }
 
 func peerSocialEvidence(messages []domain.PeerDialogueMessage) []reflection.Evidence {
@@ -218,7 +218,11 @@ func peerSocialReflectionRunID(dialogueID, observerID domain.ID) domain.ID {
 	return domain.ID("reflection_peer_" + hex.EncodeToString(digest[:12]))
 }
 
-func peerSocialMutation(result reflection.ReflectionResult, currentRelationship domain.RelationshipState, currentAffect domain.AffectiveState, evidence []reflection.Evidence, dialogue domain.PeerDialogue, observerID, subjectID domain.ID) (storage.PeerSocialMutation, error) {
+func peerSocialMutation(result reflection.ReflectionResult, currentRelationship domain.RelationshipState, currentAffect domain.AffectiveState, evidence []reflection.Evidence, dialogue domain.PeerDialogue, observerID, subjectID domain.ID, policies ...domain.PersonalizationEvolutionPolicy) (storage.PeerSocialMutation, error) {
+	policy := domain.PersonalizationEvolutionPolicy{}
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
 	record := storage.PeerSocialReflectionRecord{DialogueID: dialogue.ID, ObserverAgentID: observerID, SubjectAgentID: subjectID, Outcome: string(result.Outcome), Reason: result.Proposal.Reason, CreatedAt: result.FinishedAt}
 	mutation := storage.PeerSocialMutation{Record: record}
 	if !result.Changed() && !result.CanPersistAffectDecay() {
@@ -241,7 +245,7 @@ func peerSocialMutation(result reflection.ReflectionResult, currentRelationship 
 			addEvidenceLink(links, link)
 		}
 	}
-	if result.Proposal.Relationship != nil {
+	if result.Proposal.Relationship != nil && !policy.FieldLocked("relationship") {
 		next := currentRelationship
 		next.Version, next.RevisionID, next.ParentID, next.ParentVersion = result.State.Relationship.Version, "", currentRelationship.RevisionID, currentRelationship.Version
 		next.Operation, next.Dimensions = domain.RelationshipOperationUpdate, copyFloatMap(result.State.Relationship.Dimensions)
@@ -250,7 +254,7 @@ func peerSocialMutation(result reflection.ReflectionResult, currentRelationship 
 		next.AuthorRunID, next.UpdatedAt = result.RunID, result.FinishedAt
 		mutation.Relationship, mutation.ExpectedRelationship = &next, currentRelationship.Version
 	}
-	if result.Proposal.Affect != nil || result.CanPersistAffectDecay() {
+	if (result.Proposal.Affect != nil || result.CanPersistAffectDecay()) && !policy.FieldLocked("affect") {
 		next := currentAffect
 		next.Version, next.RevisionID, next.ParentID, next.ParentVersion = currentAffect.Version+1, "", currentAffect.RevisionID, currentAffect.Version
 		next.Operation, next.Emotions, next.Dimensions, next.Values = domain.AffectOperationUpdate, copyFloatMap(result.State.Affect.Dimensions), nil, nil

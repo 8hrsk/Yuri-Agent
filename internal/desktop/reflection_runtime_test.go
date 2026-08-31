@@ -182,6 +182,52 @@ func TestReflectOnTurnRespectsPerAgentReflectionMode(t *testing.T) {
 	}
 }
 
+func TestReflectionBudgetForPolicyUsesOverridesAndLegacyFallback(t *testing.T) {
+	fallback := reflection.ReflectionBudget{MaxDuration: 45 * time.Second, MaxTokens: 1_200, MaxInputBytes: 32, MaxOutputBytes: 16, MaxEvidence: 8}
+	legacy := reflectionBudgetForPolicy(domain.PersonalizationEvolutionPolicy{}, fallback)
+	if legacy != fallback {
+		t.Fatalf("legacy reflection budget = %#v, want %#v", legacy, fallback)
+	}
+	custom := reflectionBudgetForPolicy(domain.PersonalizationEvolutionPolicy{
+		ReflectionMaxTokens: 900, ReflectionMaxDurationSecs: 30, ReflectionMaxEvidence: 4,
+	}, fallback)
+	if custom.MaxTokens != 900 || custom.MaxDuration != 30*time.Second || custom.MaxEvidence != 4 || custom.MaxInputBytes != 32 || custom.MaxOutputBytes != 16 {
+		t.Fatalf("custom reflection budget = %#v", custom)
+	}
+}
+
+func TestReflectOnTurnRespectsVersionedLayerLocks(t *testing.T) {
+	bridge := newPersonalityTestBridge(t)
+	bridge.reflectionRuns = reflection.NewCoordinator()
+	seed, err := bridge.repositories.Personalization.Get(context.Background(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed.Version++
+	seed.RevisionID = ""
+	seed.Operation = domain.PersonalizationOperationUpdate
+	seed.EvolutionPolicy.LockedFields = append(seed.EvolutionPolicy.LockedFields, "mutable_persona", "relationship", "affect")
+	seed.Reason = "owner locked every mutable reflection layer"
+	seed.UpdatedAt = seed.UpdatedAt.Add(time.Second)
+	if _, err = bridge.repositories.Personalization.AppendVersion(context.Background(), seed, seed.Version-1); err != nil {
+		t.Fatal(err)
+	}
+	provider := &reflectionBackendStub{events: []agent.ModelEvent{
+		{Type: agent.ModelEventTextDelta, Delta: `{"outcome":"changed","reason":"candidate","evidence_ids":["message"],"persona":{"traits":{"warmth":0.05},"reason":"candidate","confidence":0.8},"relationship":{"dimensions":{"trust":0.05},"reason":"candidate","confidence":0.8},"affect":{"dimensions":{"joy":0.05},"reason":"candidate","confidence":0.8}}`},
+		{Type: agent.ModelEventCompleted},
+	}}
+	bridge.reflectOnTurn(context.Background(), provider, "test", memory.Turn{
+		RunID: "run-locked-layers", ConversationID: "conversation", Now: seed.UpdatedAt.Add(time.Minute),
+		Messages: []memory.TranscriptMessage{{ID: "message", Role: string(agent.RoleUser), Content: "Спасибо", CreatedAt: seed.UpdatedAt.Add(time.Minute)}},
+	})
+	persona, _ := bridge.repositories.Persona.Get(context.Background(), "owner")
+	relationship, _ := bridge.repositories.Relationship.Get(context.Background(), "owner")
+	affect, _ := bridge.repositories.Affect.Get(context.Background(), "owner")
+	if persona.Version != 1 || relationship.Version != 1 || affect.Version != 1 {
+		t.Fatalf("locked reflection persisted state: persona=%d relationship=%d affect=%d", persona.Version, relationship.Version, affect.Version)
+	}
+}
+
 func TestReflectOnTurnPersistsDecayWhenAnalyzerReturnsNoChange(t *testing.T) {
 	bridge := newPersonalityTestBridge(t)
 	bridge.reflectionRuns = reflection.NewCoordinator()

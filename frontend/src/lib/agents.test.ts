@@ -93,7 +93,7 @@ describe('agent profile contracts', () => {
       emotional_dynamics: { reactivity: 0.75, conflict_style: 'direct', triggers: { fear: ['темнота'] } },
       relationship_seed: { preset: 'friends', dimensions: { trust: 0.8 }, summary: 'Давние друзья.' },
       backstory: { narrative: 'Помнит старый маяк.', summary: 'Архивистка.', episodes: [{ id: 'lighthouse', content: 'Нашла карту.', emotional_valence: 0.4 }] },
-      evolution_policy: { locked_fields: ['identity'], trait_bounds: { warmth: { min: 0.4, max: 1 } }, reflection_mode: 'disabled', reflection_cooldown_minutes: 90 },
+      evolution_policy: { locked_fields: ['identity'], trait_bounds: { warmth: { min: 0.4, max: 1 } }, reflection_mode: 'disabled', reflection_cooldown_minutes: 90, reflection_max_tokens: 1800, reflection_max_duration_seconds: 45, reflection_max_evidence: 6 },
       created_at: '2026-08-31T10:00:00Z', updated_at: '2026-08-31T11:00:00Z',
     })
 
@@ -102,7 +102,7 @@ describe('agent profile contracts', () => {
     expect(profile?.temperament).toMatchObject({ warmth: 0.8, fearfulness: 0.65 })
     expect(profile?.emotionalDynamics).toMatchObject({ conflictStyle: 'direct', triggers: { fear: ['темнота'] } })
     expect(profile?.structuredBackstory.episodes[0]).toMatchObject({ id: 'lighthouse', content: 'Нашла карту.', emotionalValence: 0.4 })
-    expect(profile?.evolutionPolicy).toMatchObject({ reflectionMode: 'disabled', reflectionCooldownMinutes: 90 })
+    expect(profile?.evolutionPolicy).toMatchObject({ reflectionMode: 'disabled', reflectionCooldownMinutes: 90, reflectionMaxTokens: 1800, reflectionMaxDurationSeconds: 45, reflectionMaxEvidence: 6 })
   })
 
   it('validates owner-controlled identity fields', () => {

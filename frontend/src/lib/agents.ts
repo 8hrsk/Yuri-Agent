@@ -88,6 +88,9 @@ export const defaultAgentPersonalization: AgentPersonalizationInput = {
     traitBounds: Object.fromEntries(Object.keys(defaultAgentTraits).map((trait) => [trait, { min: 0, max: 1 }])),
     reflectionMode: 'enabled',
     reflectionCooldownMinutes: 60,
+    reflectionMaxTokens: 2_500,
+    reflectionMaxDurationSeconds: 60,
+    reflectionMaxEvidence: 8,
   },
 }
 
@@ -331,6 +334,9 @@ function normalizePersonalizationInput(value: unknown, fallback: AgentPersonaliz
       traitBounds: Object.keys(traitBounds).length > 0 ? traitBounds : Object.fromEntries(Object.entries(fallback.evolutionPolicy.traitBounds).map(([trait, bounds]) => [trait, { ...bounds }])),
       reflectionMode: (stringValue(policy, fallback.evolutionPolicy.reflectionMode, 'reflectionMode', 'reflection_mode') === 'disabled' ? 'disabled' : 'enabled'),
       reflectionCooldownMinutes: Math.max(1, Math.min(7 * 24 * 60, integerValue(policy, fallback.evolutionPolicy.reflectionCooldownMinutes, 'reflectionCooldownMinutes', 'reflection_cooldown_minutes'))),
+      reflectionMaxTokens: Math.max(256, Math.min(10_000, integerValue(policy, fallback.evolutionPolicy.reflectionMaxTokens, 'reflectionMaxTokens', 'reflection_max_tokens'))),
+      reflectionMaxDurationSeconds: Math.max(5, Math.min(120, integerValue(policy, fallback.evolutionPolicy.reflectionMaxDurationSeconds, 'reflectionMaxDurationSeconds', 'reflection_max_duration_seconds'))),
+      reflectionMaxEvidence: Math.max(1, Math.min(32, integerValue(policy, fallback.evolutionPolicy.reflectionMaxEvidence, 'reflectionMaxEvidence', 'reflection_max_evidence'))),
     },
   }
 }

@@ -4,6 +4,7 @@ import { createStarterPersonalitySnapshot, createYuriClient, normalizePersonalit
 import { clonePersonalization } from '../lib/agents'
 import type {
   AffectiveDimension,
+  AgentEvolutionPolicy,
   AgentPersonalizationProfile,
   AgentProfile,
   AgentProfileInput,
@@ -33,7 +34,7 @@ type PersonaRelationshipViewProps = {
 }
 
 type Feedback = { kind: 'success' | 'error'; text: string }
-type BusyAction = 'loading' | 'evolution' | 'pin' | 'rollback' | 'reset' | 'seed' | undefined
+type BusyAction = 'loading' | 'evolution' | 'policy' | 'pin' | 'rollback' | 'reset' | 'seed' | undefined
 
 function ownerSeedDraft(agent: AgentProfile, seed: AgentPersonalizationProfile): AgentProfileInput {
   return {
@@ -150,14 +151,14 @@ function RelationshipVersionItem({ version, currentVersion, labels, onRollback, 
   </article>
 }
 
-function SnapshotHeader({ snapshot, busy, onEvolution }: { snapshot: PersonalitySnapshot; busy: boolean; onEvolution: () => void }) {
+function SnapshotHeader({ snapshot }: { snapshot: PersonalitySnapshot }) {
   const mood = dominantAffectMood(snapshot.affect)
   const moodClass = `persona-mood persona-mood--${mood}`
   return <section className="persona-overview">
     <div className="persona-profile-card">
       <div className="persona-profile-card__heading"><div><span className="section-heading__overline">MUTABLE PERSONA</span><h2>Профиль Yuri</h2></div><span className="persona-version-chip">v{snapshot.currentVersion}</span></div>
       <div className="persona-profile-card__body"><YuriAvatar affect={snapshot.affect} label={`Yuri · ${snapshot.affect.mood}`} size="lg" state="idle" /><div className="persona-profile-card__copy"><strong>Версия {snapshot.currentVersion}</strong><p>Traits ограничены диапазонами и меняются только через versioned reflection. Identity seed и policy остаются неизменными.</p><span className="persona-profile-card__updated">Последняя рефлексия · {formatDate(snapshot.lastReflectionAt)}</span></div></div>
-      <label className="persona-evolution-toggle"><button aria-checked={snapshot.autoEvolution} className={snapshot.autoEvolution ? 'toggle toggle--on' : 'toggle'} disabled={busy} onClick={onEvolution} role="switch" type="button"><i /></button><span><strong>Автоэволюция личности</strong><small>{snapshot.autoEvolution ? 'Bounded reflection может предложить новые версии.' : 'Новые версии создаются только вручную.'}</small></span><span className={snapshot.autoEvolution ? 'persona-evolution-toggle__status persona-evolution-toggle__status--on' : 'persona-evolution-toggle__status'}>{snapshot.autoEvolution ? 'ON' : 'OFF'}</span></label>
+      <div className="persona-profile-card__policy-status"><span>Reflection runtime</span><strong>{snapshot.autoEvolution ? 'global ON' : 'global OFF'}</strong></div>
     </div>
     <div className="persona-mood-card">
       <div className="persona-mood-card__heading"><div><span className="section-heading__overline">AFFECTIVE STATE</span><h2>Настроение</h2></div><YuriAvatar affect={snapshot.affect} label={`Аффект: ${snapshot.affect.mood}`} size="sm" state="idle" /></div>
@@ -166,6 +167,43 @@ function SnapshotHeader({ snapshot, busy, onEvolution }: { snapshot: Personality
       <div className="persona-mood__bounds"><span>negative</span><span>positive</span></div>
       <p>Это моделируемое внутреннее состояние персонажа, а не утверждение о сознании модели. Affect не влияет на разрешения и security policy.</p>
     </div>
+  </section>
+}
+
+const evolutionLayerLocks = [
+  { id: 'mutable_persona', label: 'Mutable persona', detail: 'Черты и развиваемый prompt' },
+  { id: 'relationship', label: 'Relationship', detail: 'Связь и субъективные мнения' },
+  { id: 'affect', label: 'Current affect', detail: 'Реакции и их затухание' },
+] as const
+
+function EvolutionPolicyPanel({ globalEnabled, policy, busy, onChange, onGlobalToggle, onSave }: {
+  globalEnabled: boolean
+  policy: AgentEvolutionPolicy
+  busy: boolean
+  onChange: (policy: AgentEvolutionPolicy) => void
+  onGlobalToggle: () => void
+  onSave: () => void
+}) {
+  const update = (partial: Partial<AgentEvolutionPolicy>) => onChange({ ...policy, ...partial })
+  const budgetValid = policy.reflectionCooldownMinutes >= 1 && policy.reflectionMaxTokens >= 256 && policy.reflectionMaxDurationSeconds >= 5 && policy.reflectionMaxEvidence >= 1
+  const toggleLock = (field: string) => {
+    const core = policy.lockedFields.filter((item) => item !== field)
+    update({ lockedFields: policy.lockedFields.includes(field) ? core : [...core, field] })
+  }
+  return <section aria-labelledby="evolution-policy-title" className="evolution-policy-panel">
+    <header><div><span className="section-heading__overline">VERSIONED EVOLUTION POLICY</span><h2 id="evolution-policy-title">Границы развития</h2><p>Global switch останавливает рефлексию всей установки. Остальные параметры принадлежат только активному агенту и сохраняются новой owner revision.</p></div><span className="owner-seed-editor__version">per-agent</span></header>
+    <div className="evolution-policy-panel__switches">
+      <label className="persona-evolution-toggle"><button aria-checked={globalEnabled} className={globalEnabled ? 'toggle toggle--on' : 'toggle'} disabled={busy} onClick={onGlobalToggle} role="switch" type="button"><i /></button><span><strong>Глобальный master switch</strong><small>Аварийно отключает background reflection для всех агентов.</small></span><span className={globalEnabled ? 'persona-evolution-toggle__status persona-evolution-toggle__status--on' : 'persona-evolution-toggle__status'}>{globalEnabled ? 'ON' : 'OFF'}</span></label>
+      <label className="persona-evolution-toggle"><input checked={policy.reflectionMode === 'enabled'} disabled={busy} onChange={(event) => update({ reflectionMode: event.target.checked ? 'enabled' : 'disabled' })} type="checkbox" /><span><strong>Рефлексия этого агента</strong><small>Per-agent разрешение внутри глобального ограничения.</small></span><span className={policy.reflectionMode === 'enabled' ? 'persona-evolution-toggle__status persona-evolution-toggle__status--on' : 'persona-evolution-toggle__status'}>{policy.reflectionMode === 'enabled' ? 'ON' : 'OFF'}</span></label>
+    </div>
+    <div className="evolution-policy-panel__budgets">
+      <label><span>Cooldown <small>минуты</small></span><input aria-label="Cooldown рефлексии" disabled={busy} max={10080} min={1} onBlur={() => policy.reflectionCooldownMinutes < 1 && update({ reflectionCooldownMinutes: 1 })} onChange={(event) => update({ reflectionCooldownMinutes: Math.max(0, Math.min(10080, Number(event.target.value) || 0)) })} type="number" value={policy.reflectionCooldownMinutes} /></label>
+      <label><span>Token budget <small>на run</small></span><input aria-label="Token budget рефлексии" disabled={busy} max={10000} min={256} onBlur={() => policy.reflectionMaxTokens < 256 && update({ reflectionMaxTokens: 256 })} onChange={(event) => update({ reflectionMaxTokens: Math.max(0, Math.min(10000, Number(event.target.value) || 0)) })} type="number" value={policy.reflectionMaxTokens} /></label>
+      <label><span>Timeout <small>секунды</small></span><input aria-label="Timeout рефлексии" disabled={busy} max={120} min={5} onBlur={() => policy.reflectionMaxDurationSeconds < 5 && update({ reflectionMaxDurationSeconds: 5 })} onChange={(event) => update({ reflectionMaxDurationSeconds: Math.max(0, Math.min(120, Number(event.target.value) || 0)) })} type="number" value={policy.reflectionMaxDurationSeconds} /></label>
+      <label><span>Evidence <small>максимум</small></span><input aria-label="Evidence budget рефлексии" disabled={busy} max={32} min={1} onBlur={() => policy.reflectionMaxEvidence < 1 && update({ reflectionMaxEvidence: 1 })} onChange={(event) => update({ reflectionMaxEvidence: Math.max(0, Math.min(32, Number(event.target.value) || 0)) })} type="number" value={policy.reflectionMaxEvidence} /></label>
+    </div>
+    <fieldset className="evolution-policy-panel__locks"><legend>Заблокировать слои от фоновых изменений</legend>{evolutionLayerLocks.map((lock) => <label key={lock.id}><input checked={policy.lockedFields.includes(lock.id)} disabled={busy} onChange={() => toggleLock(lock.id)} type="checkbox" /><span><strong>{lock.label}</strong><small>{lock.detail}</small></span></label>)}</fieldset>
+    <footer><p>Identity и backstory всегда owner-only. Lock влияет и на обычную, и на межагентную рефлексию.</p><button className="button button--accent" disabled={busy || !budgetValid} onClick={onSave} type="button"><Icon name="check" width={14} height={14} /> Сохранить policy revision</button></footer>
   </section>
 }
 
@@ -191,6 +229,7 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
   const [seedDraft, setSeedDraft] = useState<AgentProfileInput>()
   const [seedEditorOpen, setSeedEditorOpen] = useState(false)
   const [seedReason, setSeedReason] = useState('')
+  const [evolutionPolicy, setEvolutionPolicy] = useState<AgentEvolutionPolicy>()
 
   const load = useCallback(async () => {
     setBusy('loading')
@@ -204,6 +243,7 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
       setSnapshot(normalizePersonalitySnapshot(nextSnapshot))
       setActiveAgent(agent)
       setOwnerSeed(seed)
+      if (seed) setEvolutionPolicy({ ...seed.evolutionPolicy, lockedFields: [...seed.evolutionPolicy.lockedFields], traitBounds: { ...seed.evolutionPolicy.traitBounds } })
       if (agent && seed) setSeedDraft((current) => current ?? ownerSeedDraft(agent, seed))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Не удалось загрузить состояние личности.')
@@ -326,6 +366,25 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
     }
   }
 
+  const saveEvolutionPolicy = async () => {
+    if (!ownerSeed || !activeAgent || !evolutionPolicy) return
+    setBusy('policy')
+    setFeedback(undefined)
+    try {
+      const draft = ownerSeedDraft(activeAgent, ownerSeed)
+      draft.personalization.evolutionPolicy = { ...evolutionPolicy, lockedFields: [...evolutionPolicy.lockedFields], traitBounds: { ...evolutionPolicy.traitBounds } }
+      const next = await client.updateActiveAgentPersonalization({ expectedVersion: ownerSeed.version, traits: { ...draft.traits }, personalization: draft.personalization, reason: 'Владелец обновил policy развития агента' })
+      setOwnerSeed(next)
+      setEvolutionPolicy({ ...next.evolutionPolicy, lockedFields: [...next.evolutionPolicy.lockedFields], traitBounds: { ...next.evolutionPolicy.traitBounds } })
+      setSeedDraft(ownerSeedDraft(activeAgent, next))
+      setFeedback({ kind: 'success', text: `Evolution policy сохранена как owner revision v${next.version}.` })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось сохранить evolution policy.' })
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const versions = useMemo(() => [...snapshot.versions].sort((a, b) => b.version - a.version), [snapshot.versions])
   const relationshipVersions = useMemo(() => [...snapshot.relationship.versions].sort((a, b) => b.version - a.version), [snapshot.relationship.versions])
   const relationshipLabels = useMemo(() => Object.fromEntries(snapshot.relationship.dimensions.map((dimension) => [dimension.id, dimension.label])), [snapshot.relationship.dimensions])
@@ -380,7 +439,9 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
     {loading && <div className="persona-loading" role="status"><span className="memory-spinner" /> {relationship ? 'Загружаю состояние связи…' : 'Загружаю состояние личности…'}</div>}
     {error && <div className="tasks-feedback tasks-feedback--error" role="alert"><Icon name="warning" width={14} height={14} /> {error}<button aria-label="Закрыть ошибку" className="icon-button icon-button--small" onClick={() => setError(undefined)} type="button"><Icon name="x" width={13} height={13} /></button></div>}
 
-    {!relationship && <SnapshotHeader busy={busy !== undefined} onEvolution={() => void toggleAutoEvolution()} snapshot={snapshot} />}
+    {!relationship && evolutionPolicy && <EvolutionPolicyPanel busy={busy !== undefined} globalEnabled={snapshot.autoEvolution} onChange={setEvolutionPolicy} onGlobalToggle={() => void toggleAutoEvolution()} onSave={() => void saveEvolutionPolicy()} policy={evolutionPolicy} />}
+
+    {!relationship && <SnapshotHeader snapshot={snapshot} />}
 
     <div className="persona-grid">
       <main className="persona-main">

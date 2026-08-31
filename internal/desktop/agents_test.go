@@ -232,6 +232,8 @@ func updatePersonalizationInputFromSeed(seed domain.PersonalizationSeed) UpdateA
 			EvolutionPolicy: CreateAgentEvolutionPolicyInput{
 				LockedFields: seed.EvolutionPolicy.LockedFields, TraitBounds: bounds,
 				ReflectionMode: string(seed.EvolutionPolicy.ReflectionMode), ReflectionCooldownMinutes: seed.EvolutionPolicy.ReflectionCooldownMinutes,
+				ReflectionMaxTokens: seed.EvolutionPolicy.ReflectionMaxTokens, ReflectionMaxDurationSecs: seed.EvolutionPolicy.ReflectionMaxDurationSecs,
+				ReflectionMaxEvidence: seed.EvolutionPolicy.ReflectionMaxEvidence,
 			},
 		},
 	}

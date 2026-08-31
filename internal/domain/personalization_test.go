@@ -34,6 +34,9 @@ func TestNewPersonalizationSeedPreservesLegacyTraitsAndIdentity(t *testing.T) {
 	if !seed.EvolutionPolicy.ReflectionEnabled(false) || seed.EvolutionPolicy.ReflectionCooldown(5*time.Minute) != time.Hour {
 		t.Fatalf("default per-agent reflection policy = %#v", seed.EvolutionPolicy)
 	}
+	if seed.EvolutionPolicy.ReflectionMaxTokens != 2_500 || seed.EvolutionPolicy.ReflectionMaxDurationSecs != 60 || seed.EvolutionPolicy.ReflectionMaxEvidence != 8 {
+		t.Fatalf("default reflection budget = %#v", seed.EvolutionPolicy)
+	}
 }
 
 func TestTemperamentRoundTripsTraitMap(t *testing.T) {
@@ -77,6 +80,9 @@ func TestPersonalizationSeedRejectsUnsafeOrInvalidState(t *testing.T) {
 		}},
 		{name: "reflection mode", mutate: func(seed *PersonalizationSeed) { seed.EvolutionPolicy.ReflectionMode = "always" }},
 		{name: "reflection cooldown", mutate: func(seed *PersonalizationSeed) { seed.EvolutionPolicy.ReflectionCooldownMinutes = 10081 }},
+		{name: "reflection tokens", mutate: func(seed *PersonalizationSeed) { seed.EvolutionPolicy.ReflectionMaxTokens = 255 }},
+		{name: "reflection duration", mutate: func(seed *PersonalizationSeed) { seed.EvolutionPolicy.ReflectionMaxDurationSecs = 121 }},
+		{name: "reflection evidence", mutate: func(seed *PersonalizationSeed) { seed.EvolutionPolicy.ReflectionMaxEvidence = 33 }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
