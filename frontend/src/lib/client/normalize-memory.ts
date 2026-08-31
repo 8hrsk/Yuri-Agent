@@ -1,6 +1,7 @@
 import type {
   ArchiveSearchResponse,
   ArchiveSearchResult,
+  FictionProvenance,
   MemoryContentKind,
   MemoryKind,
   MemoryLifecycleState,
@@ -32,6 +33,11 @@ function normalizeMemoryLifecycle(value: unknown): MemoryLifecycleState {
   if (state === 'forgotten') return 'dormant'
   if (state === 'active' || state === 'dormant' || state === 'deleted') return state
   return 'active'
+}
+
+function normalizeFictionProvenance(value: unknown): FictionProvenance | undefined {
+  const provenance = String(value ?? '')
+  return provenance === 'owner_seed' || provenance === 'interpreted' || provenance === 'uncertain' ? provenance : undefined
 }
 
 function normalizeMemorySource(value: unknown): MemorySource | undefined {
@@ -79,8 +85,8 @@ function normalizeMemory(value: unknown): MemoryRecord | undefined {
   }
   const valenceValue = source.valence === undefined ? undefined : Number(source.valence)
   const rawFiction = source.fiction && typeof source.fiction === 'object' ? source.fiction as UnknownRecord : undefined
-  const provenance = String(rawFiction?.provenance ?? '')
-  const fiction = rawFiction && (provenance === 'owner_seed' || provenance === 'interpreted' || provenance === 'uncertain')
+  const provenance = normalizeFictionProvenance(rawFiction?.provenance)
+  const fiction = rawFiction && provenance
     ? {
         provenance,
         recallState: rawFiction.recallState === 'remembered' || rawFiction.recall_state === 'remembered' ? 'remembered' as const : undefined,

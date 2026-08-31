@@ -4,6 +4,8 @@ import type {
   ApprovalDecision,
   AgentProfile,
   AgentProfileInput,
+  PersonalityPreview,
+  PersonalityPreviewScenario,
   AgentPersonalizationProfile,
   ArchiveSearchRequest,
   ArchiveSearchResponse,
@@ -295,6 +297,10 @@ class WailsYuriClient implements YuriClient {
     const result = normalizeAgentProfile(await callBridge<unknown>(['CreateAgent', 'CreateAgentProfile'], [input]))
     if (!result) throw new Error('Backend не вернул созданного агента.')
     return result
+  }
+
+  async previewAgentPersonality(input: AgentProfileInput, scenario: PersonalityPreviewScenario): Promise<PersonalityPreview | undefined> {
+    return await callBridge<PersonalityPreview>(['PreviewAgentPersonality'], [{ profile: input, scenario }])
   }
 
   async setActiveAgent(agentId: string): Promise<AgentProfile> {

@@ -129,3 +129,29 @@ export interface AgentProfileInput {
   creationMode: AgentCreationMode
   presetId: string
 }
+
+export type PersonalityPreviewScenario =
+  | 'introduction'
+  | 'disagreement'
+  | 'self_correction'
+  | 'praise'
+  | 'peer_praise'
+  | 'fear'
+  | 'reconciliation'
+
+export interface PersonalityPreviewInfluence {
+  layer: string
+  key: string
+  value: number
+  direction: 'low' | 'balanced' | 'high'
+}
+
+export interface PersonalityPreview {
+  scenario: PersonalityPreviewScenario
+  scenarioTitle: string
+  prompt: string
+  response: string
+  model: string
+  compilerCharacters: number
+  influences: PersonalityPreviewInfluence[]
+}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import type { AgentBackstoryEpisode, AgentProfileInput, RelationshipSeedPreset } from '../lib/contracts'
+import { createYuriClient } from '../lib/client'
+import type { AgentBackstoryEpisode, AgentProfileInput, PersonalityPreview, PersonalityPreviewScenario, RelationshipSeedPreset } from '../lib/contracts'
 import { agentPresets, applyAgentPreset, relationshipSeeds, saveAgentDraft, validateAgentDraft } from '../lib/agents'
 import { Icon } from './Icon'
 
@@ -202,14 +203,43 @@ function BackstoryStep({ value, onChange, update }: { value: AgentProfileInput; 
   return <section aria-labelledby="agent-step-backstory" className="agent-wizard__panel"><div className="agent-wizard__heading"><span>07 · FICTIONAL BACKSTORY</span><h3 id="agent-step-backstory">С каким прошлым агент начинает?</h3><p>Это художественная identity seed. Она не является фактом о пользователе, policy или основанием для permissions.</p></div><label htmlFor="agent-backstory"><span>Свободная предыстория <small>· до 12000 символов</small></span><textarea aria-describedby="agent-backstory-hint" id="agent-backstory" maxLength={12000} onChange={(event) => onChange({ ...value, backstory: event.target.value, personalization: { ...value.personalization, structuredBackstory: { ...structured, narrative: event.target.value } } })} placeholder="Прошлое, важные события и воспоминания…" rows={7} value={value.backstory} /><small className="agent-profile-form__field-hint" id="agent-backstory-hint">В каждом диалоге используется только короткое self-summary; подробности агент вспоминает выборочно. Исходный текст меняет только владелец.</small></label><label htmlFor="agent-backstory-summary"><span>Короткое self-summary <small>· до 2000 символов</small></span><textarea id="agent-backstory-summary" maxLength={2000} onChange={(event) => updateStructured({ summary: event.target.value })} rows={3} value={structured.summary} /></label><div className="agent-episodes"><div className="agent-episodes__heading"><div><strong>Ключевые эпизоды</strong><small>Они хранятся как отдельные fictional memories с provenance и извлекаются по релевантности.</small></div><button className="button button--quiet" onClick={() => updateStructured({ episodes: [...structured.episodes, emptyEpisode(structured.episodes.length)] })} type="button"><Icon name="plus" width={13} height={13} /> Добавить эпизод</button></div>{structured.episodes.map((episode, index) => <article className="agent-episode" key={episode.id}><div className="agent-episode__top"><strong>Эпизод {index + 1}</strong><button aria-label={`Удалить эпизод ${index + 1}`} onClick={() => updateStructured({ episodes: structured.episodes.filter((_, itemIndex) => itemIndex !== index) })} type="button"><Icon name="x" width={13} height={13} /></button></div><div className="agent-profile-grid"><label><span>Название</span><input maxLength={256} onChange={(event) => updateEpisode(index, { title: event.target.value })} value={episode.title} /></label><label><span>Место</span><input maxLength={256} onChange={(event) => updateEpisode(index, { place: event.target.value })} value={episode.place} /></label><label><span>Люди <small>· через запятую</small></span><input onChange={(event) => updateEpisode(index, { people: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} value={episode.people.join(', ')} /></label></div><label><span>Что произошло</span><textarea maxLength={4000} onChange={(event) => updateEpisode(index, { content: event.target.value })} rows={4} value={episode.content} /></label><ProfileSlider definition={{ id: `valence-${index}`, label: 'Эмоциональная окраска', hint: 'От болезненного воспоминания к очень приятному.', low: 'болезненно', high: 'приятно' }} onChange={(next) => updateEpisode(index, { emotionalValence: next * 2 - 1 })} value={(episode.emotionalValence + 1) / 2} /></article>)}</div></section>
 }
 
-function ReviewStep({ value }: { value: AgentProfileInput }) {
+const previewScenarios: Array<{ value: PersonalityPreviewScenario; label: string }> = [
+  { value: 'introduction', label: 'Обычное знакомство' },
+  { value: 'disagreement', label: 'Несогласие' },
+  { value: 'self_correction', label: 'Ошибка и исправление' },
+  { value: 'praise', label: 'Похвала' },
+  { value: 'peer_praise', label: 'Похвала другому агенту' },
+  { value: 'fear', label: 'Тревожная ситуация' },
+  { value: 'reconciliation', label: 'Конфликт и примирение' },
+]
+
+type PreviewSlot = 0 | 1
+
+function PreviewResultCard({ label, preview }: { label: string; preview: PersonalityPreview }) {
+  return <article className="agent-preview__result"><header><span>{label}</span><small>{preview.model}</small></header><p className="agent-preview__prompt">{preview.prompt}</p><blockquote>{preview.response}</blockquote><details><summary>Что повлияло · {preview.influences.length}</summary><div className="agent-preview__influences">{preview.influences.map((influence) => <span key={`${influence.layer}-${influence.key}`}><strong>{influence.key.replaceAll('_', ' ')}</strong><small>{influence.layer} · {influence.direction} · {Math.round(influence.value * 100)}%</small></span>)}</div></details></article>
+}
+
+function ReviewStep({ value, scenario, previews, previewBusy, previewError, onScenario, onPreview }: {
+  value: AgentProfileInput
+  scenario: PersonalityPreviewScenario
+  previews: [PersonalityPreview | undefined, PersonalityPreview | undefined]
+  previewBusy?: PreviewSlot
+  previewError?: string
+  onScenario: (scenario: PersonalityPreviewScenario) => void
+  onPreview: (slot: PreviewSlot) => void
+}) {
   const selectedPreset = agentPresets.find((preset) => preset.id === value.presetId)
   const strongestTraits = Object.entries(value.traits).sort((a, b) => b[1] - a[1]).slice(0, 8)
-  return <section aria-labelledby="agent-step-review" className="agent-wizard__panel"><div className="agent-wizard__heading"><span>08 · REVIEW</span><h3 id="agent-step-review">Проверьте будущего агента</h3><p>После создания эти значения станут owner-authored reset baseline. Mutable persona сможет меняться только в заданных пределах.</p></div><div className="agent-review"><article><span>Identity</span><strong>{value.name || 'Без имени'} · {value.age ?? 'возраст не указан'} · {value.gender}</strong><p>{value.personalization.identity.role || 'Роль не задана'} · {value.personalization.identity.pronouns || 'местоимения не заданы'} · язык {value.personalization.identity.preferredLanguage}</p></article><article><span>Образ</span><strong>{selectedPreset?.label ?? 'Свой профиль'}</strong><p>{value.preferences || 'Без короткого описания.'}</p></article><article><span>Сильнее выражены</span><div className="agent-review__chips">{strongestTraits.map(([trait, amount]) => <span key={trait}>{trait} · {levelLabel(amount)}</span>)}</div></article><article><span>Эмоциональная динамика</span><strong>{value.personalization.emotionalDynamics.conflictStyle}</strong><p>Реактивность {levelLabel(value.personalization.emotionalDynamics.reactivity)}, восстановление {levelLabel(value.personalization.emotionalDynamics.recoverySpeed)}, выражение {levelLabel(value.personalization.emotionalDynamics.expression)}.</p></article><article><span>Отношения</span><strong>{relationshipSeeds[value.personalization.relationshipSeed.preset].label}</strong><p>{value.personalization.relationshipSeed.summary}</p></article><article><span>Backstory</span><strong>{value.personalization.structuredBackstory.episodes.length} эпизодов</strong><p>{value.personalization.structuredBackstory.summary || value.backstory || 'Предыстория не задана.'}</p></article></div></section>
+  return <section aria-labelledby="agent-step-review" className="agent-wizard__panel"><div className="agent-wizard__heading"><span>08 · REVIEW</span><h3 id="agent-step-review">Проверьте будущего агента</h3><p>После создания эти значения станут owner-authored reset baseline. Mutable persona сможет меняться только в заданных пределах.</p></div><div className="agent-review"><article><span>Identity</span><strong>{value.name || 'Без имени'} · {value.age ?? 'возраст не указан'} · {value.gender}</strong><p>{value.personalization.identity.role || 'Роль не задана'} · {value.personalization.identity.pronouns || 'местоимения не заданы'} · язык {value.personalization.identity.preferredLanguage}</p></article><article><span>Образ</span><strong>{selectedPreset?.label ?? 'Свой профиль'}</strong><p>{value.preferences || 'Без короткого описания.'}</p></article><article><span>Сильнее выражены</span><div className="agent-review__chips">{strongestTraits.map(([trait, amount]) => <span key={trait}>{trait} · {levelLabel(amount)}</span>)}</div></article><article><span>Эмоциональная динамика</span><strong>{value.personalization.emotionalDynamics.conflictStyle}</strong><p>Реактивность {levelLabel(value.personalization.emotionalDynamics.reactivity)}, восстановление {levelLabel(value.personalization.emotionalDynamics.recoverySpeed)}, выражение {levelLabel(value.personalization.emotionalDynamics.expression)}.</p></article><article><span>Отношения</span><strong>{relationshipSeeds[value.personalization.relationshipSeed.preset].label}</strong><p>{value.personalization.relationshipSeed.summary}</p></article><article><span>Backstory</span><strong>{value.personalization.structuredBackstory.episodes.length} эпизодов</strong><p>{value.personalization.structuredBackstory.summary || value.backstory || 'Предыстория не задана.'}</p></article></div><section className="agent-preview" aria-labelledby="agent-preview-title"><div className="agent-preview__heading"><div><span>LIVE PERSONALITY PREVIEW</span><h4 id="agent-preview-title">Послушайте характер до создания</h4><p>Ответ генерирует выбранный provider через production Personality Compiler и расходует его quota. Preview не пишет диалоги, memory, relationship, affect или persona history.</p></div><label><span>Сценарий</span><select aria-label="Сценарий preview" onChange={(event) => onScenario(event.target.value as PersonalityPreviewScenario)} value={scenario}>{previewScenarios.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div><div className="agent-preview__actions"><button className="button button--quiet" disabled={previewBusy !== undefined} onClick={() => onPreview(0)} type="button">{previewBusy === 0 ? 'Генерирую A…' : previews[0] ? 'Обновить вариант A' : 'Сгенерировать вариант A'}</button><button className="button button--quiet" disabled={previewBusy !== undefined || !previews[0]} onClick={() => onPreview(1)} type="button">{previewBusy === 1 ? 'Генерирую B…' : previews[1] ? 'Обновить вариант B' : 'Сравнить с вариантом B'}</button></div>{previewError && <div className="agent-profile-form__validation" role="alert"><Icon name="warning" width={14} height={14} /> {previewError}</div>}<div className="agent-preview__grid">{previews[0] && <PreviewResultCard label="Вариант A" preview={previews[0]} />}{previews[1] && <PreviewResultCard label="Вариант B" preview={previews[1]} />}</div></section></section>
 }
 
 export function AgentProfileForm({ value, busy, onChange, onBack, onSubmit, submitLabel = 'Создать агента' }: AgentProfileFormProps) {
   const [step, setStep] = useState<FormStep>('identity')
+  const client = useMemo(() => createYuriClient(), [])
+  const [previewScenario, setPreviewScenario] = useState<PersonalityPreviewScenario>('introduction')
+  const [previews, setPreviews] = useState<[PersonalityPreview | undefined, PersonalityPreview | undefined]>([undefined, undefined])
+  const [previewBusy, setPreviewBusy] = useState<PreviewSlot>()
+  const [previewError, setPreviewError] = useState<string>()
   const steps = useMemo(() => value.creationMode === 'advanced' ? advancedSteps : quickSteps, [value.creationMode])
   const stepIndex = Math.max(0, steps.indexOf(step))
   const validationError = validateAgentDraft(value)
@@ -222,6 +252,28 @@ export function AgentProfileForm({ value, busy, onChange, onBack, onSubmit, subm
   const next = () => { if (stepIndex < steps.length - 1) setStep(steps[stepIndex + 1]) }
   const basicInvalid = !value.name.trim() || !value.gender.trim() || (value.age !== undefined && (!Number.isInteger(value.age) || value.age < 1 || value.age > 200))
   const submit = () => { if (step === 'review') { if (!validationError) onSubmit() } else if (!(step === 'identity' && basicInvalid)) next() }
+  const selectPreviewScenario = (scenario: PersonalityPreviewScenario) => {
+    setPreviewScenario(scenario)
+    setPreviews([undefined, undefined])
+    setPreviewError(undefined)
+  }
+  const runPreview = async (slot: PreviewSlot) => {
+    if (validationError) {
+      setPreviewError(validationError)
+      return
+    }
+    setPreviewBusy(slot)
+    setPreviewError(undefined)
+    try {
+      const preview = await client.previewAgentPersonality(value, previewScenario)
+      if (!preview) throw new Error('Personality Preview доступен после запуска desktop backend и настройки provider.')
+      setPreviews((current) => current.map((item, index) => index === slot ? preview : item) as [PersonalityPreview | undefined, PersonalityPreview | undefined])
+    } catch (cause) {
+      setPreviewError(cause instanceof Error ? cause.message : 'Не удалось создать Personality Preview.')
+    } finally {
+      setPreviewBusy(undefined)
+    }
+  }
 
   return (
     <form className="onboarding-form agent-profile-form agent-wizard" onSubmit={(event) => { event.preventDefault(); submit() }}>
@@ -234,7 +286,7 @@ export function AgentProfileForm({ value, busy, onChange, onBack, onSubmit, subm
       {step === 'dynamics' && <DynamicsStep update={update} value={value} />}
       {step === 'relationship' && <RelationshipStep update={update} value={value} />}
       {step === 'backstory' && <BackstoryStep onChange={onChange} update={update} value={value} />}
-      {step === 'review' && <ReviewStep value={value} />}
+      {step === 'review' && <ReviewStep onPreview={(slot) => { void runPreview(slot) }} onScenario={selectPreviewScenario} previewBusy={previewBusy} previewError={previewError} previews={previews} scenario={previewScenario} value={value} />}
       {step === 'review' && validationError && <div className="agent-profile-form__validation" role="alert"><Icon name="warning" width={14} height={14} /> {validationError}</div>}
       <div className="onboarding-form__actions"><button className="button button--quiet" onClick={previous} type="button">Назад</button><button className="button button--accent" disabled={busy || (step === 'identity' && basicInvalid) || (step === 'review' && Boolean(validationError))} type="submit">{busy ? 'Создаю…' : step === 'review' ? submitLabel : 'Продолжить'} <Icon name="chevron-right" width={14} height={14} /></button></div>
     </form>

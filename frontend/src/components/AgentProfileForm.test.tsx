@@ -2,11 +2,12 @@
 import '@testing-library/jest-dom/vitest'
 
 import { useState } from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { cloneAgentDraft, defaultAgentDraft } from '../lib/agents'
+import { resetYuriClientForTests } from '../lib/client'
 import type { AgentProfileInput } from '../lib/contracts'
 import { AgentProfileForm } from './AgentProfileForm'
 
@@ -16,7 +17,11 @@ function ProfileHarness({ initial = defaultAgentDraft, onSubmit = vi.fn() }: { i
 }
 
 describe('AgentProfileForm', () => {
-  beforeEach(() => window.localStorage.clear())
+  beforeEach(() => {
+    window.localStorage.clear()
+    delete (window as typeof window & { go?: unknown }).go
+    resetYuriClientForTests()
+  })
 
   it('offers a short Quick flow with visible owner-controlled presets', () => {
     render(<ProfileHarness />)
@@ -90,6 +95,35 @@ describe('AgentProfileForm', () => {
     expect(JSON.parse(window.localStorage.getItem('yuri.agent-profile-draft.v2') ?? '{}')).toMatchObject({ name: 'Emilu' })
     fireEvent.click(screen.getByRole('button', { name: /Создать агента/ }))
     expect(onSubmit).toHaveBeenCalledOnce()
+  })
+
+  it('previews the production personality contract and supports an A/B comparison', async () => {
+    const calls: unknown[] = []
+    ;(window as typeof window & { go?: unknown }).go = { main: { Bridge: {
+      ListConversations: () => [],
+      PreviewAgentPersonality: (input: unknown) => {
+        calls.push(input)
+        const slot = calls.length === 1 ? 'A' : 'B'
+        return {
+          scenario: 'introduction', scenarioTitle: 'Обычное знакомство', prompt: 'Привет!',
+          response: `Ответ ${slot}`, model: 'test-model', compilerCharacters: 1200,
+          influences: [{ layer: 'temperament', key: 'shyness', value: 1, direction: 'high' }],
+        }
+      },
+    } } }
+    resetYuriClientForTests()
+    render(<ProfileHarness />)
+    fireEvent.click(screen.getByRole('button', { name: /Review/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сгенерировать вариант A' }))
+    expect(await screen.findByText('Ответ A')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Сравнить с вариантом B' }))
+    expect(await screen.findByText('Ответ B')).toBeInTheDocument()
+    fireEvent.click(screen.getAllByText(/Что повлияло/)[0])
+
+    expect(screen.getAllByText('shyness')).toHaveLength(2)
+    expect(calls).toHaveLength(2)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Обновить вариант B' })).toBeEnabled())
   })
 
   it('supports native keyboard navigation through the accessible step controls', async () => {

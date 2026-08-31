@@ -3,6 +3,8 @@ import type {
   ActivityListOptions,
   AgentProfile,
   AgentProfileInput,
+  PersonalityPreview,
+  PersonalityPreviewScenario,
   AgentPersonalizationProfile,
   ApprovalDecision,
   ApprovalRequest,
@@ -270,6 +272,10 @@ class MockYuriClient implements YuriClient {
       completed: this.onboarding.providerTested,
     }
     return { ...agent, backstory: agent.backstory, traits: { ...agent.traits } }
+  }
+
+  async previewAgentPersonality(_input: AgentProfileInput, _scenario: PersonalityPreviewScenario): Promise<PersonalityPreview | undefined> {
+    return undefined
   }
 
   async setActiveAgent(agentId: string): Promise<AgentProfile> {

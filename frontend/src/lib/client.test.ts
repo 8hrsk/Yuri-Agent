@@ -346,6 +346,27 @@ describe('Yuri client contract', () => {
     }
   })
 
+  it('forwards an isolated personality preview with the selected scenario', async () => {
+    const calls: unknown[] = []
+    await withWindow({
+      go: { main: { Bridge: {
+        ListConversations: () => [],
+        PreviewAgentPersonality: (input: unknown) => {
+          calls.push(input)
+          return {
+            scenario: 'fear', scenarioTitle: 'Тревожная ситуация', prompt: 'Мне тревожно.',
+            response: 'Я рядом.', model: 'test-model', compilerCharacters: 900, influences: [],
+          }
+        },
+      } } },
+    }, async () => {
+      await expect(createYuriClient().previewAgentPersonality(defaultAgentDraft, 'fear')).resolves.toMatchObject({
+        scenario: 'fear', response: 'Я рядом.', model: 'test-model',
+      })
+      expect(calls).toEqual([{ profile: defaultAgentDraft, scenario: 'fear' }])
+    })
+  })
+
   it('lists Codex account models through the Wails bridge', async () => {
     const bridge = {
       ListConversations: () => [],

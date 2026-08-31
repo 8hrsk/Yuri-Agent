@@ -45,6 +45,9 @@ export type {
   AgentPersonalizationProfile,
   AgentProfile,
   AgentProfileInput,
+  PersonalityPreviewScenario,
+  PersonalityPreviewInfluence,
+  PersonalityPreview,
 } from './contracts/agents'
 export type {
   MemoryKind,

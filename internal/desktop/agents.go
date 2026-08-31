@@ -244,37 +244,63 @@ func (b *Bridge) CreateAgent(input CreateAgentInput) (AgentProfileView, error) {
 		return AgentProfileView{}, err
 	}
 	now := time.Now().UTC()
+	state, err := buildAgentCreationState(id, input, now)
+	if err != nil {
+		return AgentProfileView{}, err
+	}
+	if err := b.repositories.CreateAgentWithPersonalizationDefaults(ctx, state.Profile, state.Persona, state.Relationship, state.Affect, state.Personalization); err != nil {
+		return AgentProfileView{}, fmt.Errorf("initialize agent personality: %w", err)
+	}
+	if err := b.activateAgent(state.Profile.ID, true); err != nil {
+		return AgentProfileView{}, err
+	}
+	return agentProfileView(state.Profile, true, state.Persona.Traits), nil
+}
+
+type agentCreationState struct {
+	Profile         domain.AgentProfile
+	Persona         domain.MutablePersona
+	Relationship    domain.RelationshipState
+	Affect          domain.AffectiveState
+	Personalization domain.PersonalizationSeed
+}
+
+// buildAgentCreationState is the single pure boundary shared by durable agent
+// creation and side-effect-free Personality Preview. Keeping defaults and v2
+// projection here prevents preview from demonstrating a profile different
+// from the one the owner will actually create.
+func buildAgentCreationState(id domain.ID, input CreateAgentInput, now time.Time) (agentCreationState, error) {
 	backstory := strings.TrimSpace(input.Backstory)
 	if input.Personalization != nil && strings.TrimSpace(input.Personalization.StructuredBackstory.Narrative) != "" {
 		structured := strings.TrimSpace(input.Personalization.StructuredBackstory.Narrative)
 		if backstory != "" && backstory != structured {
-			return AgentProfileView{}, fmt.Errorf("%w: backstory and structured backstory narrative differ", domain.ErrInvalidArgument)
+			return agentCreationState{}, fmt.Errorf("%w: backstory and structured backstory narrative differ", domain.ErrInvalidArgument)
 		}
 		backstory = structured
 	}
 	profile, err := domain.NewAgentProfileWithBackstory(id, input.Name, input.Age, input.Gender, input.Preferences, backstory, now)
 	if err != nil {
-		return AgentProfileView{}, err
+		return agentCreationState{}, err
 	}
 	traits := defaultPersonaTraits()
 	for name, value := range input.Traits {
 		traits[strings.TrimSpace(name)] = value
 	}
-	seed, err := domain.NewMutablePersona(id, traits, agentMutablePersonaPrompt(profile), now)
+	persona, err := domain.NewMutablePersona(id, traits, agentMutablePersonaPrompt(profile), now)
 	if err != nil {
-		return AgentProfileView{}, err
+		return agentCreationState{}, err
 	}
 	relationship, err := domain.NewRelationshipState(id, defaultRelationshipDimensions(), "Связь только начинает формироваться из совместных диалогов.", now)
 	if err != nil {
-		return AgentProfileView{}, err
+		return agentCreationState{}, err
 	}
 	affect, err := domain.NewAffectiveState(id, defaultAffectDimensions(), "спокойное внимание", now)
 	if err != nil {
-		return AgentProfileView{}, err
+		return agentCreationState{}, err
 	}
 	personalization, err := domain.NewPersonalizationSeed(profile, traits, relationship.Dimensions, now)
 	if err != nil {
-		return AgentProfileView{}, err
+		return agentCreationState{}, err
 	}
 	if input.Personalization != nil {
 		identity, style, dynamics, relationshipSeed, structuredBackstory, evolutionPolicy := input.Personalization.domainValues()
@@ -289,20 +315,16 @@ func (b *Bridge) CreateAgent(input CreateAgentInput) (AgentProfileView, error) {
 		personalization.EvolutionPolicy = evolutionPolicy
 		personalization.Reason = "owner configured personalization profile v2"
 		if err := personalization.Validate(); err != nil {
-			return AgentProfileView{}, err
+			return agentCreationState{}, err
 		}
 	}
 	relationship, err = domain.NewOwnerRelationshipState(personalization, now)
 	if err != nil {
-		return AgentProfileView{}, err
+		return agentCreationState{}, err
 	}
-	if err := b.repositories.CreateAgentWithPersonalizationDefaults(ctx, profile, seed, relationship, affect, personalization); err != nil {
-		return AgentProfileView{}, fmt.Errorf("initialize agent personality: %w", err)
-	}
-	if err := b.activateAgent(profile.ID, true); err != nil {
-		return AgentProfileView{}, err
-	}
-	return agentProfileView(profile, true, traits), nil
+	return agentCreationState{
+		Profile: profile, Persona: persona, Relationship: relationship, Affect: affect, Personalization: personalization,
+	}, nil
 }
 
 func (b *Bridge) SetActiveAgent(input SelectAgentInput) (AgentProfileView, error) {

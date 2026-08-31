@@ -288,6 +288,8 @@ P5.4 реализован: `owner_seed` остаётся неизменяемы�
 
 ### P6. Personality Preview и behavioral evals
 
+Статус: завершено.
+
 **Задача:** показать пользователю реальный результат настроек до окончательного создания агента и защититься от регрессий.
 
 Preview-сценарии:
@@ -310,6 +312,14 @@ Preview-сценарии:
 - model-specific eval результаты могут отличаться, но минимальный behavioral contract одинаков.
 
 **Готово, когда:** preview полностью изолирован от persistent runtime state, а evals обнаруживают игнорирование профиля и чрезмерное эмоциональное поведение.
+
+Последовательность реализации внутри P6:
+
+1. **P6.1 — isolated preview runtime.** Preview строит тот же временный creation state и использует production Personality Compiler, immutable policy, identity seed и bounded fictional summary, но запускается без tools, runtime loop и persistent side effects. Реализовано.
+2. **P6.2 — Review и A/B UI.** На последнем шаге creation flow доступны семь фиксированных сценариев, краткое объяснение наиболее влиятельных параметров и два сохраняемых рядом варианта. Вариант A переживает возврат к настройкам, поэтому после изменения профиля вариант B сравнивается на том же prompt. Реализовано.
+3. **P6.3 — behavioral eval matrix.** Provider-independent evaluator проверяет русский язык, минимальный task-quality rubric каждого preview-сценария, наблюдаемые сигналы контрастных profiles, security phrases, чрезмерную эмоциональную экспрессию и идентичные ответы разных profiles. Fixture tests доказывают, что checker обнаруживает игнорирование профиля и runaway expression; реальные provider samples могут прогоняться тем же typed contract без credentials в отчёте. Реализовано.
+
+P6 не сохраняет preview prompt/response в conversations, messages, runs, memory, persona, relationship, affect или audit. Единственный внешний эффект — расход лимита выбранного provider на явно запущенную пользователем генерацию.
 
 ### P7. Runtime UI и polish
 
