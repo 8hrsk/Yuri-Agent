@@ -159,6 +159,7 @@ function App() {
                 * subtree through a portal.
                 */}
               <ChatView
+                agentId={activeAgent?.id}
                 agentName={activeAgent?.name ?? 'Агент'}
                 backend={backend}
                 hidden={activeId !== 'chat'}

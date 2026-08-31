@@ -23,6 +23,16 @@ const props: {
 }
 
 describe('ChatHeader conversation title editor', () => {
+  it('renders the active agent affect and gives it to the avatar instead of using the default mood', () => {
+    render(<ChatHeader {...props} affect={{
+      mood: 'Напряжённое раздражение', valence: -0.7, arousal: 0.8, intensity: 0.76,
+      dimensions: [{ id: 'irritation', label: 'Раздражение', value: 0.76, valence: -0.8 }],
+    }} onRename={vi.fn()} />)
+
+    expect(screen.getByLabelText('Текущее эмоциональное состояние: Напряжённое раздражение')).toHaveTextContent('Раздражение 76%')
+    expect(screen.getByRole('img', { name: /Yuri · Жду задачу · Напряжённое раздражение/ })).toHaveClass('yuri-avatar--tense')
+  })
+
   it('renames the conversation through the owner callback', async () => {
     const user = userEvent.setup()
     const onRename = vi.fn(async () => undefined)

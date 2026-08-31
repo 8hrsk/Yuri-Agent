@@ -341,6 +341,50 @@
   gap: 15px;
 }
 
+.affect-state {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 1px 6px;
+  align-items: center;
+  max-width: 230px;
+  color: #9e97ad;
+  font-size: 8px;
+}
+
+.affect-state > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8d879a;
+  box-shadow: 0 0 calc(4px + 5px * var(--avatar-energy, 0.5)) currentcolor;
+}
+
+.affect-state > span,
+.affect-state > small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.affect-state > small {
+  grid-column: 2;
+  color: #666173;
+  font-size: 7px;
+}
+
+.affect-state--warm > i {
+  background: var(--rose);
+}
+
+.affect-state--cool > i {
+  background: #82a9d4;
+}
+
+.affect-state--tense > i {
+  background: #dc7f8c;
+}
+
 .run-state {
   display: inline-flex;
   align-items: center;

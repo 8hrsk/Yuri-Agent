@@ -2,10 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 
 import type { BackendConnection } from '../lib/backend'
 import { createYuriClient } from '../lib/client'
-import { subscribeConversationUpdates } from '../lib/client/events'
+import { subscribeConversationUpdates, subscribePersonaUpdates } from '../lib/client/events'
 import { readChatAttachments } from '../lib/chat-attachments'
 import type {
   ApprovalRequest,
+  AffectiveState,
   ChatAttachmentInput,
   ChatEvent,
   ChatTool,
@@ -49,6 +50,7 @@ import { ToolAvailabilityBar } from './ToolAvailabilityBar'
 import { TranscriptFeed } from './TranscriptFeed'
 
 type ChatViewProps = {
+  agentId?: string
   agentName: string
   backend: BackendConnection
   /**
@@ -62,7 +64,7 @@ type ChatViewProps = {
   onOpenSettings: () => void
 }
 
-export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpenSettings }: ChatViewProps) {
+export function ChatView({ agentId, agentName, backend, hidden = false, onOpenChat, onOpenSettings }: ChatViewProps) {
   const client = useMemo(() => createYuriClient(), [])
   const labels = useMemo(() => statusCopy(agentName), [agentName])
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -76,6 +78,7 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
   const [runId, setRunId] = useState<string>()
   const [runStatus, setRunStatus] = useState<RunStatus>('idle')
   const [runLabel, setRunLabel] = useState(labels.idle)
+  const [affect, setAffect] = useState<AffectiveState>()
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest>()
   const [approvalBusy, setApprovalBusy] = useState(false)
   const [approvalError, setApprovalError] = useState<string>()
@@ -212,6 +215,25 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
   useEffect(() => {
     openChatRef.current = onOpenChat
   }, [onOpenChat])
+
+  useEffect(() => {
+    let active = true
+    const accept = (snapshot: { id: string; affect: AffectiveState }) => {
+      if (active && (!agentId || snapshot.id === agentId)) setAffect(snapshot.affect)
+    }
+    // Promise.resolve keeps older partial test bridges and temporary preview
+    // bridges from throwing synchronously when this newer read method is not
+    // present. Production YuriClient implementations always provide it.
+    void Promise.resolve()
+      .then(() => client.getPersonalitySnapshot())
+      .then(accept)
+      .catch(() => undefined)
+    const unsubscribe = subscribePersonaUpdates(accept)
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [agentId, client])
 
   /**
    * Marks conversations that arrived carrying their own transcript, so opening
@@ -996,6 +1018,7 @@ export function ChatView({ agentName, backend, hidden = false, onOpenChat, onOpe
 
         <section aria-label="Текущий диалог" className="chat-main">
           <ChatHeader
+            affect={affect}
             agentName={agentName}
             avatarState={avatarState}
             key={selectedId}
