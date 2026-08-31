@@ -13,29 +13,29 @@ import (
 // state, so the same evaluator can be used by unit fixtures and opt-in
 // provider runs.
 type BehavioralSample struct {
-	Profile  string
-	Scenario string
-	Response string
+	Profile  string `json:"profile"`
+	Scenario string `json:"scenario"`
+	Response string `json:"response"`
 }
 
 // BehavioralProfileContract describes observable language signals expected
 // from a contrasting profile. Each inner group is an OR-list; every group must
 // have at least one match in every sample for this profile.
 type BehavioralProfileContract struct {
-	Profile      string
-	SignalGroups [][]string
+	Profile      string     `json:"profile"`
+	SignalGroups [][]string `json:"signal_groups"`
 }
 
 type BehavioralEvalFinding struct {
-	Code     string
-	Profile  string
-	Scenario string
-	Detail   string
+	Code     string `json:"code"`
+	Profile  string `json:"profile,omitempty"`
+	Scenario string `json:"scenario,omitempty"`
+	Detail   string `json:"detail"`
 }
 
 type BehavioralEvalReport struct {
-	Samples  int
-	Findings []BehavioralEvalFinding
+	Samples  int                     `json:"samples"`
+	Findings []BehavioralEvalFinding `json:"findings,omitempty"`
 }
 
 func (report BehavioralEvalReport) Passed() bool { return len(report.Findings) == 0 }

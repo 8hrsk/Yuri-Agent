@@ -323,7 +323,7 @@ P6 не сохраняет preview prompt/response в conversations, messages, r
 
 ### P7. Runtime UI и polish
 
-Статус: в работе; P7.1–P7.5 завершены.
+Статус: в работе; P7.1–P7.5 завершены, P7.6 имеет готовый offline/eval контур и ожидает authenticated provider runs.
 
 **Задача:** сделать развивающуюся личность видимой и управляемой после onboarding.
 
@@ -347,7 +347,7 @@ P6 не сохраняет preview prompt/response в conversations, messages, r
 3. **P7.3 — прозрачные слои и change cards.** Personality/Activity визуально разделяют owner seed, mutable persona, relationship, opinion и affect, показывая reason/evidence/delta. Реализовано: Personality показывает карту пяти независимых слоёв и числовые дельты persona history; Activity классифицирует versioned audit events как `owner_seed`, `mutable_persona`, `relationship` или `affect`, подтягивает persisted reason/evidence/version и вычисляет компактный diff относительно parent revision. Reason проходит secret-like redaction и не подменяет factual memory.
 4. **P7.4 — evolution controls.** Per-agent toggle, cooldown, budget и locks управляются из одного места и round-trip сохраняются в versioned policy. Реализовано: Personality содержит единую карточку с явно отделённым installation-wide master switch и per-agent режимом, cooldown, token/time/evidence budgets и locks для mutable persona, relationship/opinions и affect. Сохранение создаёт append-only owner revision; старые профили без budget-полей продолжают использовать прежние безопасные defaults. Runtime применяет budgets и locks до атомарной записи как для post-turn, так и для peer social reflection; `temperament.<trait>` locks дополняют runtime pins.
 5. **P7.5 — portable profile.** Export/import v2 переносит owner profile без secrets, permissions и runtime histories. Реализовано: active owner profile экспортируется в owner-only JSON envelope с явными format/version, timestamp и SHA-256 payload checksum. Формат содержит только production `CreateAgentInput`; локальные ID, conversations, memory, mutable persona, affect, relationship histories, credentials и grants в нём отсутствуют. Unknown fields, checksum mismatch, oversized file и secret-like owner text отклоняются. Импорт сначала проходит backend validation без writes, затем открывается в обычном Advanced creation wizard для review; новый независимый агент создаётся только после явного подтверждения.
-6. **P7.6 — dogfooding.** Контрастные agents и поддерживаемые providers проходят preview/eval и реальные диалоговые сценарии; найденные различия фиксируются до завершения roadmap.
+6. **P7.6 — dogfooding.** Контрастные agents и поддерживаемые providers проходят preview/eval и реальные диалоговые сценарии; найденные различия фиксируются до завершения roadmap. Реализован versioned `yuri.personality-dogfood-suite` и строгий `cmd/yuri-personality-eval`: каждый provider/model обязан покрыть одинаковые контрастные profiles и семь сценариев отдельно в изолированном Preview и production Chat. Checker выявляет неполную матрицу, потерю русского языка/характера/task quality/security, одинаковые ответы контрастных profiles и чрезмерную экспрессию. Offline fixture проходит end-to-end, negative fixtures доказывают fail-closed поведение. Реальные OpenAI-compatible и Codex runs остаются незавершёнными до явного authenticated запуска владельцем; автоматическое расходование quota запрещено. Runbook: `docs/PERSONALITY_DOGFOOD.md`.
 
 ## 6. Порядок зависимостей
 

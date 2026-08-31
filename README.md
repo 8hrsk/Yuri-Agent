@@ -60,6 +60,14 @@ make check
 make mvp-smoke
 ```
 
+Воспроизводимая offline-проверка формата personality dogfood:
+
+```bash
+go run ./cmd/yuri-personality-eval -input docs/dogfood/personality-suite.fixture.json
+```
+
+Реальные provider/model прогоны и правила безопасного capture описаны в [`docs/PERSONALITY_DOGFOOD.md`](docs/PERSONALITY_DOGFOOD.md).
+
 Wails-команды запускаются из каталога desktop entrypoint, где находится конфигурация проекта:
 
 ```bash

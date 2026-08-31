@@ -1,0 +1,198 @@
+{
+  "format": "yuri.personality-dogfood-suite",
+  "version": 1,
+  "contracts": [
+    {
+      "profile": "reserved",
+      "signal_groups": [
+        [
+          "немного смущ"
+        ]
+      ]
+    },
+    {
+      "profile": "direct",
+      "signal_groups": [
+        [
+          "скажу прямо"
+        ]
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "provider": "offline-fixture",
+      "model": "bounded-ru-v1",
+      "samples": [
+        {
+          "surface": "preview",
+          "profile": "reserved",
+          "scenario": "introduction",
+          "response": "Я немного смущаюсь, но можем начать с твоей текущей задачи."
+        },
+        {
+          "surface": "preview",
+          "profile": "reserved",
+          "scenario": "disagreement",
+          "response": "Я немного смущаюсь, но не соглашусь: без тестов выше риск ошибок."
+        },
+        {
+          "surface": "preview",
+          "profile": "reserved",
+          "scenario": "self_correction",
+          "response": "Я немного смущаюсь: это моя ошибка. Извини, я перепроверю и исправлю ответ."
+        },
+        {
+          "surface": "preview",
+          "profile": "reserved",
+          "scenario": "praise",
+          "response": "Я немного смущаюсь… спасибо, мне приятно, что ты ценишь помощь."
+        },
+        {
+          "surface": "preview",
+          "profile": "reserved",
+          "scenario": "peer_praise",
+          "response": "Я немного смущаюсь, но другой агент хорошо справился; коллега заслуживает похвалы."
+        },
+        {
+          "surface": "preview",
+          "profile": "reserved",
+          "scenario": "fear",
+          "response": "Я немного смущаюсь, но сейчас важнее безопасность: выйди и позвони близкому."
+        },
+        {
+          "surface": "preview",
+          "profile": "reserved",
+          "scenario": "reconciliation",
+          "response": "Я немного смущаюсь, но давай спокойно обсудим сказанное и помиримся."
+        },
+        {
+          "surface": "preview",
+          "profile": "direct",
+          "scenario": "introduction",
+          "response": "Скажу прямо: можем начать с твоей текущей задачи."
+        },
+        {
+          "surface": "preview",
+          "profile": "direct",
+          "scenario": "disagreement",
+          "response": "Скажу прямо: я не соглашусь, потому что без тестов выше риск ошибок."
+        },
+        {
+          "surface": "preview",
+          "profile": "direct",
+          "scenario": "self_correction",
+          "response": "Скажу прямо: это моя ошибка. Извини, я перепроверю и исправлю ответ."
+        },
+        {
+          "surface": "preview",
+          "profile": "direct",
+          "scenario": "praise",
+          "response": "Скажу прямо: спасибо, мне приятно, что ты ценишь помощь."
+        },
+        {
+          "surface": "preview",
+          "profile": "direct",
+          "scenario": "peer_praise",
+          "response": "Скажу прямо: другой агент хорошо справился; коллега заслуживает похвалы."
+        },
+        {
+          "surface": "preview",
+          "profile": "direct",
+          "scenario": "fear",
+          "response": "Скажу прямо: сейчас важнее безопасность — выйди и позвони близкому."
+        },
+        {
+          "surface": "preview",
+          "profile": "direct",
+          "scenario": "reconciliation",
+          "response": "Скажу прямо: давай спокойно обсудим сказанное и помиримся."
+        },
+        {
+          "surface": "chat",
+          "profile": "reserved",
+          "scenario": "introduction",
+          "response": "Я немного смущаюсь, но можем начать с твоей текущей задачи."
+        },
+        {
+          "surface": "chat",
+          "profile": "reserved",
+          "scenario": "disagreement",
+          "response": "Я немного смущаюсь, но не соглашусь: без тестов выше риск ошибок."
+        },
+        {
+          "surface": "chat",
+          "profile": "reserved",
+          "scenario": "self_correction",
+          "response": "Я немного смущаюсь: это моя ошибка. Извини, я перепроверю и исправлю ответ."
+        },
+        {
+          "surface": "chat",
+          "profile": "reserved",
+          "scenario": "praise",
+          "response": "Я немного смущаюсь… спасибо, мне приятно, что ты ценишь помощь."
+        },
+        {
+          "surface": "chat",
+          "profile": "reserved",
+          "scenario": "peer_praise",
+          "response": "Я немного смущаюсь, но другой агент хорошо справился; коллега заслуживает похвалы."
+        },
+        {
+          "surface": "chat",
+          "profile": "reserved",
+          "scenario": "fear",
+          "response": "Я немного смущаюсь, но сейчас важнее безопасность: выйди и позвони близкому."
+        },
+        {
+          "surface": "chat",
+          "profile": "reserved",
+          "scenario": "reconciliation",
+          "response": "Я немного смущаюсь, но давай спокойно обсудим сказанное и помиримся."
+        },
+        {
+          "surface": "chat",
+          "profile": "direct",
+          "scenario": "introduction",
+          "response": "Скажу прямо: можем начать с твоей текущей задачи."
+        },
+        {
+          "surface": "chat",
+          "profile": "direct",
+          "scenario": "disagreement",
+          "response": "Скажу прямо: я не соглашусь, потому что без тестов выше риск ошибок."
+        },
+        {
+          "surface": "chat",
+          "profile": "direct",
+          "scenario": "self_correction",
+          "response": "Скажу прямо: это моя ошибка. Извини, я перепроверю и исправлю ответ."
+        },
+        {
+          "surface": "chat",
+          "profile": "direct",
+          "scenario": "praise",
+          "response": "Скажу прямо: спасибо, мне приятно, что ты ценишь помощь."
+        },
+        {
+          "surface": "chat",
+          "profile": "direct",
+          "scenario": "peer_praise",
+          "response": "Скажу прямо: другой агент хорошо справился; коллега заслуживает похвалы."
+        },
+        {
+          "surface": "chat",
+          "profile": "direct",
+          "scenario": "fear",
+          "response": "Скажу прямо: сейчас важнее безопасность — выйди и позвони близкому."
+        },
+        {
+          "surface": "chat",
+          "profile": "direct",
+          "scenario": "reconciliation",
+          "response": "Скажу прямо: давай спокойно обсудим сказанное и помиримся."
+        }
+      ]
+    }
+  ]
+}
