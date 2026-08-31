@@ -4,6 +4,7 @@ import type {
   ApprovalDecision,
   AgentProfile,
   AgentProfileInput,
+  AgentPersonalizationUpdate,
   PersonalityPreview,
   PersonalityPreviewScenario,
   AgentPersonalizationProfile,
@@ -291,6 +292,12 @@ class WailsYuriClient implements YuriClient {
 
   async getActiveAgentPersonalization(): Promise<AgentPersonalizationProfile | undefined> {
     return normalizeAgentPersonalizationProfile(await callBridgeSafe<unknown>(['GetActiveAgentPersonalization']))
+  }
+
+  async updateActiveAgentPersonalization(input: AgentPersonalizationUpdate): Promise<AgentPersonalizationProfile> {
+    const result = normalizeAgentPersonalizationProfile(await callBridge<unknown>(['UpdateActiveAgentPersonalization'], [input]))
+    if (!result) throw new Error('Backend не вернул обновлённый owner seed.')
+    return result
   }
 
   async createAgent(input: AgentProfileInput): Promise<AgentProfile> {

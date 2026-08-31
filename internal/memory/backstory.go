@@ -142,15 +142,46 @@ func (e *Engine) HydrateBackstory(ctx context.Context, seed domain.Personalizati
 		return episodes[i].Sequence < episodes[j].Sequence
 	})
 	results := make([]WriteResult, 0, len(episodes))
+	currentEpisodeIDs := make(map[string]struct{}, len(episodes))
 	for _, episode := range episodes {
 		if err := contextErr(ctx); err != nil {
 			return results, err
 		}
-		result, err := e.hydrateBackstoryEpisode(ctx, seed, normalizeBackstoryEpisode(episode))
+		episode = normalizeBackstoryEpisode(episode)
+		currentEpisodeIDs[episode.ID] = struct{}{}
+		result, err := e.hydrateBackstoryEpisode(ctx, seed, episode)
 		if err != nil {
 			return results, err
 		}
 		results = append(results, result)
+	}
+	// The current owner seed is authoritative. Removing an episode in the
+	// editor must not leave its prior fictional projection recallable forever.
+	// Preserve provenance/history by appending an owner tombstone rather than
+	// deleting the memory row. Explicitly disabled records are excluded here
+	// and remain disabled until RehydrateBackstoryEpisode is invoked.
+	existing, err := e.store.ListMemories(ctx, MemoryFilter{
+		AgentID: seed.AgentID, IncludeDormant: true, IncludeHidden: true, Limit: 0,
+	})
+	if err != nil {
+		return results, err
+	}
+	for _, item := range existing {
+		if item.AgentID != seed.AgentID || item.Nature != domain.MemoryNatureFiction {
+			continue
+		}
+		payload, parseErr := ParseBackstoryMemoryPayload(item.ContentJSON)
+		if parseErr != nil || payload.AgentID != seed.AgentID {
+			continue
+		}
+		if _, present := currentEpisodeIDs[payload.EpisodeID]; present {
+			continue
+		}
+		forgotten, disableErr := e.DisableBackstoryMemory(ctx, item.ID)
+		if disableErr != nil {
+			return results, disableErr
+		}
+		results = append(results, forgotten)
 	}
 	return results, nil
 }

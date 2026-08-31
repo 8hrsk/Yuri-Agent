@@ -29,6 +29,14 @@ func (r *AuditRepository) Append(ctx context.Context, event AuditEvent) error {
 	if err := validateAuditEvent(event); err != nil {
 		return err
 	}
+	return appendAuditEvent(ctx, r.db, event)
+}
+
+type auditEventExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func appendAuditEvent(ctx context.Context, executor auditEventExecutor, event AuditEvent) error {
 	createdAt, err := timeValue(event.CreatedAt)
 	if err != nil {
 		return err
@@ -40,7 +48,7 @@ func (r *AuditRepository) Append(ctx context.Context, event AuditEvent) error {
 	if err := validJSON(payload, "payload_redacted"); err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx, `
+	_, err = executor.ExecContext(ctx, `
 		INSERT INTO audit_events(
 			id, run_id, tool_call_id, approval_id, actor, action, target, decision,
 			payload_redacted, duration_ms, created_at

@@ -102,6 +102,13 @@ export interface AgentPersonalizationProfile extends AgentPersonalizationInput {
   temperament: Record<string, number>
 }
 
+export interface AgentPersonalizationUpdate {
+  expectedVersion: number
+  traits: Record<string, number>
+  personalization: AgentPersonalizationInput
+  reason: string
+}
+
 export interface AgentProfile {
   id: string
   name: string

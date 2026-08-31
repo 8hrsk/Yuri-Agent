@@ -82,6 +82,55 @@ func TestPersonalizationRepositoryCreateGetAndAppend(t *testing.T) {
 	}
 }
 
+func TestAuditedPersonalizationAppendIsAtomic(t *testing.T) {
+	database, ctx := testDatabase(t)
+	agents := NewAgentRepository(database)
+	repository := NewPersonalizationRepository(database)
+	repositories := &Repositories{Personalization: repository, Audit: NewAuditRepository(database)}
+	now := time.Date(2026, 8, 31, 14, 0, 0, 0, time.UTC)
+	profile, err := domain.NewAgentProfile("agent-audited-seed", "Yuri", 21, "female", "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := agents.Create(ctx, profile); err != nil {
+		t.Fatal(err)
+	}
+	seed, err := domain.NewPersonalizationSeed(profile, nil, nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Create(ctx, seed); err != nil {
+		t.Fatal(err)
+	}
+	next := seed
+	next.Version++
+	next.RevisionID = "agent-audited-seed:personalization:v2"
+	next.ParentID = seed.RevisionID
+	next.ParentVersion = seed.Version
+	next.Operation = domain.PersonalizationOperationUpdate
+	next.Reason = "owner update"
+	next.UpdatedAt = now.Add(time.Minute)
+	next.CommunicationStyle.Humor = .9
+	if _, err := repositories.AppendPersonalizationWithAudit(ctx, next, seed.Version, AuditEvent{}); err == nil {
+		t.Fatal("invalid audit unexpectedly committed personalization")
+	}
+	head, err := repository.Get(ctx, profile.ID)
+	if err != nil || head.Version != 1 {
+		t.Fatalf("failed aggregate changed head = %#v, %v", head, err)
+	}
+	appended, err := repositories.AppendPersonalizationWithAudit(ctx, next, seed.Version, AuditEvent{
+		ID: "audit-owner-seed", Actor: domain.ActorUser, Action: "personalization.owner_seed.update",
+		Target: string(profile.ID), Decision: domain.PermissionAllow, CreatedAt: next.UpdatedAt,
+	})
+	if err != nil || appended.Version != 2 {
+		t.Fatalf("audited append = %#v, %v", appended, err)
+	}
+	audit, err := repositories.Audit.List(ctx, 10, 0)
+	if err != nil || len(audit) != 1 || audit[0].ID != "audit-owner-seed" {
+		t.Fatalf("atomic audit = %#v, %v", audit, err)
+	}
+}
+
 func TestPersonalizationRepositoryMigratesLegacyBackstoryExactlyOnce(t *testing.T) {
 	database, ctx := testDatabase(t)
 	agents := NewAgentRepository(database)

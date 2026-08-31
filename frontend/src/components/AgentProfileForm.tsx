@@ -8,6 +8,7 @@ import { Icon } from './Icon'
 type AgentProfileFormProps = {
   value: AgentProfileInput
   busy?: boolean
+  baselineEditing?: boolean
   onChange: (value: AgentProfileInput) => void
   onBack?: () => void
   onSubmit: () => void
@@ -136,15 +137,15 @@ function ProfileSlider({ definition, value, onChange }: { definition: SliderDefi
   )
 }
 
-function IdentityStep({ value, update }: { value: AgentProfileInput; update: <K extends keyof AgentProfileInput>(key: K, next: AgentProfileInput[K]) => void }) {
+function IdentityStep({ value, update, lockedCoreIdentity = false }: { value: AgentProfileInput; update: <K extends keyof AgentProfileInput>(key: K, next: AgentProfileInput[K]) => void; lockedCoreIdentity?: boolean }) {
   const identity = value.personalization.identity
   const updateIdentity = (patch: Partial<typeof identity>) => update('personalization', { ...value.personalization, identity: { ...identity, ...patch } })
   return <section aria-labelledby="agent-step-identity" className="agent-wizard__panel">
     <div className="agent-wizard__heading"><span>01 · IDENTITY</span><h3 id="agent-step-identity">Кто этот агент?</h3><p>Имя и базовая identity задаются владельцем и не переписываются фоновой рефлексией.</p></div>
     <div className="agent-profile-grid">
-      <label htmlFor="agent-name"><span>Имя агента</span><input autoFocus autoComplete="off" id="agent-name" maxLength={64} onChange={(event) => update('name', event.target.value)} placeholder="Yuri" value={value.name} /></label>
-      <label htmlFor="agent-age"><span>Возраст <small>· optional</small></span><input id="agent-age" max={200} min={1} onChange={(event) => update('age', event.target.value === '' ? undefined : Number(event.target.value))} type="number" value={value.age ?? ''} /></label>
-      <label htmlFor="agent-gender"><span>Пол / гендер</span><select id="agent-gender" onChange={(event) => update('gender', event.target.value)} value={value.gender}><option value="female">Женский</option><option value="male">Мужской</option><option value="nonbinary">Небинарный</option><option value="unspecified">Не указан</option></select></label>
+      <label htmlFor="agent-name"><span>Имя агента</span><input autoFocus autoComplete="off" disabled={lockedCoreIdentity} id="agent-name" maxLength={64} onChange={(event) => update('name', event.target.value)} placeholder="Yuri" value={value.name} /></label>
+      <label htmlFor="agent-age"><span>Возраст <small>· optional</small></span><input disabled={lockedCoreIdentity} id="agent-age" max={200} min={1} onChange={(event) => update('age', event.target.value === '' ? undefined : Number(event.target.value))} type="number" value={value.age ?? ''} /></label>
+      <label htmlFor="agent-gender"><span>Пол / гендер</span><select disabled={lockedCoreIdentity} id="agent-gender" onChange={(event) => update('gender', event.target.value)} value={value.gender}><option value="female">Женский</option><option value="male">Мужской</option><option value="nonbinary">Небинарный</option><option value="unspecified">Не указан</option></select></label>
     </div>
     <div className="agent-profile-grid agent-profile-grid--identity">
       <label htmlFor="agent-language"><span>Основной язык</span><input id="agent-language" maxLength={64} onChange={(event) => updateIdentity({ preferredLanguage: event.target.value })} value={identity.preferredLanguage} /></label>
@@ -219,8 +220,9 @@ function PreviewResultCard({ label, preview }: { label: string; preview: Persona
   return <article className="agent-preview__result"><header><span>{label}</span><small>{preview.model}</small></header><p className="agent-preview__prompt">{preview.prompt}</p><blockquote>{preview.response}</blockquote><details><summary>Что повлияло · {preview.influences.length}</summary><div className="agent-preview__influences">{preview.influences.map((influence) => <span key={`${influence.layer}-${influence.key}`}><strong>{influence.key.replaceAll('_', ' ')}</strong><small>{influence.layer} · {influence.direction} · {Math.round(influence.value * 100)}%</small></span>)}</div></details></article>
 }
 
-function ReviewStep({ value, scenario, previews, previewBusy, previewError, onScenario, onPreview }: {
+function ReviewStep({ value, baselineEditing = false, scenario, previews, previewBusy, previewError, onScenario, onPreview }: {
   value: AgentProfileInput
+  baselineEditing?: boolean
   scenario: PersonalityPreviewScenario
   previews: [PersonalityPreview | undefined, PersonalityPreview | undefined]
   previewBusy?: PreviewSlot
@@ -230,22 +232,22 @@ function ReviewStep({ value, scenario, previews, previewBusy, previewError, onSc
 }) {
   const selectedPreset = agentPresets.find((preset) => preset.id === value.presetId)
   const strongestTraits = Object.entries(value.traits).sort((a, b) => b[1] - a[1]).slice(0, 8)
-  return <section aria-labelledby="agent-step-review" className="agent-wizard__panel"><div className="agent-wizard__heading"><span>08 · REVIEW</span><h3 id="agent-step-review">Проверьте будущего агента</h3><p>После создания эти значения станут owner-authored reset baseline. Mutable persona сможет меняться только в заданных пределах.</p></div><div className="agent-review"><article><span>Identity</span><strong>{value.name || 'Без имени'} · {value.age ?? 'возраст не указан'} · {value.gender}</strong><p>{value.personalization.identity.role || 'Роль не задана'} · {value.personalization.identity.pronouns || 'местоимения не заданы'} · язык {value.personalization.identity.preferredLanguage}</p></article><article><span>Образ</span><strong>{selectedPreset?.label ?? 'Свой профиль'}</strong><p>{value.preferences || 'Без короткого описания.'}</p></article><article><span>Сильнее выражены</span><div className="agent-review__chips">{strongestTraits.map(([trait, amount]) => <span key={trait}>{trait} · {levelLabel(amount)}</span>)}</div></article><article><span>Эмоциональная динамика</span><strong>{value.personalization.emotionalDynamics.conflictStyle}</strong><p>Реактивность {levelLabel(value.personalization.emotionalDynamics.reactivity)}, восстановление {levelLabel(value.personalization.emotionalDynamics.recoverySpeed)}, выражение {levelLabel(value.personalization.emotionalDynamics.expression)}.</p></article><article><span>Отношения</span><strong>{relationshipSeeds[value.personalization.relationshipSeed.preset].label}</strong><p>{value.personalization.relationshipSeed.summary}</p></article><article><span>Backstory</span><strong>{value.personalization.structuredBackstory.episodes.length} эпизодов</strong><p>{value.personalization.structuredBackstory.summary || value.backstory || 'Предыстория не задана.'}</p></article></div><section className="agent-preview" aria-labelledby="agent-preview-title"><div className="agent-preview__heading"><div><span>LIVE PERSONALITY PREVIEW</span><h4 id="agent-preview-title">Послушайте характер до создания</h4><p>Ответ генерирует выбранный provider через production Personality Compiler и расходует его quota. Preview не пишет диалоги, memory, relationship, affect или persona history.</p></div><label><span>Сценарий</span><select aria-label="Сценарий preview" onChange={(event) => onScenario(event.target.value as PersonalityPreviewScenario)} value={scenario}>{previewScenarios.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div><div className="agent-preview__actions"><button className="button button--quiet" disabled={previewBusy !== undefined} onClick={() => onPreview(0)} type="button">{previewBusy === 0 ? 'Генерирую A…' : previews[0] ? 'Обновить вариант A' : 'Сгенерировать вариант A'}</button><button className="button button--quiet" disabled={previewBusy !== undefined || !previews[0]} onClick={() => onPreview(1)} type="button">{previewBusy === 1 ? 'Генерирую B…' : previews[1] ? 'Обновить вариант B' : 'Сравнить с вариантом B'}</button></div>{previewError && <div className="agent-profile-form__validation" role="alert"><Icon name="warning" width={14} height={14} /> {previewError}</div>}<div className="agent-preview__grid">{previews[0] && <PreviewResultCard label="Вариант A" preview={previews[0]} />}{previews[1] && <PreviewResultCard label="Вариант B" preview={previews[1]} />}</div></section></section>
+  return <section aria-labelledby="agent-step-review" className="agent-wizard__panel"><div className="agent-wizard__heading"><span>08 · REVIEW</span><h3 id="agent-step-review">{baselineEditing ? 'Проверьте новый owner baseline' : 'Проверьте будущего агента'}</h3><p>{baselineEditing ? 'Сохранение создаст новую append-only revision. Текущие persona, affect и relationship не изменятся, пока вы отдельно не выполните reset.' : 'После создания эти значения станут owner-authored reset baseline. Mutable persona сможет меняться только в заданных пределах.'}</p></div><div className="agent-review"><article><span>Identity</span><strong>{value.name || 'Без имени'} · {value.age ?? 'возраст не указан'} · {value.gender}</strong><p>{value.personalization.identity.role || 'Роль не задана'} · {value.personalization.identity.pronouns || 'местоимения не заданы'} · язык {value.personalization.identity.preferredLanguage}</p></article><article><span>Образ</span><strong>{selectedPreset?.label ?? 'Свой профиль'}</strong><p>{value.preferences || 'Без короткого описания.'}</p></article><article><span>Сильнее выражены</span><div className="agent-review__chips">{strongestTraits.map(([trait, amount]) => <span key={trait}>{trait} · {levelLabel(amount)}</span>)}</div></article><article><span>Эмоциональная динамика</span><strong>{value.personalization.emotionalDynamics.conflictStyle}</strong><p>Реактивность {levelLabel(value.personalization.emotionalDynamics.reactivity)}, восстановление {levelLabel(value.personalization.emotionalDynamics.recoverySpeed)}, выражение {levelLabel(value.personalization.emotionalDynamics.expression)}.</p></article><article><span>Отношения</span><strong>{relationshipSeeds[value.personalization.relationshipSeed.preset].label}</strong><p>{value.personalization.relationshipSeed.summary}</p></article><article><span>Backstory</span><strong>{value.personalization.structuredBackstory.episodes.length} эпизодов</strong><p>{value.personalization.structuredBackstory.summary || value.backstory || 'Предыстория не задана.'}</p></article></div><section className="agent-preview" aria-labelledby="agent-preview-title"><div className="agent-preview__heading"><div><span>LIVE PERSONALITY PREVIEW</span><h4 id="agent-preview-title">Послушайте характер до сохранения</h4><p>Ответ генерирует выбранный provider через production Personality Compiler и расходует его quota. Preview не пишет диалоги, memory, relationship, affect или persona history.</p></div><label><span>Сценарий</span><select aria-label="Сценарий preview" onChange={(event) => onScenario(event.target.value as PersonalityPreviewScenario)} value={scenario}>{previewScenarios.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div><div className="agent-preview__actions"><button className="button button--quiet" disabled={previewBusy !== undefined} onClick={() => onPreview(0)} type="button">{previewBusy === 0 ? 'Генерирую A…' : previews[0] ? 'Обновить вариант A' : 'Сгенерировать вариант A'}</button><button className="button button--quiet" disabled={previewBusy !== undefined || !previews[0]} onClick={() => onPreview(1)} type="button">{previewBusy === 1 ? 'Генерирую B…' : previews[1] ? 'Обновить вариант B' : 'Сравнить с вариантом B'}</button></div>{previewError && <div className="agent-profile-form__validation" role="alert"><Icon name="warning" width={14} height={14} /> {previewError}</div>}<div className="agent-preview__grid">{previews[0] && <PreviewResultCard label="Вариант A" preview={previews[0]} />}{previews[1] && <PreviewResultCard label="Вариант B" preview={previews[1]} />}</div></section></section>
 }
 
-export function AgentProfileForm({ value, busy, onChange, onBack, onSubmit, submitLabel = 'Создать агента' }: AgentProfileFormProps) {
+export function AgentProfileForm({ value, busy, baselineEditing = false, onChange, onBack, onSubmit, submitLabel = 'Создать агента' }: AgentProfileFormProps) {
   const [step, setStep] = useState<FormStep>('identity')
   const client = useMemo(() => createYuriClient(), [])
   const [previewScenario, setPreviewScenario] = useState<PersonalityPreviewScenario>('introduction')
   const [previews, setPreviews] = useState<[PersonalityPreview | undefined, PersonalityPreview | undefined]>([undefined, undefined])
   const [previewBusy, setPreviewBusy] = useState<PreviewSlot>()
   const [previewError, setPreviewError] = useState<string>()
-  const steps = useMemo(() => value.creationMode === 'advanced' ? advancedSteps : quickSteps, [value.creationMode])
+  const steps = useMemo(() => baselineEditing || value.creationMode === 'advanced' ? advancedSteps : quickSteps, [baselineEditing, value.creationMode])
   const stepIndex = Math.max(0, steps.indexOf(step))
   const validationError = validateAgentDraft(value)
   const update = <K extends keyof AgentProfileInput>(key: K, next: AgentProfileInput[K]) => onChange({ ...value, [key]: next })
 
-  useEffect(() => { saveAgentDraft(value) }, [value])
+  useEffect(() => { if (!baselineEditing) saveAgentDraft(value) }, [baselineEditing, value])
   useEffect(() => { if (!steps.includes(step)) setStep('image') }, [step, steps])
 
   const previous = () => { if (stepIndex === 0) onBack?.(); else setStep(steps[stepIndex - 1]) }
@@ -277,18 +279,18 @@ export function AgentProfileForm({ value, busy, onChange, onBack, onSubmit, subm
 
   return (
     <form className="onboarding-form agent-profile-form agent-wizard" onSubmit={(event) => { event.preventDefault(); submit() }}>
-      <div className="agent-wizard__toolbar"><div aria-label="Режим создания" className="agent-wizard__modes" role="group"><button aria-pressed={value.creationMode === 'quick'} onClick={() => update('creationMode', 'quick')} type="button">Quick</button><button aria-pressed={value.creationMode === 'advanced'} onClick={() => update('creationMode', 'advanced')} type="button">Advanced</button></div><span><Icon name="check" width={12} height={12} /> Черновик сохраняется локально</span></div>
+      <div className="agent-wizard__toolbar">{baselineEditing ? <strong>OWNER SEED · append-only</strong> : <div aria-label="Режим создания" className="agent-wizard__modes" role="group"><button aria-pressed={value.creationMode === 'quick'} onClick={() => update('creationMode', 'quick')} type="button">Quick</button><button aria-pressed={value.creationMode === 'advanced'} onClick={() => update('creationMode', 'advanced')} type="button">Advanced</button></div>}<span><Icon name={baselineEditing ? 'lock' : 'check'} width={12} height={12} /> {baselineEditing ? 'Имя, возраст и гендер заблокированы' : 'Черновик сохраняется локально'}</span></div>
       <nav aria-label="Шаги создания агента" className="agent-wizard__steps">{steps.map((item, index) => <button aria-current={item === step ? 'step' : undefined} className={item === step ? 'agent-wizard__step agent-wizard__step--active' : index < stepIndex ? 'agent-wizard__step agent-wizard__step--done' : 'agent-wizard__step'} key={item} onClick={() => setStep(item)} type="button"><span>{index + 1}</span>{stepLabels[item]}</button>)}</nav>
-      {step === 'identity' && <IdentityStep update={update} value={value} />}
+      {step === 'identity' && <IdentityStep lockedCoreIdentity={baselineEditing} update={update} value={value} />}
       {step === 'image' && <ImageStep onChange={onChange} update={update} value={value} />}
       {step === 'style' && <StyleStep update={update} value={value} />}
       {step === 'traits' && <TraitsStep update={update} value={value} />}
       {step === 'dynamics' && <DynamicsStep update={update} value={value} />}
       {step === 'relationship' && <RelationshipStep update={update} value={value} />}
       {step === 'backstory' && <BackstoryStep onChange={onChange} update={update} value={value} />}
-      {step === 'review' && <ReviewStep onPreview={(slot) => { void runPreview(slot) }} onScenario={selectPreviewScenario} previewBusy={previewBusy} previewError={previewError} previews={previews} scenario={previewScenario} value={value} />}
+      {step === 'review' && <ReviewStep baselineEditing={baselineEditing} onPreview={(slot) => { void runPreview(slot) }} onScenario={selectPreviewScenario} previewBusy={previewBusy} previewError={previewError} previews={previews} scenario={previewScenario} value={value} />}
       {step === 'review' && validationError && <div className="agent-profile-form__validation" role="alert"><Icon name="warning" width={14} height={14} /> {validationError}</div>}
-      <div className="onboarding-form__actions"><button className="button button--quiet" onClick={previous} type="button">Назад</button><button className="button button--accent" disabled={busy || (step === 'identity' && basicInvalid) || (step === 'review' && Boolean(validationError))} type="submit">{busy ? 'Создаю…' : step === 'review' ? submitLabel : 'Продолжить'} <Icon name="chevron-right" width={14} height={14} /></button></div>
+      <div className="onboarding-form__actions"><button className="button button--quiet" onClick={previous} type="button">Назад</button><button className="button button--accent" disabled={busy || (step === 'identity' && basicInvalid) || (step === 'review' && Boolean(validationError))} type="submit">{busy ? baselineEditing ? 'Сохраняю…' : 'Создаю…' : step === 'review' ? submitLabel : 'Продолжить'} <Icon name="chevron-right" width={14} height={14} /></button></div>
     </form>
   )
 }

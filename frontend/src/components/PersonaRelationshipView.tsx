@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { createStarterPersonalitySnapshot, createYuriClient, normalizePersonalitySnapshot, subscribePersonaUpdates } from '../lib/client'
+import { clonePersonalization } from '../lib/agents'
 import type {
   AffectiveDimension,
+  AgentPersonalizationProfile,
+  AgentProfile,
+  AgentProfileInput,
   PersonaTrait,
   PersonaVersion,
   PersonalitySnapshot,
@@ -13,6 +17,7 @@ import type {
 import { formatDateTime } from '../lib/datetime'
 import { dominantAffectMood } from '../lib/personality'
 import { Icon } from './Icon'
+import { AgentProfileForm } from './AgentProfileForm'
 import { YuriAvatar } from './YuriAvatar'
 
 export type PersonaRelationshipSection = 'personality' | 'relationship'
@@ -28,7 +33,21 @@ type PersonaRelationshipViewProps = {
 }
 
 type Feedback = { kind: 'success' | 'error'; text: string }
-type BusyAction = 'loading' | 'evolution' | 'pin' | 'rollback' | 'reset' | undefined
+type BusyAction = 'loading' | 'evolution' | 'pin' | 'rollback' | 'reset' | 'seed' | undefined
+
+function ownerSeedDraft(agent: AgentProfile, seed: AgentPersonalizationProfile): AgentProfileInput {
+  return {
+    name: agent.name,
+    age: agent.age,
+    gender: agent.gender,
+    preferences: seed.identity.selfDescription,
+    backstory: seed.structuredBackstory.narrative,
+    traits: { ...seed.temperament },
+    personalization: clonePersonalization(seed),
+    creationMode: 'advanced',
+    presetId: 'custom',
+  }
+}
 
 function formatDate(value?: string): string {
   if (!value) return '—'
@@ -154,12 +173,25 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
   const [busy, setBusy] = useState<BusyAction>('loading')
   const [error, setError] = useState<string>()
   const [feedback, setFeedback] = useState<Feedback>()
+  const [activeAgent, setActiveAgent] = useState<AgentProfile>()
+  const [ownerSeed, setOwnerSeed] = useState<AgentPersonalizationProfile>()
+  const [seedDraft, setSeedDraft] = useState<AgentProfileInput>()
+  const [seedEditorOpen, setSeedEditorOpen] = useState(false)
+  const [seedReason, setSeedReason] = useState('')
 
   const load = useCallback(async () => {
     setBusy('loading')
     setError(undefined)
     try {
-      setSnapshot(normalizePersonalitySnapshot(await client.getPersonaSnapshot()))
+      const [nextSnapshot, agent, seed] = await Promise.all([
+        client.getPersonaSnapshot(),
+        client.getActiveAgent(),
+        client.getActiveAgentPersonalization(),
+      ])
+      setSnapshot(normalizePersonalitySnapshot(nextSnapshot))
+      setActiveAgent(agent)
+      setOwnerSeed(seed)
+      if (agent && seed) setSeedDraft((current) => current ?? ownerSeedDraft(agent, seed))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Не удалось загрузить состояние личности.')
     } finally {
@@ -253,6 +285,34 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
     }
   }
 
+  const saveOwnerSeed = async () => {
+    if (!ownerSeed || !seedDraft) return
+    const reason = seedReason.trim()
+    if (!reason) {
+      setFeedback({ kind: 'error', text: 'Укажите причину изменения owner baseline.' })
+      return
+    }
+    setBusy('seed')
+    setFeedback(undefined)
+    try {
+      const next = await client.updateActiveAgentPersonalization({
+        expectedVersion: ownerSeed.version,
+        traits: { ...seedDraft.traits },
+        personalization: clonePersonalization(seedDraft.personalization),
+        reason,
+      })
+      setOwnerSeed(next)
+      if (activeAgent) setSeedDraft(ownerSeedDraft(activeAgent, next))
+      setSeedReason('')
+      setSeedEditorOpen(false)
+      setFeedback({ kind: 'success', text: `Owner baseline сохранён как revision v${next.version}. Текущее состояние агента не сброшено.` })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось сохранить owner baseline.' })
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const versions = useMemo(() => [...snapshot.versions].sort((a, b) => b.version - a.version), [snapshot.versions])
   const relationshipVersions = useMemo(() => [...snapshot.relationship.versions].sort((a, b) => b.version - a.version), [snapshot.relationship.versions])
   const relationshipLabels = useMemo(() => Object.fromEntries(snapshot.relationship.dimensions.map((dimension) => [dimension.id, dimension.label])), [snapshot.relationship.dimensions])
@@ -288,6 +348,18 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
       <button aria-selected={!relationship} className={relationship ? 'persona-tab' : 'persona-tab persona-tab--active'} disabled={!onSelectSection} onClick={() => onSelectSection?.('personality')} role="tab" type="button"><Icon name="personality" width={15} height={15} /> Personality</button>
       <button aria-selected={relationship} className={relationship ? 'persona-tab persona-tab--active' : 'persona-tab'} disabled={!onSelectSection} onClick={() => onSelectSection?.('relationship')} role="tab" type="button"><Icon name="relationship" width={15} height={15} /> Relationship</button>
     </div>
+
+    {!relationship && ownerSeed && <section className="owner-seed-summary" aria-labelledby="owner-seed-title">
+      <div><span className="section-heading__overline">OWNER RESET BASELINE · v{ownerSeed.version}</span><h2 id="owner-seed-title">Исходная персонализация</h2><p>Это append-only baseline владельца. Новая revision задаёт будущие reset-значения и границы рефлексии, но не переписывает текущие persona, affect или relationship.</p></div>
+      <button className="button button--quiet" disabled={busy !== undefined || !seedDraft} onClick={() => setSeedEditorOpen((open) => !open)} type="button"><Icon name={seedEditorOpen ? 'x' : 'personality'} width={14} height={14} /> {seedEditorOpen ? 'Закрыть редактор' : 'Редактировать baseline'}</button>
+    </section>}
+
+    {!relationship && seedEditorOpen && seedDraft && <section className="owner-seed-editor" aria-labelledby="owner-seed-editor-title">
+      <header><div><span className="section-heading__overline">APPEND-ONLY OWNER REVISION</span><h2 id="owner-seed-editor-title">Новая версия baseline</h2></div><span className="owner-seed-editor__version">v{ownerSeed?.version ?? 0} → v{(ownerSeed?.version ?? 0) + 1}</span></header>
+      <label className="owner-seed-editor__reason"><span>Причина изменения <strong>обязательно</strong></span><textarea maxLength={500} onChange={(event) => setSeedReason(event.target.value)} placeholder="Например: хочу сделать стиль общения мягче и добавить важный эпизод предыстории" rows={2} value={seedReason} /></label>
+      <div className="owner-seed-editor__warning"><Icon name="warning" width={14} height={14} /><span>Имя, возраст и гендер остаются неизменными. Сохранение не выполняет reset; это отдельное явное действие ниже на странице.</span></div>
+      <AgentProfileForm baselineEditing busy={busy === 'seed'} onBack={() => setSeedEditorOpen(false)} onChange={setSeedDraft} onSubmit={() => void saveOwnerSeed()} submitLabel="Сохранить revision" value={seedDraft} />
+    </section>}
 
     {loading && <div className="persona-loading" role="status"><span className="memory-spinner" /> {relationship ? 'Загружаю состояние связи…' : 'Загружаю состояние личности…'}</div>}
     {error && <div className="tasks-feedback tasks-feedback--error" role="alert"><Icon name="warning" width={14} height={14} /> {error}<button aria-label="Закрыть ошибку" className="icon-button icon-button--small" onClick={() => setError(undefined)} type="button"><Icon name="x" width={13} height={13} /></button></div>}

@@ -43,6 +43,7 @@ export type {
   AgentEvolutionPolicy,
   AgentPersonalizationInput,
   AgentPersonalizationProfile,
+  AgentPersonalizationUpdate,
   AgentProfile,
   AgentProfileInput,
   PersonalityPreviewScenario,

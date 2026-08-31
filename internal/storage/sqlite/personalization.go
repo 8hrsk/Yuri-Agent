@@ -96,6 +96,17 @@ func (r *PersonalizationRepository) AppendVersion(ctx context.Context, seed doma
 		return domain.PersonalizationSeed{}, wrappedSQLError("begin append personalization seed", err)
 	}
 	defer tx.Rollback()
+	seed, err = r.appendVersionTx(ctx, tx, seed, expectedVersion)
+	if err != nil {
+		return domain.PersonalizationSeed{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.PersonalizationSeed{}, wrappedSQLError("commit personalization seed revision", err)
+	}
+	return seed, nil
+}
+
+func (r *PersonalizationRepository) appendVersionTx(ctx context.Context, tx *sql.Tx, seed domain.PersonalizationSeed, expectedVersion uint64) (domain.PersonalizationSeed, error) {
 	current, err := scanPersonalizationSeed(tx.QueryRowContext(ctx, personalizationSelect+`
 		FROM personalization_seed_heads AS ph
 		JOIN personalization_seed_versions AS pv ON pv.agent_id = ph.agent_id AND pv.version = ph.version
@@ -124,8 +135,33 @@ func (r *PersonalizationRepository) AppendVersion(ctx context.Context, seed doma
 	if err := r.appendTx(ctx, tx, seed); err != nil {
 		return domain.PersonalizationSeed{}, err
 	}
+	return seed, nil
+}
+
+// AppendPersonalizationWithAudit persists an explicit owner revision and its
+// redacted audit event atomically. Runtime reflection has no access to this
+// aggregate boundary.
+func (repositories *Repositories) AppendPersonalizationWithAudit(ctx context.Context, seed domain.PersonalizationSeed, expectedVersion uint64, event AuditEvent) (domain.PersonalizationSeed, error) {
+	if repositories == nil || repositories.Personalization == nil || repositories.Audit == nil {
+		return domain.PersonalizationSeed{}, fmt.Errorf("%w: personalization and audit repositories are required", domain.ErrInvalidArgument)
+	}
+	if err := validateAuditEvent(event); err != nil {
+		return domain.PersonalizationSeed{}, err
+	}
+	tx, err := repositories.Personalization.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.PersonalizationSeed{}, wrappedSQLError("begin audited personalization append", err)
+	}
+	defer tx.Rollback()
+	seed, err = repositories.Personalization.appendVersionTx(ctx, tx, seed, expectedVersion)
+	if err != nil {
+		return domain.PersonalizationSeed{}, err
+	}
+	if err := appendAuditEvent(ctx, tx, event); err != nil {
+		return domain.PersonalizationSeed{}, err
+	}
 	if err := tx.Commit(); err != nil {
-		return domain.PersonalizationSeed{}, wrappedSQLError("commit personalization seed revision", err)
+		return domain.PersonalizationSeed{}, wrappedSQLError("commit audited personalization append", err)
 	}
 	return seed, nil
 }

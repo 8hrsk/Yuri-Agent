@@ -5,15 +5,31 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { PersonalitySnapshot, YuriClient } from '../lib/contracts'
+import type { AgentPersonalizationProfile, AgentProfile, PersonalitySnapshot, YuriClient } from '../lib/contracts'
+import { clonePersonalization, defaultAgentDraft } from '../lib/agents'
 import { createStarterPersonalitySnapshot } from '../lib/personality'
 import { PersonaRelationshipView } from './PersonaRelationshipView'
 
 const snapshot: PersonalitySnapshot = createStarterPersonalitySnapshot()
+const activeAgent: AgentProfile = {
+  id: 'agent-yuri', name: 'Yuri', age: 21, gender: 'female', preferences: defaultAgentDraft.preferences,
+  backstory: '', traits: { ...defaultAgentDraft.traits }, active: true,
+  createdAt: '2026-08-31T08:00:00Z', updatedAt: '2026-08-31T08:00:00Z',
+}
+const ownerSeed: AgentPersonalizationProfile = {
+  ...clonePersonalization(defaultAgentDraft.personalization),
+  agentId: activeAgent.id, schemaVersion: 2, version: 1, revisionId: 'seed-1',
+  operation: 'owner_create', reason: 'initial owner seed', createdAt: activeAgent.createdAt, updatedAt: activeAgent.updatedAt,
+  temperament: { ...defaultAgentDraft.traits },
+}
+const updateActiveAgentPersonalization = vi.fn(async () => ({ ...ownerSeed, version: 2, revisionId: 'seed-2' }))
 
 const clientStub = {
   mode: 'mock',
   getPersonaSnapshot: async () => snapshot,
+  getActiveAgent: async () => activeAgent,
+  getActiveAgentPersonalization: async () => ownerSeed,
+  updateActiveAgentPersonalization,
 } as unknown as YuriClient
 
 vi.mock('../lib/client', () => ({
@@ -65,5 +81,25 @@ describe('Personality and Relationship are two destinations, not one page', () =
     // The view does not move itself: the shell owns the destination, so the
     // nav rail and the page can never disagree about where the user is.
     expect(screen.getByRole('heading', { name: 'Черты характера' })).toBeInTheDocument()
+  })
+
+  it('creates an append-only owner baseline revision without unlocking core identity', async () => {
+    const user = userEvent.setup()
+    updateActiveAgentPersonalization.mockClear()
+    render(<PersonaRelationshipView section="personality" />)
+    await waitFor(() => expect(screen.getByRole('button', { name: /Редактировать baseline/ })).toBeEnabled())
+
+    await user.click(screen.getByRole('button', { name: /Редактировать baseline/ }))
+    expect(screen.getByRole('textbox', { name: /Имя агента/ })).toBeDisabled()
+    await user.type(screen.getByRole('textbox', { name: /Причина изменения/ }), 'Сделать исходный стиль мягче')
+    await user.click(screen.getByRole('button', { name: /Review/ }))
+    await user.click(screen.getByRole('button', { name: /Сохранить revision/ }))
+
+    await waitFor(() => expect(updateActiveAgentPersonalization).toHaveBeenCalledTimes(1))
+    expect(updateActiveAgentPersonalization).toHaveBeenCalledWith(expect.objectContaining({
+      expectedVersion: 1,
+      reason: 'Сделать исходный стиль мягче',
+    }))
+    expect(await screen.findByText(/Owner baseline сохранён как revision v2/)).toBeInTheDocument()
   })
 })

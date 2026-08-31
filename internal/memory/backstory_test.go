@@ -136,6 +136,50 @@ func TestHydrateBackstoryIsIdempotentAndOnlyVersionsChangedEpisode(t *testing.T)
 	}
 }
 
+func TestHydrateBackstoryTombstonesEpisodesRemovedFromOwnerSeed(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	clock := &testClock{current: now}
+	store := newMemoryTestStore()
+	engine := newBackstoryTestEngine(t, store, clock)
+	seed := backstoryTestSeed(t, now)
+	created, err := engine.HydrateBackstory(context.Background(), seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clock.current = now.Add(time.Hour)
+	updated := seed
+	updated.Version = 2
+	updated.RevisionID = "agent-emily:personalization:v2"
+	updated.ParentID = seed.RevisionID
+	updated.ParentVersion = seed.Version
+	updated.Operation = domain.PersonalizationOperationUpdate
+	updated.Reason = "owner removed an episode"
+	updated.UpdatedAt = clock.current
+	updated.Backstory.Episodes = append([]domain.BackstoryEpisode(nil), seed.Backstory.Episodes[1:]...)
+	if err := updated.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	results, err := engine.HydrateBackstory(context.Background(), updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 || results[0].Changed || results[1].Operation != OperationForget || !results[1].Changed {
+		t.Fatalf("results = %#v", results)
+	}
+	removed, err := store.GetMemory(context.Background(), created[1].Memory.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Lifecycle != domain.MemoryLifecycleDeleted || removed.Version != 2 {
+		t.Fatalf("removed memory = %#v", removed)
+	}
+	versions, _ := store.ListMemoryVersions(context.Background(), removed.ID, 0)
+	if len(versions) != 2 {
+		t.Fatalf("versions = %#v", versions)
+	}
+}
+
 func TestHydrateBackstoryRespectsDeletedMemoryAndAgentBoundary(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	clock := &testClock{current: now}

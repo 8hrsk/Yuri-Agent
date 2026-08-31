@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/OrdoAI/yuri-agent/internal/config"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
+	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 )
 
 type AgentProfileView struct {
@@ -54,6 +56,13 @@ type CreateAgentInput struct {
 	Backstory       string                           `json:"backstory,omitempty"`
 	Traits          map[string]float64               `json:"traits,omitempty"`
 	Personalization *CreateAgentPersonalizationInput `json:"personalization,omitempty"`
+}
+
+type UpdateAgentPersonalizationInput struct {
+	ExpectedVersion uint64                          `json:"expectedVersion"`
+	Traits          map[string]float64              `json:"traits"`
+	Personalization CreateAgentPersonalizationInput `json:"personalization"`
+	Reason          string                          `json:"reason"`
 }
 
 // CreateAgentPersonalizationInput is the owner-authored v2 part of agent
@@ -234,6 +243,76 @@ func (b *Bridge) GetActiveAgentPersonalization() (PersonalizationProfileView, er
 		return PersonalizationProfileView{}, err
 	}
 	return personalizationProfileView(seed), nil
+}
+
+// UpdateActiveAgentPersonalization appends a new owner-authored reset
+// baseline. It never mutates the current persona, relationship or affect; an
+// explicit reset remains a separate owner action.
+func (b *Bridge) UpdateActiveAgentPersonalization(input UpdateAgentPersonalizationInput) (PersonalizationProfileView, error) {
+	ctx, cancel := b.context()
+	defer cancel()
+	agentID := b.personaProfileID()
+	current, err := b.repositories.Personalization.Get(ctx, agentID)
+	if err != nil {
+		return PersonalizationProfileView{}, err
+	}
+	if input.ExpectedVersion == 0 || input.ExpectedVersion != current.Version {
+		return PersonalizationProfileView{}, domain.ErrConflict
+	}
+	reason := strings.TrimSpace(input.Reason)
+	if reason == "" {
+		return PersonalizationProfileView{}, fmt.Errorf("%w: owner revision reason is required", domain.ErrInvalidArgument)
+	}
+	identity, style, dynamics, relationshipSeed, backstory, evolutionPolicy := input.Personalization.domainValues()
+	now := time.Now().UTC()
+	if !now.After(current.UpdatedAt) {
+		now = current.UpdatedAt.Add(time.Nanosecond)
+	}
+	next := current
+	next.Version = current.Version + 1
+	next.RevisionID = domain.ID(fmt.Sprintf("%s:personalization:v%d", agentID, next.Version))
+	next.ParentID = current.RevisionID
+	next.ParentVersion = current.Version
+	next.Operation = domain.PersonalizationOperationUpdate
+	next.Identity = identity
+	next.CommunicationStyle = style
+	next.Temperament = domain.TemperamentFromTraits(input.Traits)
+	next.EmotionalDynamics = dynamics
+	next.RelationshipSeed = relationshipSeed
+	next.Backstory = backstory
+	next.EvolutionPolicy = evolutionPolicy
+	next.Reason = reason
+	next.UpdatedAt = now
+	if err := next.Validate(); err != nil {
+		return PersonalizationProfileView{}, err
+	}
+	auditID, err := domain.NewID("audit")
+	if err != nil {
+		return PersonalizationProfileView{}, err
+	}
+	payload, err := json.Marshal(map[string]any{
+		"agent_id": agentID, "from_version": current.Version, "to_version": next.Version,
+		"revision_id": next.RevisionID, "reason_recorded": true,
+	})
+	if err != nil {
+		return PersonalizationProfileView{}, err
+	}
+	next, err = b.repositories.AppendPersonalizationWithAudit(ctx, next, current.Version, storage.AuditEvent{
+		ID: auditID, Actor: domain.ActorUser, Action: "personalization.owner_seed.update",
+		Target: string(agentID), Decision: domain.PermissionAllow, PayloadRedacted: string(payload), CreatedAt: now,
+	})
+	if err != nil {
+		return PersonalizationProfileView{}, err
+	}
+	// Backstory memories are a derived projection. A future chat retries
+	// hydration, so a cache/index failure must not make a committed owner
+	// revision look rolled back to the UI.
+	if engine, engineErr := b.newMemoryEngine(nil, "", agentID); engineErr == nil {
+		if results, hydrateErr := engine.HydrateBackstory(ctx, next); hydrateErr == nil && len(results) > 0 {
+			b.emitMemoryUpdated(len(results))
+		}
+	}
+	return personalizationProfileView(next), nil
 }
 
 func (b *Bridge) CreateAgent(input CreateAgentInput) (AgentProfileView, error) {

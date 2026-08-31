@@ -131,6 +131,112 @@ func TestCreateAgentPersistsOwnerIdentityAndInitialPersona(t *testing.T) {
 	}
 }
 
+func TestUpdateActiveAgentPersonalizationAppendsOwnerBaselineWithoutResettingRuntime(t *testing.T) {
+	bridge := newAgentTestBridge(t)
+	created, err := bridge.CreateAgent(CreateAgentInput{Name: "Эми", Gender: "female"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	agentID := domain.ID(created.ID)
+	seed, err := bridge.repositories.Personalization.Get(ctx, agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	personaBefore, _ := bridge.repositories.Persona.Get(ctx, agentID)
+	relationshipBefore, _ := bridge.repositories.Relationship.Get(ctx, agentID)
+	affectBefore, _ := bridge.repositories.Affect.Get(ctx, agentID)
+	auditBefore, _ := bridge.repositories.Audit.List(ctx, 20, 0)
+	input := updatePersonalizationInputFromSeed(seed)
+	input.ExpectedVersion = seed.Version
+	input.Reason = "Владелец сделал характер теплее"
+	input.Traits["warmth"] = .91
+	input.Personalization.CommunicationStyle.Humor = .82
+	input.Personalization.Identity.Role = "картограф"
+	input.Personalization.StructuredBackstory.Summary = "Картограф, которая учится доверять людям."
+
+	updated, err := bridge.UpdateActiveAgentPersonalization(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Version != seed.Version+1 || updated.Temperament.Warmth != .91 || updated.CommunicationStyle.Humor != .82 || updated.Reason != input.Reason {
+		t.Fatalf("updated owner seed = %#v", updated)
+	}
+	original, err := bridge.repositories.Personalization.GetVersion(ctx, agentID, seed.Version)
+	if err != nil || original.Temperament.Warmth == .91 || original.Identity.Role == "картограф" {
+		t.Fatalf("previous owner seed changed = %#v, %v", original, err)
+	}
+	personaAfter, _ := bridge.repositories.Persona.Get(ctx, agentID)
+	relationshipAfter, _ := bridge.repositories.Relationship.Get(ctx, agentID)
+	affectAfter, _ := bridge.repositories.Affect.Get(ctx, agentID)
+	if personaAfter.Version != personaBefore.Version || personaAfter.Traits["warmth"] != personaBefore.Traits["warmth"] || relationshipAfter.Version != relationshipBefore.Version || affectAfter.Version != affectBefore.Version {
+		t.Fatalf("owner baseline update reset runtime: persona=%#v relationship=%#v affect=%#v", personaAfter, relationshipAfter, affectAfter)
+	}
+	audit, err := bridge.repositories.Audit.List(ctx, 10, 0)
+	if err != nil || len(audit) != len(auditBefore)+1 || audit[0].Action != "personalization.owner_seed.update" || audit[0].Actor != domain.ActorUser {
+		t.Fatalf("owner seed audit = %#v, %v", audit, err)
+	}
+	if strings.Contains(audit[0].PayloadRedacted, input.Reason) {
+		t.Fatalf("owner reason leaked into redacted audit payload: %s", audit[0].PayloadRedacted)
+	}
+	if _, err := bridge.UpdateActiveAgentPersonalization(input); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("stale owner revision error = %v", err)
+	}
+	auditAfterConflict, _ := bridge.repositories.Audit.List(ctx, 10, 0)
+	if len(auditAfterConflict) != len(audit) {
+		t.Fatalf("stale update wrote audit: %#v", auditAfterConflict)
+	}
+}
+
+func updatePersonalizationInputFromSeed(seed domain.PersonalizationSeed) UpdateAgentPersonalizationInput {
+	bounds := make(map[string]CreateAgentNumericRangeInput, len(seed.EvolutionPolicy.TraitBounds))
+	for name, value := range seed.EvolutionPolicy.TraitBounds {
+		bounds[name] = CreateAgentNumericRangeInput{Min: value.Min, Max: value.Max}
+	}
+	episodes := make([]CreateAgentBackstoryEpisodeInput, 0, len(seed.Backstory.Episodes))
+	for _, episode := range seed.Backstory.Episodes {
+		episodes = append(episodes, CreateAgentBackstoryEpisodeInput{
+			ID: episode.ID, Title: episode.Title, Content: episode.Content, Kind: episode.Kind,
+			People: append([]string(nil), episode.People...), Place: episode.Place,
+			EmotionalValence: episode.EmotionalValence, Sequence: episode.Sequence,
+		})
+	}
+	return UpdateAgentPersonalizationInput{
+		ExpectedVersion: seed.Version, Traits: seed.Temperament.Traits(),
+		Personalization: CreateAgentPersonalizationInput{
+			Identity: CreateAgentIdentityInput{
+				PreferredLanguage: seed.Identity.PreferredLanguage, Pronouns: seed.Identity.Pronouns,
+				UserAddress: seed.Identity.UserAddress, SelfDescription: seed.Identity.SelfDescription, Role: seed.Identity.Role,
+			},
+			CommunicationStyle: CreateAgentCommunicationStyleInput{
+				Verbosity: seed.CommunicationStyle.Verbosity, Softness: seed.CommunicationStyle.Softness,
+				Humor: seed.CommunicationStyle.Humor, Figurativeness: seed.CommunicationStyle.Figurativeness,
+				Expressiveness: seed.CommunicationStyle.Expressiveness, Supportiveness: seed.CommunicationStyle.Supportiveness,
+				Formality: seed.CommunicationStyle.Formality, Teasing: seed.CommunicationStyle.Teasing,
+				EmojiFrequency: seed.CommunicationStyle.EmojiFrequency, Flirtation: seed.CommunicationStyle.Flirtation,
+				ConversationalInitiative: seed.CommunicationStyle.ConversationalInitiative,
+			},
+			EmotionalDynamics: CreateAgentEmotionalDynamicsInput{
+				Reactivity: seed.EmotionalDynamics.Reactivity, ResponseIntensity: seed.EmotionalDynamics.ResponseIntensity,
+				RecoverySpeed: seed.EmotionalDynamics.RecoverySpeed, PositivePersistence: seed.EmotionalDynamics.PositivePersistence,
+				NegativePersistence: seed.EmotionalDynamics.NegativePersistence, Expression: seed.EmotionalDynamics.Expression,
+				Masking: seed.EmotionalDynamics.Masking, ConflictStyle: seed.EmotionalDynamics.ConflictStyle,
+				Triggers: seed.EmotionalDynamics.Triggers, SoothingStrategies: seed.EmotionalDynamics.SoothingStrategies,
+			},
+			RelationshipSeed: CreateAgentRelationshipSeedInput{
+				Preset: string(seed.RelationshipSeed.Preset), Dimensions: seed.RelationshipSeed.Dimensions, Summary: seed.RelationshipSeed.Summary,
+			},
+			StructuredBackstory: CreateAgentStructuredBackstoryInput{
+				Narrative: seed.Backstory.Narrative, Summary: seed.Backstory.Summary, Episodes: episodes,
+			},
+			EvolutionPolicy: CreateAgentEvolutionPolicyInput{
+				LockedFields: seed.EvolutionPolicy.LockedFields, TraitBounds: bounds,
+				ReflectionMode: string(seed.EvolutionPolicy.ReflectionMode), ReflectionCooldownMinutes: seed.EvolutionPolicy.ReflectionCooldownMinutes,
+			},
+		},
+	}
+}
+
 func TestCreateAgentRoundTripsPersonalizationProfileV2(t *testing.T) {
 	bridge := newAgentTestBridge(t)
 	now := time.Date(2026, 8, 31, 20, 0, 0, 0, time.UTC)

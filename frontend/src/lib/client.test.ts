@@ -314,11 +314,18 @@ describe('Yuri client contract', () => {
       evolutionPolicy: defaultAgentDraft.personalization.evolutionPolicy,
       createdAt: '2026-08-29T00:00:00Z', updatedAt: '2026-08-29T00:00:00Z',
     }
+    const personalizationUpdate = {
+      expectedVersion: 1,
+      traits: { ...defaultAgentDraft.traits, warmth: 0.72 },
+      personalization: defaultAgentDraft.personalization,
+      reason: 'Owner adjusted the reset baseline',
+    }
     const bridge = {
       ListConversations: () => [],
       ListAgents: () => { calls.push({ name: 'ListAgents', args: [] }); return [wireAgent] },
       GetActiveAgent: () => { calls.push({ name: 'GetActiveAgent', args: [] }); return wireAgent },
       GetActiveAgentPersonalization: () => { calls.push({ name: 'GetActiveAgentPersonalization', args: [] }); return wirePersonalization },
+      UpdateActiveAgentPersonalization: (input: unknown) => { calls.push({ name: 'UpdateActiveAgentPersonalization', args: [input] }); return { ...wirePersonalization, version: 2, revisionId: 'revision-2' } },
       CreateAgent: (input: unknown) => { calls.push({ name: 'CreateAgent', args: [input] }); return wireAgent },
       SetActiveAgent: (input: unknown) => { calls.push({ name: 'SetActiveAgent', args: [input] }); return wireAgent },
     }
@@ -330,12 +337,14 @@ describe('Yuri client contract', () => {
       await expect(client.listAgents()).resolves.toMatchObject([{ id: 'agent-yuri', name: 'Юри', backstory: 'Выросла среди старых карт.', traits: { warmth: 0.6 }, active: true }])
       await expect(client.getActiveAgent()).resolves.toMatchObject({ id: 'agent-yuri', backstory: 'Выросла среди старых карт.' })
       await expect(client.getActiveAgentPersonalization()).resolves.toMatchObject({ agentId: 'agent-yuri', schemaVersion: 2, revisionId: 'revision-1' })
+      await expect(client.updateActiveAgentPersonalization(personalizationUpdate)).resolves.toMatchObject({ agentId: 'agent-yuri', version: 2, revisionId: 'revision-2' })
       await expect(client.createAgent(defaultAgentDraft)).resolves.toMatchObject({ id: 'agent-yuri', backstory: 'Выросла среди старых карт.' })
       await expect(client.setActiveAgent('agent-yuri')).resolves.toMatchObject({ id: 'agent-yuri', active: true })
       expect(calls).toEqual([
         { name: 'ListAgents', args: [] },
         { name: 'GetActiveAgent', args: [] },
         { name: 'GetActiveAgentPersonalization', args: [] },
+        { name: 'UpdateActiveAgentPersonalization', args: [personalizationUpdate] },
         { name: 'CreateAgent', args: [defaultAgentDraft] },
         { name: 'SetActiveAgent', args: [{ id: 'agent-yuri' }] },
       ])

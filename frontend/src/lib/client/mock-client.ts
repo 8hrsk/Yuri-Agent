@@ -3,6 +3,7 @@ import type {
   ActivityListOptions,
   AgentProfile,
   AgentProfileInput,
+  AgentPersonalizationUpdate,
   PersonalityPreview,
   PersonalityPreviewScenario,
   AgentPersonalizationProfile,
@@ -249,6 +250,30 @@ class MockYuriClient implements YuriClient {
   async getActiveAgentPersonalization(): Promise<AgentPersonalizationProfile | undefined> {
     const value = this.activeAgentId ? this.agentPersonalization.get(this.activeAgentId) : undefined
     return value ? { ...value, ...clonePersonalization(value), temperament: { ...value.temperament } } : undefined
+  }
+
+  async updateActiveAgentPersonalization(input: AgentPersonalizationUpdate): Promise<AgentPersonalizationProfile> {
+    if (!this.activeAgentId) throw new Error('Активный агент не выбран.')
+    const current = this.agentPersonalization.get(this.activeAgentId)
+    if (!current) throw new Error('Owner seed не найден.')
+    if (input.expectedVersion !== current.version) throw new Error('Owner seed уже изменился. Перезагрузите редактор.')
+    const reason = input.reason.trim()
+    if (!reason) throw new Error('Укажите причину изменения owner seed.')
+    const now = nowIso()
+    const next: AgentPersonalizationProfile = {
+      ...clonePersonalization(input.personalization),
+      agentId: current.agentId,
+      schemaVersion: current.schemaVersion,
+      version: current.version + 1,
+      revisionId: `${current.agentId}:personalization:v${current.version + 1}`,
+      operation: 'update',
+      reason,
+      createdAt: current.createdAt,
+      updatedAt: now,
+      temperament: { ...input.traits },
+    }
+    this.agentPersonalization.set(current.agentId, next)
+    return { ...next, ...clonePersonalization(next), temperament: { ...next.temperament } }
   }
 
   async createAgent(input: AgentProfileInput): Promise<AgentProfile> {
