@@ -9,8 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OrdoAI/yuri-agent/internal/agent"
 	"github.com/OrdoAI/yuri-agent/internal/config"
+	contextbuilder "github.com/OrdoAI/yuri-agent/internal/context"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
+	"github.com/OrdoAI/yuri-agent/internal/memory"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 )
 
@@ -219,6 +222,157 @@ func TestCreateAgentRoundTripsPersonalizationProfileV2(t *testing.T) {
 	}
 }
 
+func TestStructuredBackstoryHydrationRoundTripsThroughSQLite(t *testing.T) {
+	bridge := newAgentTestBridge(t)
+	created, err := bridge.CreateAgent(CreateAgentInput{Name: "Эми", Gender: "female"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentID := domain.ID(created.ID)
+	seed, err := bridge.repositories.Personalization.Get(context.Background(), agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed.ParentID = seed.RevisionID
+	seed.ParentVersion = seed.Version
+	seed.Version++
+	seed.RevisionID = domain.ID(fmt.Sprintf("%s:personalization:v%d", agentID, seed.Version))
+	seed.Operation = domain.PersonalizationOperationUpdate
+	seed.Reason = "owner added structured backstory"
+	seed.UpdatedAt = seed.UpdatedAt.Add(time.Minute)
+	seed.Backstory.Narrative = "RAW-NARRATIVE-ONLY: подробная история, которая не должна постоянно попадать в prompt."
+	seed.Backstory.Summary = "Картограф, выросшая рядом с обсерваторией."
+	seed.Backstory.Episodes = []domain.BackstoryEpisode{{
+		ID: "first-comet", Title: "Первая комета",
+		Content: "Впервые увидела комету вместе с наставницей.",
+		Kind:    "formative", People: []string{"наставница"}, Place: "обсерватория",
+		EmotionalValence: .8, Sequence: 1,
+	}}
+	seed, err = bridge.repositories.Personalization.AppendVersion(context.Background(), seed, seed.ParentVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := bridge.newMemoryEngine(nil, "", agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := engine.HydrateBackstory(context.Background(), seed)
+	if err != nil || len(first) != 1 || !first[0].Created {
+		t.Fatalf("hydrate = %#v, %v", first, err)
+	}
+	stored, err := bridge.repositories.Memories.GetForAgent(context.Background(), agentID, first[0].Memory.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := memory.ParseBackstoryMemoryPayload(stored.ContentJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Nature != domain.MemoryNatureFiction || payload.EpisodeID != "first-comet" || payload.PersonalizationRevisionID != seed.RevisionID {
+		t.Fatalf("stored fictional memory = %#v, payload = %#v", stored, payload)
+	}
+	sources, err := bridge.repositories.Memories.ListSources(context.Background(), stored.ID)
+	if err != nil || len(sources) != 1 || sources[0].SourceType != memory.BackstorySourceIdentitySeed {
+		t.Fatalf("sources = %#v, %v", sources, err)
+	}
+	repeated, err := engine.HydrateBackstory(context.Background(), seed)
+	if err != nil || repeated[0].Changed {
+		t.Fatalf("repeat = %#v, %v", repeated, err)
+	}
+	recalled, err := engine.Recall(context.Background(), "комета", memory.RecallOptions{
+		AgentID: agentID, Mode: memory.RecallAutomatic, Limit: 3, Now: seed.UpdatedAt,
+	})
+	if err != nil || len(recalled) != 1 || recalled[0].Memory.ID != stored.ID || recalled[0].Memory.Nature != domain.MemoryNatureFiction {
+		t.Fatalf("fictional recall = %#v, %v", recalled, err)
+	}
+	conversationID := domain.ID("conversation-selective-backstory")
+	if err := bridge.repositories.Conversations.Create(context.Background(), storage.Conversation{
+		ID: conversationID, AgentID: agentID, Title: "Проверка памяти", CreatedAt: seed.UpdatedAt, UpdatedAt: seed.UpdatedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assembler, err := contextbuilder.New(desktopContextSource{engine: engine, repositories: bridge.repositories, agentID: agentID}, contextbuilder.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assemble := func(query string) string {
+		t.Helper()
+		snapshot, assembleErr := assembler.Assemble(context.Background(), contextbuilder.Input{
+			AgentID: agentID, ConversationID: conversationID, Query: query,
+			ImmutablePolicy: "POLICY", IdentitySeed: "IDENTITY",
+			BackstorySummary: domain.BackstoryIdentitySummary(seed.Backstory),
+			Transcript:       []agent.Message{{Role: agent.RoleUser, Content: query}},
+		})
+		if assembleErr != nil {
+			t.Fatal(assembleErr)
+		}
+		var joined strings.Builder
+		for _, message := range snapshot.Messages {
+			joined.WriteString(message.Content)
+			joined.WriteByte('\n')
+		}
+		return joined.String()
+	}
+	relevantContext := assemble("комета")
+	if !strings.Contains(relevantContext, seed.Backstory.Summary) || !strings.Contains(relevantContext, "комет") ||
+		!strings.Contains(relevantContext, "nature=fiction") || !strings.Contains(relevantContext, "source=identity_seed:") ||
+		strings.Contains(relevantContext, "RAW-NARRATIVE-ONLY") {
+		t.Fatalf("relevant context = %s", relevantContext)
+	}
+	unrelatedContext := assemble("налоги")
+	if !strings.Contains(unrelatedContext, seed.Backstory.Summary) || strings.Contains(unrelatedContext, "Впервые увидела комету") ||
+		strings.Contains(unrelatedContext, "RAW-NARRATIVE-ONLY") {
+		t.Fatalf("unrelated context = %s", unrelatedContext)
+	}
+	versions, err := bridge.repositories.Memories.ListVersionsForAgent(context.Background(), agentID, stored.ID, 0)
+	if err != nil || len(versions) != 1 {
+		t.Fatalf("versions = %#v, %v", versions, err)
+	}
+}
+
+func TestLegacyBackstoryIsMigratedAndHydratedBeforeContextUse(t *testing.T) {
+	bridge := newAgentTestBridge(t)
+	original := "Эми выросла рядом с маяком. По вечерам она записывала истории моряков."
+	created, err := bridge.CreateAgent(CreateAgentInput{
+		Name: "Эми", Gender: "female", Backstory: original,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentID := domain.ID(created.ID)
+	engine, err := bridge.newMemoryEngine(nil, "", agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed, err := bridge.hydrateAgentBackstory(context.Background(), engine, agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seed.Version != 2 || seed.Operation != domain.PersonalizationOperationMigration || seed.Backstory.Narrative != original ||
+		len(seed.Backstory.Episodes) != 1 || seed.Backstory.Summary == "" {
+		t.Fatalf("migrated seed = %#v", seed)
+	}
+	recalled, err := engine.Recall(context.Background(), "маяк", memory.RecallOptions{
+		AgentID: agentID, Mode: memory.RecallAutomatic, Limit: 3, Now: time.Now().UTC(),
+	})
+	if err != nil || len(recalled) != 1 || recalled[0].Memory.Nature != domain.MemoryNatureFiction {
+		t.Fatalf("legacy recall = %#v, %v", recalled, err)
+	}
+	firstMemory := recalled[0].Memory
+	secondSeed, err := bridge.hydrateAgentBackstory(context.Background(), engine, agentID)
+	if err != nil || secondSeed.Version != seed.Version {
+		t.Fatalf("repeat seed = %#v, %v", secondSeed, err)
+	}
+	versions, err := bridge.repositories.Memories.ListVersionsForAgent(context.Background(), agentID, firstMemory.ID, 0)
+	if err != nil || len(versions) != 1 {
+		t.Fatalf("repeat memory versions = %#v, %v", versions, err)
+	}
+	originalSeed, err := bridge.repositories.Personalization.GetVersion(context.Background(), agentID, 1)
+	if err != nil || originalSeed.Backstory.Narrative != original || len(originalSeed.Backstory.Episodes) != 0 {
+		t.Fatalf("original seed was not preserved: %#v, %v", originalSeed, err)
+	}
+}
+
 func TestAgentIdentitySeedDeclaresBackstoryBoundaryWithoutEmbeddingRawText(t *testing.T) {
 	now := time.Now().UTC()
 	profile, err := domain.NewAgentProfileWithBackstory("agent_yuri", "Юри", 21, "female", "", "Секретная вымышленная история", now)
@@ -226,7 +380,7 @@ func TestAgentIdentitySeedDeclaresBackstoryBoundaryWithoutEmbeddingRawText(t *te
 		t.Fatal(err)
 	}
 	seed := agentIdentitySeed(profile, []domain.AgentProfile{profile})
-	for _, required := range []string{"вымышленная личная история", "subjective identity data", "не воспринимай её как факт", "разрешение"} {
+	for _, required := range []string{"вымышленная личная история", "subjective identity summary", "fictional episodes", "не воспринимай их как факт", "разрешение"} {
 		if !strings.Contains(strings.ToLower(seed), strings.ToLower(required)) {
 			t.Fatalf("identity seed missing boundary %q: %s", required, seed)
 		}

@@ -36,6 +36,7 @@ const (
 	ContentOpinion   = domain.MemoryNatureOpinion
 	ContentEmotion   = domain.MemoryNatureEmotion
 	ContentInference = domain.MemoryNatureInference
+	ContentFiction   = domain.MemoryNatureFiction
 
 	SensitivityPublic          = domain.MemorySensitivityPublic
 	SensitivityPrivate         = domain.MemorySensitivityPrivate

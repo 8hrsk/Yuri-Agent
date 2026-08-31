@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 )
@@ -127,6 +128,48 @@ func (r *PersonalizationRepository) AppendVersion(ctx context.Context, seed doma
 		return domain.PersonalizationSeed{}, wrappedSQLError("commit personalization seed revision", err)
 	}
 	return seed, nil
+}
+
+// MigrateLegacyBackstory is a narrow trusted migration boundary. Unlike
+// AppendVersion it does not accept caller-authored replacement state: it loads
+// the current head and applies the deterministic domain migration itself.
+// Reflection and model output therefore cannot use it to rewrite owner identity.
+func (r *PersonalizationRepository) MigrateLegacyBackstory(ctx context.Context, agentID domain.ID, now time.Time) (domain.PersonalizationSeed, bool, error) {
+	if err := requireDatabase(r.db); err != nil {
+		return domain.PersonalizationSeed{}, false, err
+	}
+	if err := contextErr(ctx); err != nil {
+		return domain.PersonalizationSeed{}, false, err
+	}
+	if agentID.Empty() || now.IsZero() {
+		return domain.PersonalizationSeed{}, false, fmt.Errorf("%w: personalization agent id and migration timestamp are required", domain.ErrInvalidArgument)
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.PersonalizationSeed{}, false, wrappedSQLError("begin migrate legacy backstory", err)
+	}
+	defer tx.Rollback()
+	current, err := scanPersonalizationSeed(tx.QueryRowContext(ctx, personalizationSelect+`
+		FROM personalization_seed_heads AS ph
+		JOIN personalization_seed_versions AS pv ON pv.agent_id = ph.agent_id AND pv.version = ph.version
+		WHERE ph.agent_id = ?`, string(agentID)))
+	if err != nil {
+		return domain.PersonalizationSeed{}, false, err
+	}
+	migrated, changed, err := domain.MigrateLegacyBackstory(current, now)
+	if err != nil {
+		return domain.PersonalizationSeed{}, false, err
+	}
+	if !changed {
+		return current, false, nil
+	}
+	if err := r.appendTx(ctx, tx, migrated); err != nil {
+		return domain.PersonalizationSeed{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.PersonalizationSeed{}, false, wrappedSQLError("commit migrate legacy backstory", err)
+	}
+	return migrated, true, nil
 }
 
 func (r *PersonalizationRepository) appendTx(ctx context.Context, tx *sql.Tx, seed domain.PersonalizationSeed) error {

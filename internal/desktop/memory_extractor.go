@@ -95,6 +95,11 @@ func (extractor modelMemoryExtractor) Extract(ctx context.Context, turn memory.T
 			kind = domain.MemoryKindSemantic
 		}
 		nature := domain.MemoryNature(item.Nature)
+		// Fiction is trusted identity-seed provenance, not a label the model may
+		// mint from an untrusted conversation transcript.
+		if nature == domain.MemoryNatureFiction {
+			continue
+		}
 		if !nature.Valid() || nature == domain.MemoryNatureOpinion || nature == domain.MemoryNatureEmotion {
 			nature = domain.MemoryNatureFact
 		}

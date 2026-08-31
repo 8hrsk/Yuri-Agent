@@ -82,6 +82,56 @@ func TestPersonalizationRepositoryCreateGetAndAppend(t *testing.T) {
 	}
 }
 
+func TestPersonalizationRepositoryMigratesLegacyBackstoryExactlyOnce(t *testing.T) {
+	database, ctx := testDatabase(t)
+	agents := NewAgentRepository(database)
+	repository := NewPersonalizationRepository(database)
+	now := time.Date(2026, 8, 31, 15, 0, 0, 0, time.UTC)
+	profile, err := domain.NewAgentProfileWithBackstory(
+		"agent-legacy-backstory", "Эми", 21, "female", "",
+		"Она выросла рядом с маяком. По вечерам записывала истории моряков.", now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := agents.Create(ctx, profile); err != nil {
+		t.Fatal(err)
+	}
+	seed, err := domain.NewPersonalizationSeed(profile, nil, nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Create(ctx, seed); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated, changed, err := repository.MigrateLegacyBackstory(ctx, profile.ID, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed || migrated.Version != 2 || migrated.Operation != domain.PersonalizationOperationMigration ||
+		migrated.Backstory.Narrative != seed.Backstory.Narrative || len(migrated.Backstory.Episodes) != 1 {
+		t.Fatalf("migrated seed = %#v, changed=%v", migrated, changed)
+	}
+	repeated, changed, err := repository.MigrateLegacyBackstory(ctx, profile.ID, now.Add(2*time.Minute))
+	if err != nil || changed || repeated.Version != migrated.Version {
+		t.Fatalf("repeat = %#v, changed=%v, err=%v", repeated, changed, err)
+	}
+	original, err := repository.GetVersion(ctx, profile.ID, 1)
+	if err != nil || original.Backstory.Narrative != seed.Backstory.Narrative || len(original.Backstory.Episodes) != 0 {
+		t.Fatalf("original revision changed: %#v, %v", original, err)
+	}
+
+	unauthorized := migrated
+	unauthorized.Version++
+	unauthorized.RevisionID = "agent-legacy-backstory:personalization:v3"
+	unauthorized.Operation = domain.PersonalizationOperationMigration
+	unauthorized.UpdatedAt = now.Add(3 * time.Minute)
+	if _, err := repository.AppendVersion(ctx, unauthorized, migrated.Version); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("owner append accepted migration operation: %v", err)
+	}
+}
+
 func TestPersonalizationMigrationBackfillsLegacyOwnerSeed(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "legacy.sqlite3")

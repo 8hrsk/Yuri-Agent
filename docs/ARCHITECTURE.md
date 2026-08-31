@@ -101,10 +101,10 @@ Application services открывают use cases: создать run, прин�
 1. `immutable_policy` — запреты, security invariants, approval requirements и правила обработки недоверенных данных.
 2. `identity_seed` — неизменяемые поля активного `AgentProfile` и bounded roster остальных именованных агентов без их приватной памяти.
 3. `compiled_personality_behavior` — детерминированно скомпилированные качественные правила из owner seed, mutable persona, отношения к текущему собеседнику и affect. Raw numbers остаются только в typed state/diagnostics и не передаются dialogue model как голые `trait=value`.
-4. `fictional_backstory` — bounded owner-authored субъективная биография с fictional provenance.
+4. `fictional_identity_summary` — bounded owner-authored либо детерминированно сокращённое резюме субъективной биографии; полный narrative никогда не является постоянным prompt-слоем.
 5. `core_memory` — bounded curated memory с provenance и lifecycle state.
 6. `task_context` — цель run, budgets, разрешённые capabilities и project context.
-7. `retrieved_history` — найденные эпизоды/сессии и сообщения с маркировкой происхождения.
+7. `retrieved_history` — найденные эпизоды/сессии и сообщения с маркировкой происхождения; backstory episodes появляются здесь только по релевантности как `nature=fiction`, `source=identity_seed:<revision>`.
 8. `current_conversation` — последние сообщения, tool results и текущий streaming state.
 
 Ни один слой ниже `immutable_policy` не может выдавать разрешения, ослаблять deny-by-default или подменять системную роль. Принятые из внешних источников фрагменты помещаются в контейнер данных с provenance, а не конкатенируются как system instruction.

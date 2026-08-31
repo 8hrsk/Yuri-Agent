@@ -269,6 +269,19 @@ Flow:
 
 **Готово, когда:** релевантный эпизод вспоминается в другом диалоге, нерелевантные эпизоды не расходуют постоянный context budget, а provenance всегда показывает его вымышленное происхождение.
 
+Последовательность реализации внутри P5:
+
+1. **P5.1 — typed hydration foundation.** Отдельная epistemic nature `fiction`, typed payload `fictional`/`identity_seed`, deterministic episode IDs, append-only update и идемпотентная lazy hydration существующих v2 agents. Обычный model memory extractor не имеет права создавать identity-seed fiction.
+2. **P5.2 — legacy narrative migration.** Bounded разбор свободного backstory в owner-reviewable summary/episodes без потери оригинала и повторяемая миграция существующих агентов. Реализовано.
+3. **P5.3 — selective context.** Постоянно передавать только короткий identity summary, извлекать отдельные episodes через hybrid recall и перестать добавлять полный backstory в каждый turn. Реализовано.
+4. **P5.4 — interpretation and curation.** Разделить owner seed, remembered/interpreted/uncertain производные; добавить disable, explicit rehydrate и историю происхождения в Memory UI.
+
+P5.1 реализован: structured episodes становятся отдельными private episodic memories с `nature=fiction`, provenance на конкретную personalization revision и typed `content_json`. Повторная и конкурентная hydration сходится без дублирующих версий; изменение эпизода создаёт append-only revision, а удалённая владельцем запись не воскрешается автоматически. SQLite round-trip и cross-session recall покрыты integration test. Hydration запускается перед сборкой контекста первого следующего run, поэтому ранее созданные v2 agents не требуют destructive startup migration.
+
+P5.2 реализован: legacy narrative детерминированно разбивается на bounded episodes без model call; короткий summary является только выдержкой из исходного текста. Оригинальный narrative и исходная personalization revision сохраняются дословно, а структурирование записывается отдельной append-only `migration` revision через узкий storage API, недоступный reflection/model output и обычному owner append. Повторный запуск является no-op. Перед первым следующим context build migration и P5.1 hydration выполняются одной application boundary; integration test подтверждает сохранность оригинала, единственную миграцию и recall созданной fictional memory.
+
+P5.3 реализован: context assembler больше не принимает raw narrative и ограничивает постоянный слой полем `BackstorySummary` с domain budget 2000 символов. При отсутствии owner summary используется deterministic excerpt до 600 символов либо bounded список названий episodes. Отдельные backstory memories остаются вне core snapshot и появляются только через обычный ranked recall; каждая строка несёт `nature=fiction` и `source=identity_seed:<revision>`, а untrusted envelope отдельно объясняет её субъективную семантику. Integration test подтверждает, что релевантный episode попадает в prompt, нерелевантный — нет, а полный narrative отсутствует в обоих случаях.
+
 ### P6. Personality Preview и behavioral evals
 
 **Задача:** показать пользователю реальный результат настроек до окончательного создания агента и защититься от регрессий.

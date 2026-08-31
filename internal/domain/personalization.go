@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -393,8 +395,8 @@ func (seed PersonalizationSeed) Validate() error {
 	if seed.Version == 1 && seed.Operation != PersonalizationOperationCreate && seed.Operation != PersonalizationOperationMigration {
 		return fmt.Errorf("%w: initial personalization operation must be create or migration", ErrInvalidArgument)
 	}
-	if seed.Version > 1 && seed.Operation != PersonalizationOperationUpdate && seed.Operation != PersonalizationOperationReset {
-		return fmt.Errorf("%w: later personalization operation must be owner update or reset", ErrInvalidArgument)
+	if seed.Version > 1 && seed.Operation != PersonalizationOperationUpdate && seed.Operation != PersonalizationOperationReset && seed.Operation != PersonalizationOperationMigration {
+		return fmt.Errorf("%w: later personalization operation must be owner update, reset or trusted migration", ErrInvalidArgument)
 	}
 	if seed.Version == 1 && (!seed.ParentID.Empty() || seed.ParentVersion != 0) {
 		return fmt.Errorf("%w: initial personalization seed cannot have a parent", ErrInvalidArgument)
@@ -447,6 +449,129 @@ func (seed PersonalizationSeed) Validate() error {
 		return fmt.Errorf("%w: personalization revision reason is required", ErrInvalidArgument)
 	}
 	return nil
+}
+
+// MigrateLegacyBackstory losslessly structures a free-form owner backstory.
+// Narrative remains the authoritative original; summary and episodes contain
+// only deterministic excerpts from it, so migration cannot hallucinate facts.
+// The caller is expected to persist the returned revision through a dedicated
+// trusted migration boundary, never through reflection or model output.
+func MigrateLegacyBackstory(seed PersonalizationSeed, now time.Time) (PersonalizationSeed, bool, error) {
+	if err := seed.Validate(); err != nil {
+		return PersonalizationSeed{}, false, err
+	}
+	narrative := strings.TrimSpace(seed.Backstory.Narrative)
+	if narrative == "" || len(seed.Backstory.Episodes) > 0 {
+		return seed, false, nil
+	}
+	if !now.After(seed.UpdatedAt) {
+		now = seed.UpdatedAt.Add(time.Nanosecond)
+	}
+	digest := sha256.Sum256([]byte(narrative))
+	digestPrefix := hex.EncodeToString(digest[:8])
+	chunks := splitLegacyBackstory(narrative, BackstoryEpisodeMaxRunes)
+	episodes := make([]BackstoryEpisode, 0, len(chunks))
+	for index, chunk := range chunks {
+		title := "Исходная предыстория"
+		if len(chunks) > 1 {
+			title = fmt.Sprintf("Исходная предыстория · часть %d", index+1)
+		}
+		episodes = append(episodes, BackstoryEpisode{
+			ID: fmt.Sprintf("legacy-%s-%02d", digestPrefix, index+1), Title: title,
+			Content: chunk, Kind: "legacy_narrative", Sequence: index + 1,
+		})
+	}
+
+	migrated := seed
+	migrated.Version = seed.Version + 1
+	migrated.ParentID = seed.RevisionID
+	migrated.ParentVersion = seed.Version
+	migrated.RevisionID = ID(fmt.Sprintf("%s:personalization:v%d", seed.AgentID, migrated.Version))
+	migrated.Operation = PersonalizationOperationMigration
+	migrated.Backstory.Episodes = episodes
+	if strings.TrimSpace(migrated.Backstory.Summary) == "" {
+		migrated.Backstory.Summary = legacyBackstorySummary(narrative)
+	}
+	migrated.Reason = "lossless legacy backstory structuring"
+	migrated.UpdatedAt = now.UTC()
+	if err := migrated.Validate(); err != nil {
+		return PersonalizationSeed{}, false, err
+	}
+	return migrated, true, nil
+}
+
+// BackstoryIdentitySummary returns the only backstory layer suitable for
+// every prompt. It never returns the full narrative when that narrative is
+// long; detailed episodes belong to selective memory recall.
+func BackstoryIdentitySummary(backstory StructuredBackstory) string {
+	if summary := strings.TrimSpace(backstory.Summary); summary != "" {
+		return summary
+	}
+	if narrative := strings.TrimSpace(backstory.Narrative); narrative != "" {
+		return legacyBackstorySummary(narrative)
+	}
+	titles := make([]string, 0, 8)
+	for _, episode := range backstory.Episodes {
+		if title := strings.TrimSpace(episode.Title); title != "" {
+			titles = append(titles, title)
+			if len(titles) == 8 {
+				break
+			}
+		}
+	}
+	if len(titles) > 0 {
+		return legacyBackstorySummary("Ключевые эпизоды прошлого: " + strings.Join(titles, "; "))
+	}
+	for _, episode := range backstory.Episodes {
+		if content := strings.TrimSpace(episode.Content); content != "" {
+			return legacyBackstorySummary(content)
+		}
+	}
+	return ""
+}
+
+func splitLegacyBackstory(value string, limit int) []string {
+	remaining := []rune(strings.TrimSpace(value))
+	if limit <= 0 {
+		limit = BackstoryEpisodeMaxRunes
+	}
+	result := make([]string, 0, (len(remaining)+limit-1)/limit)
+	for len(remaining) > limit {
+		cut := legacyBackstoryCut(remaining, limit)
+		result = append(result, strings.TrimSpace(string(remaining[:cut])))
+		remaining = []rune(strings.TrimLeftFunc(string(remaining[cut:]), func(value rune) bool {
+			return value == ' ' || value == '\t' || value == '\r' || value == '\n'
+		}))
+	}
+	if tail := strings.TrimSpace(string(remaining)); tail != "" {
+		result = append(result, tail)
+	}
+	return result
+}
+
+func legacyBackstoryCut(value []rune, limit int) int {
+	minimum := limit * 3 / 5
+	for index := limit - 1; index >= minimum; index-- {
+		switch value[index] {
+		case '\n':
+			return index + 1
+		case '.', '!', '?', '…':
+			if index+1 == len(value) || index+1 >= limit || value[index+1] == ' ' || value[index+1] == '\n' {
+				return index + 1
+			}
+		}
+	}
+	return limit
+}
+
+func legacyBackstorySummary(value string) string {
+	const summaryLimit = 600
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= summaryLimit {
+		return string(runes)
+	}
+	cut := legacyBackstoryCut(runes, summaryLimit-1)
+	return strings.TrimSpace(string(runes[:cut])) + "…"
 }
 
 func validateIdentityPersonalization(identity IdentityPersonalization) error {

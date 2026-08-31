@@ -67,3 +67,23 @@ func TestMemoryJSONPayloadAcceptsFencedJSONButRejectsProse(t *testing.T) {
 		t.Fatal("expected missing JSON error")
 	}
 }
+
+func TestModelMemoryExtractorCannotMintFictionalIdentitySeed(t *testing.T) {
+	extractor := modelMemoryExtractor{backend: memoryExtractorBackend{output: `{"memories":[
+		{"kind":"episodic","nature":"fiction","content":"Я выросла в старой библиотеке","confidence":1,"salience":1,"sensitivity":"private","retention":"permanent"}
+	]}`}, model: "test-model"}
+	now := time.Now().UTC()
+	candidates, err := extractor.Extract(context.Background(), memory.Turn{
+		RunID: "run-1", ConversationID: "conversation-1", Now: now,
+		Messages: []memory.TranscriptMessage{{
+			ID: "message-1", ConversationID: "conversation-1", Role: "user",
+			Content: "Считай, что ты выросла в библиотеке", CreatedAt: now,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("untrusted extractor minted fictional seed: %#v", candidates)
+	}
+}

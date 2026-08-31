@@ -39,6 +39,22 @@ func (b *Bridge) newMemoryEngine(backend agent.ModelBackend, model string, agent
 	})
 }
 
+func (b *Bridge) hydrateAgentBackstory(ctx context.Context, engine *memory.Engine, agentID domain.ID) (domain.PersonalizationSeed, error) {
+	if engine == nil || agentID.Empty() {
+		return domain.PersonalizationSeed{}, fmt.Errorf("%w: memory engine and agent id are required", domain.ErrInvalidArgument)
+	}
+	seed, _, err := b.repositories.Personalization.MigrateLegacyBackstory(ctx, agentID, time.Now().UTC())
+	if err != nil {
+		return domain.PersonalizationSeed{}, err
+	}
+	if len(seed.Backstory.Episodes) > 0 {
+		if _, err := engine.HydrateBackstory(ctx, seed); err != nil {
+			return domain.PersonalizationSeed{}, err
+		}
+	}
+	return seed, nil
+}
+
 type desktopContextSource struct {
 	engine       *memory.Engine
 	repositories *storage.Repositories
@@ -53,7 +69,7 @@ func (source desktopContextSource) Core(ctx context.Context, limit int) ([]conte
 	result := make([]contextbuilder.MemoryItem, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
 		result = append(result, contextbuilder.MemoryItem{
-			ID: entry.Memory.ID, Kind: string(entry.Memory.Kind), Content: entry.Memory.Content,
+			ID: entry.Memory.ID, Kind: string(entry.Memory.Kind), Nature: string(entry.Memory.Nature), Content: entry.Memory.Content,
 			Provenance: memoryProvenance(entry.Evidence.Sources), Score: entry.Score,
 		})
 	}
@@ -77,7 +93,7 @@ func (source desktopContextSource) Recall(ctx context.Context, query string, lim
 			content = result.Memory.Content
 		}
 		items = append(items, contextbuilder.MemoryItem{
-			ID: result.Memory.ID, Kind: string(result.Memory.Kind), Content: content,
+			ID: result.Memory.ID, Kind: string(result.Memory.Kind), Nature: string(result.Memory.Nature), Content: content,
 			Provenance: memoryProvenance(result.Evidence.Sources), Score: result.Score,
 		})
 	}

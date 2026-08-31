@@ -265,7 +265,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
-	personalization, err := b.repositories.Personalization.Get(runContext, profileID)
+	personalization, err := b.hydrateAgentBackstory(runContext, memoryEngine, profileID)
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
@@ -276,7 +276,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	snapshot, err := assembler.Assemble(runContext, contextbuilder.Input{
 		AgentID: profileID, ConversationID: conversationID, Query: titleSeed,
 		ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, roster),
-		Backstory: profile.Backstory, BehavioralContext: compiledPersonality.BehavioralContext,
+		BackstorySummary: domain.BackstoryIdentitySummary(personalization.Backstory), BehavioralContext: compiledPersonality.BehavioralContext,
 		Transcript: currentTranscript,
 	})
 	if err != nil {

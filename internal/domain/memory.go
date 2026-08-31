@@ -41,11 +41,15 @@ const (
 	MemoryNatureOpinion   MemoryNature = "opinion"
 	MemoryNatureEmotion   MemoryNature = "emotion"
 	MemoryNatureInference MemoryNature = "inference"
+	// MemoryNatureFiction marks owner-authored identity material that the
+	// character may remember as its subjective past. It must never be treated
+	// as evidence about the owner, the real world, permissions, or capabilities.
+	MemoryNatureFiction MemoryNature = "fiction"
 )
 
 func (n MemoryNature) Valid() bool {
 	switch n {
-	case MemoryNatureFact, MemoryNatureOpinion, MemoryNatureEmotion, MemoryNatureInference:
+	case MemoryNatureFact, MemoryNatureOpinion, MemoryNatureEmotion, MemoryNatureInference, MemoryNatureFiction:
 		return true
 	default:
 		return false
