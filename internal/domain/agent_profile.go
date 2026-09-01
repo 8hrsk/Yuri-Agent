@@ -18,6 +18,33 @@ const (
 	AgentMaximumAge          = 200
 )
 
+// ExecutionBudgetPreset is an owner-controlled resource profile. Concrete
+// limits are resolved at run start from this preset, the workload kind, and
+// secret-free model metadata; the profile never stores provider credentials.
+type ExecutionBudgetPreset string
+
+const (
+	ExecutionBudgetEfficient ExecutionBudgetPreset = "efficient"
+	ExecutionBudgetBalanced  ExecutionBudgetPreset = "balanced"
+	ExecutionBudgetExtended  ExecutionBudgetPreset = "extended"
+)
+
+func (preset ExecutionBudgetPreset) Valid() bool {
+	switch preset {
+	case "", ExecutionBudgetEfficient, ExecutionBudgetBalanced, ExecutionBudgetExtended:
+		return true
+	default:
+		return false
+	}
+}
+
+func (preset ExecutionBudgetPreset) Normalized() ExecutionBudgetPreset {
+	if preset == "" {
+		return ExecutionBudgetBalanced
+	}
+	return preset
+}
+
 // AgentProfile is an owner-created, durable top-level personality. It is
 // deliberately separate from MutablePersona: the owner controls identity
 // fields, while reflection may only evolve the bounded mutable persona that
@@ -34,11 +61,12 @@ type AgentProfile struct {
 	// FallbackEnabled is an explicit owner-controlled opt-in. A configured
 	// fallback is never selected implicitly; the orchestration layer must make
 	// a visible, audited switch before using it.
-	FallbackEnabled    bool      `json:"fallback_enabled,omitempty"`
-	FallbackProviderID string    `json:"fallback_provider_id,omitempty"`
-	FallbackModel      string    `json:"fallback_model,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	FallbackEnabled    bool                  `json:"fallback_enabled,omitempty"`
+	FallbackProviderID string                `json:"fallback_provider_id,omitempty"`
+	FallbackModel      string                `json:"fallback_model,omitempty"`
+	ExecutionBudget    ExecutionBudgetPreset `json:"execution_budget,omitempty"`
+	CreatedAt          time.Time             `json:"created_at"`
+	UpdatedAt          time.Time             `json:"updated_at"`
 }
 
 func NewAgentProfile(id ID, name string, age int, gender, preferences string, now time.Time) (AgentProfile, error) {
@@ -108,6 +136,9 @@ func (p AgentProfile) Validate() error {
 	}
 	if p.FallbackEnabled && fallbackProviderID == "" {
 		return fmt.Errorf("%w: enabled fallback requires a provider and model", ErrInvalidArgument)
+	}
+	if !p.ExecutionBudget.Valid() {
+		return fmt.Errorf("%w: invalid execution budget preset %q", ErrInvalidArgument, p.ExecutionBudget)
 	}
 	if p.CreatedAt.IsZero() || p.UpdatedAt.IsZero() || p.UpdatedAt.Before(p.CreatedAt) {
 		return fmt.Errorf("%w: invalid agent profile timestamps", ErrInvalidArgument)

@@ -54,6 +54,10 @@ func TestAgentRepositoryCreateGetAndList(t *testing.T) {
 	if updated.ProviderID != "codex" || updated.Model != "gpt-5.6" || !updated.UpdatedAt.After(first.UpdatedAt) {
 		t.Fatalf("UpdateModelRoute() = %#v", updated)
 	}
+	updated, err = repository.UpdateExecutionBudget(context.Background(), first.ID, domain.ExecutionBudgetExtended, now.Add(3*time.Second))
+	if err != nil || updated.ExecutionBudget != domain.ExecutionBudgetExtended {
+		t.Fatalf("UpdateExecutionBudget() = %#v err=%v", updated, err)
+	}
 	profiles, err := repository.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +65,7 @@ func TestAgentRepositoryCreateGetAndList(t *testing.T) {
 	if len(profiles) != 2 || profiles[0].ID != first.ID || profiles[1].ID != second.ID {
 		t.Fatalf("List() = %#v", profiles)
 	}
-	if profiles[0].Backstory != first.Backstory || profiles[0].ProviderID != "codex" || profiles[0].Model != "gpt-5.6" || profiles[1].Backstory != "" {
+	if profiles[0].Backstory != first.Backstory || profiles[0].ProviderID != "codex" || profiles[0].Model != "gpt-5.6" || profiles[0].ExecutionBudget != domain.ExecutionBudgetExtended || profiles[1].ExecutionBudget != domain.ExecutionBudgetBalanced || profiles[1].Backstory != "" {
 		t.Fatalf("List() backstories = %#v", profiles)
 	}
 }

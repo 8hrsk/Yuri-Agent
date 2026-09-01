@@ -41,11 +41,11 @@ func (r *AgentRepository) Create(ctx context.Context, profile domain.AgentProfil
 	}
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO agent_profiles(id, name, age, gender, preferences, backstory, provider_id, model,
-			fallback_enabled, fallback_provider_id, fallback_model, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, string(profile.ID), strings.TrimSpace(profile.Name), profile.Age,
+			fallback_enabled, fallback_provider_id, fallback_model, execution_budget, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, string(profile.ID), strings.TrimSpace(profile.Name), profile.Age,
 		strings.TrimSpace(profile.Gender), strings.TrimSpace(profile.Preferences), strings.TrimSpace(profile.Backstory),
 		strings.TrimSpace(profile.ProviderID), strings.TrimSpace(profile.Model), profile.FallbackEnabled,
-		strings.TrimSpace(profile.FallbackProviderID), strings.TrimSpace(profile.FallbackModel), createdAt, updatedAt)
+		strings.TrimSpace(profile.FallbackProviderID), strings.TrimSpace(profile.FallbackModel), profile.ExecutionBudget.Normalized(), createdAt, updatedAt)
 	return wrappedSQLError("create agent profile", err)
 }
 
@@ -126,11 +126,11 @@ func (repositories *Repositories) createAgentWithDefaults(ctx context.Context, p
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO agent_profiles(id, name, age, gender, preferences, backstory, provider_id, model,
-			fallback_enabled, fallback_provider_id, fallback_model, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, string(profile.ID), strings.TrimSpace(profile.Name), profile.Age,
+			fallback_enabled, fallback_provider_id, fallback_model, execution_budget, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, string(profile.ID), strings.TrimSpace(profile.Name), profile.Age,
 		strings.TrimSpace(profile.Gender), strings.TrimSpace(profile.Preferences), strings.TrimSpace(profile.Backstory),
 		strings.TrimSpace(profile.ProviderID), strings.TrimSpace(profile.Model), profile.FallbackEnabled,
-		strings.TrimSpace(profile.FallbackProviderID), strings.TrimSpace(profile.FallbackModel), createdAt, updatedAt); err != nil {
+		strings.TrimSpace(profile.FallbackProviderID), strings.TrimSpace(profile.FallbackModel), profile.ExecutionBudget.Normalized(), createdAt, updatedAt); err != nil {
 		return wrappedSQLError("create agent profile", err)
 	}
 	if err := repositories.Persona.appendPersonaTx(ctx, tx, persona, 0, nil, false); err != nil {
@@ -165,7 +165,7 @@ func (r *AgentRepository) Get(ctx context.Context, id domain.ID) (domain.AgentPr
 	}
 	return scanAgentProfile(r.db.QueryRowContext(ctx, `
 		SELECT id, name, age, gender, preferences, backstory, provider_id, model,
-		       fallback_enabled, fallback_provider_id, fallback_model, created_at, updated_at
+		       fallback_enabled, fallback_provider_id, fallback_model, execution_budget, created_at, updated_at
 		FROM agent_profiles WHERE id = ?`, string(id)))
 }
 
@@ -178,7 +178,7 @@ func (r *AgentRepository) List(ctx context.Context) ([]domain.AgentProfile, erro
 	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, age, gender, preferences, backstory, provider_id, model,
-		       fallback_enabled, fallback_provider_id, fallback_model, created_at, updated_at
+		       fallback_enabled, fallback_provider_id, fallback_model, execution_budget, created_at, updated_at
 		FROM agent_profiles ORDER BY created_at, id`)
 	if err != nil {
 		return nil, wrappedSQLError("list agent profiles", err)
@@ -207,7 +207,7 @@ func scanAgentProfile(scanner agentProfileScanner) (domain.AgentProfile, error) 
 	var id, createdAt, updatedAt string
 	if err := scanner.Scan(&id, &profile.Name, &profile.Age, &profile.Gender, &profile.Preferences, &profile.Backstory,
 		&profile.ProviderID, &profile.Model, &profile.FallbackEnabled, &profile.FallbackProviderID, &profile.FallbackModel,
-		&createdAt, &updatedAt); err != nil {
+		&profile.ExecutionBudget, &createdAt, &updatedAt); err != nil {
 		return domain.AgentProfile{}, wrappedSQLError("scan agent profile", err)
 	}
 	profile.ID = domain.ID(id)
@@ -220,6 +220,43 @@ func scanAgentProfile(scanner agentProfileScanner) (domain.AgentProfile, error) 
 	}
 	if err := profile.Validate(); err != nil {
 		return domain.AgentProfile{}, err
+	}
+	return profile, nil
+}
+
+// UpdateExecutionBudget changes only the owner-controlled resource preset.
+// Existing runs retain their already-resolved durable budgets.
+func (r *AgentRepository) UpdateExecutionBudget(ctx context.Context, id domain.ID, preset domain.ExecutionBudgetPreset, updatedAt time.Time) (domain.AgentProfile, error) {
+	if err := requireDatabase(r.db); err != nil {
+		return domain.AgentProfile{}, err
+	}
+	if preset == "" || !preset.Valid() {
+		return domain.AgentProfile{}, fmt.Errorf("%w: execution budget preset is required", domain.ErrInvalidArgument)
+	}
+	profile, err := r.Get(ctx, id)
+	if err != nil {
+		return domain.AgentProfile{}, err
+	}
+	profile.ExecutionBudget = preset
+	profile.UpdatedAt = updatedAt.UTC()
+	if !profile.UpdatedAt.After(profile.CreatedAt) {
+		profile.UpdatedAt = profile.CreatedAt.Add(time.Nanosecond)
+	}
+	if err := profile.Validate(); err != nil {
+		return domain.AgentProfile{}, err
+	}
+	encodedTime, err := timeValue(profile.UpdatedAt)
+	if err != nil {
+		return domain.AgentProfile{}, err
+	}
+	result, err := r.db.ExecContext(ctx, `UPDATE agent_profiles SET execution_budget = ?, updated_at = ? WHERE id = ?`, preset, encodedTime, string(id))
+	if err != nil {
+		return domain.AgentProfile{}, wrappedSQLError("update agent execution budget", err)
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr != nil {
+		return domain.AgentProfile{}, affectedErr
+	} else if affected != 1 {
+		return domain.AgentProfile{}, domain.ErrNotFound
 	}
 	return profile, nil
 }
