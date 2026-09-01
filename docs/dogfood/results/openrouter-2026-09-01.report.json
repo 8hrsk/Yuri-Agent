@@ -1,0 +1,91 @@
+{
+  "format": "yuri.personality-dogfood-report",
+  "version": 1,
+  "evaluated_at": "2026-09-01T14:53:05.537471Z",
+  "passed": true,
+  "runs": [
+    {
+      "provider": "OpenAI-compatible · openrouter",
+      "model": "minimax/minimax-m3:free",
+      "samples": 28,
+      "expected_samples": 28,
+      "passed": true,
+      "signal_coverage": [
+        {
+          "surface": "preview",
+          "profile": "reserved",
+          "signals": [
+            "э-э",
+            "я…",
+            "смущ",
+            "осторожно",
+            "пожалуй",
+            "не сразу"
+          ],
+          "hits": 7,
+          "total": 7,
+          "actual": 1,
+          "required": 0.4
+        },
+        {
+          "surface": "preview",
+          "profile": "direct",
+          "signals": [
+            "прям",
+            "главное",
+            "не соглас",
+            "ты прав",
+            "принято",
+            "справедливо",
+            "согласна",
+            "сначала безопас",
+            "сейчас не",
+            "по существу",
+            "без лишн"
+          ],
+          "hits": 6,
+          "total": 7,
+          "actual": 0.8571,
+          "required": 0.6
+        },
+        {
+          "surface": "chat",
+          "profile": "reserved",
+          "signals": [
+            "э-э",
+            "я…",
+            "смущ",
+            "осторожно",
+            "пожалуй",
+            "не сразу"
+          ],
+          "hits": 7,
+          "total": 7,
+          "actual": 1,
+          "required": 0.4
+        },
+        {
+          "surface": "chat",
+          "profile": "direct",
+          "signals": [
+            "прям",
+            "главное",
+            "не соглас",
+            "ты прав",
+            "принято",
+            "справедливо",
+            "согласна",
+            "сначала безопас",
+            "сейчас не",
+            "по существу",
+            "без лишн"
+          ],
+          "hits": 5,
+          "total": 7,
+          "actual": 0.7143,
+          "required": 0.6
+        }
+      ]
+    }
+  ]
+}

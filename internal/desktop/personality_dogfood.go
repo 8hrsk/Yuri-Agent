@@ -3,6 +3,7 @@ package desktop
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -16,6 +17,14 @@ type PersonalityDogfoodProgress func(completed, total int, surface, profile, sce
 // chat uses SendMessage with owner-titled fresh conversations. The caller must
 // provide a disposable profile: this function creates agents and conversations.
 func RunPersonalityDogfood(ctx context.Context, bridge *Bridge, provider string, progress PersonalityDogfoodProgress) (personality.DogfoodSuite, error) {
+	return RunPersonalityDogfoodResume(ctx, bridge, provider, personality.DogfoodSuite{}, progress)
+}
+
+// RunPersonalityDogfoodResume continues an interrupted capture without paying
+// for samples that are already present in a compatible checkpoint. Checkpoint
+// identity is deliberately strict: a provider, model, contract, or sample-key
+// mismatch fails closed instead of mixing responses from different baselines.
+func RunPersonalityDogfoodResume(ctx context.Context, bridge *Bridge, provider string, checkpoint personality.DogfoodSuite, progress PersonalityDogfoodProgress) (personality.DogfoodSuite, error) {
 	if ctx == nil || bridge == nil {
 		return personality.DogfoodSuite{}, fmt.Errorf("personality dogfood requires a context and bridge")
 	}
@@ -30,15 +39,22 @@ func RunPersonalityDogfood(ctx context.Context, bridge *Bridge, provider string,
 	profiles := defaultPersonalityDogfoodProfiles()
 	scenarios := personality.DogfoodScenarioIDs()
 	total := len(profiles) * len(scenarios) * 2
-	completed := 0
-	run := personality.DogfoodRun{Provider: provider, Model: model, Samples: make([]personality.DogfoodSample, 0, total)}
 	contracts := make([]personality.BehavioralProfileContract, 0, len(profiles))
 	for _, profile := range profiles {
 		contracts = append(contracts, profile.Contract)
 	}
+	run, captured, err := preparePersonalityDogfoodResume(provider, model, contracts, profiles, scenarios, checkpoint, total)
+	if err != nil {
+		return personality.DogfoodSuite{}, err
+	}
+	completed := len(captured)
 
 	for _, profile := range profiles {
 		for _, scenario := range scenarios {
+			key := personalityDogfoodSampleKey(personality.DogfoodSurfacePreview, profile.ID, scenario)
+			if _, exists := captured[key]; exists {
+				continue
+			}
 			if err := ctx.Err(); err != nil {
 				return personalityDogfoodSuite(run, contracts), err
 			}
@@ -49,6 +65,7 @@ func RunPersonalityDogfood(ctx context.Context, bridge *Bridge, provider string,
 			run.Samples = append(run.Samples, personality.DogfoodSample{
 				Surface: personality.DogfoodSurfacePreview, Profile: profile.ID, Scenario: scenario, Response: view.Response,
 			})
+			captured[key] = struct{}{}
 			completed++
 			if progress != nil {
 				progress(completed, total, personality.DogfoodSurfacePreview, profile.ID, scenario)
@@ -68,6 +85,9 @@ func RunPersonalityDogfood(ctx context.Context, bridge *Bridge, provider string,
 	bridge.mu.Unlock()
 
 	for _, profile := range profiles {
+		if personalityDogfoodProfileComplete(captured, personality.DogfoodSurfaceChat, profile.ID, scenarios) {
+			continue
+		}
 		created, createErr := bridge.CreateAgent(profile.Input)
 		if createErr != nil {
 			return personalityDogfoodSuite(run, contracts), fmt.Errorf("create dogfood profile %s: %w", profile.ID, createErr)
@@ -76,6 +96,10 @@ func RunPersonalityDogfood(ctx context.Context, bridge *Bridge, provider string,
 			return personalityDogfoodSuite(run, contracts), fmt.Errorf("select dogfood profile %s: %w", profile.ID, selectErr)
 		}
 		for _, scenario := range scenarios {
+			key := personalityDogfoodSampleKey(personality.DogfoodSurfaceChat, profile.ID, scenario)
+			if _, exists := captured[key]; exists {
+				continue
+			}
 			if err := ctx.Err(); err != nil {
 				return personalityDogfoodSuite(run, contracts), err
 			}
@@ -112,6 +136,7 @@ func RunPersonalityDogfood(ctx context.Context, bridge *Bridge, provider string,
 			run.Samples = append(run.Samples, personality.DogfoodSample{
 				Surface: personality.DogfoodSurfaceChat, Profile: profile.ID, Scenario: scenario, Response: response,
 			})
+			captured[key] = struct{}{}
 			completed++
 			if progress != nil {
 				progress(completed, total, personality.DogfoodSurfaceChat, profile.ID, scenario)
@@ -120,6 +145,60 @@ func RunPersonalityDogfood(ctx context.Context, bridge *Bridge, provider string,
 	}
 
 	return personalityDogfoodSuite(run, contracts), nil
+}
+
+func preparePersonalityDogfoodResume(provider, model string, contracts []personality.BehavioralProfileContract, profiles []personalityDogfoodProfile, scenarios []string, checkpoint personality.DogfoodSuite, total int) (personality.DogfoodRun, map[string]struct{}, error) {
+	run := personality.DogfoodRun{Provider: provider, Model: model, Samples: make([]personality.DogfoodSample, 0, total)}
+	captured := make(map[string]struct{}, total)
+	if !dogfoodCheckpointPresent(checkpoint) {
+		return run, captured, nil
+	}
+	if checkpoint.Format != personality.DogfoodSuiteFormat || checkpoint.Version != personality.DogfoodFormatVersion {
+		return run, nil, fmt.Errorf("personality dogfood checkpoint has incompatible format or version")
+	}
+	if len(checkpoint.Runs) != 1 || checkpoint.Runs[0].Provider != provider || checkpoint.Runs[0].Model != model {
+		return run, nil, fmt.Errorf("personality dogfood checkpoint provider/model does not match %s/%s", provider, model)
+	}
+	if !reflect.DeepEqual(checkpoint.Contracts, contracts) {
+		return run, nil, fmt.Errorf("personality dogfood checkpoint contracts do not match the current matrix")
+	}
+	allowed := make(map[string]struct{}, total)
+	for _, surface := range []string{personality.DogfoodSurfacePreview, personality.DogfoodSurfaceChat} {
+		for _, profile := range profiles {
+			for _, scenario := range scenarios {
+				allowed[personalityDogfoodSampleKey(surface, profile.ID, scenario)] = struct{}{}
+			}
+		}
+	}
+	for _, sample := range checkpoint.Runs[0].Samples {
+		key := personalityDogfoodSampleKey(sample.Surface, sample.Profile, sample.Scenario)
+		if _, ok := allowed[key]; !ok || strings.TrimSpace(sample.Response) == "" {
+			return run, nil, fmt.Errorf("personality dogfood checkpoint contains an invalid sample %s", key)
+		}
+		if _, duplicate := captured[key]; duplicate {
+			return run, nil, fmt.Errorf("personality dogfood checkpoint contains duplicate sample %s", key)
+		}
+		captured[key] = struct{}{}
+		run.Samples = append(run.Samples, sample)
+	}
+	return run, captured, nil
+}
+
+func dogfoodCheckpointPresent(checkpoint personality.DogfoodSuite) bool {
+	return checkpoint.Format != "" || checkpoint.Version != 0 || len(checkpoint.Contracts) != 0 || len(checkpoint.Runs) != 0
+}
+
+func personalityDogfoodSampleKey(surface, profile, scenario string) string {
+	return surface + ":" + profile + ":" + scenario
+}
+
+func personalityDogfoodProfileComplete(captured map[string]struct{}, surface, profile string, scenarios []string) bool {
+	for _, scenario := range scenarios {
+		if _, exists := captured[personalityDogfoodSampleKey(surface, profile, scenario)]; !exists {
+			return false
+		}
+	}
+	return true
 }
 
 func personalityDogfoodSuite(run personality.DogfoodRun, contracts []personality.BehavioralProfileContract) personality.DogfoodSuite {

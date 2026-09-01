@@ -71,3 +71,34 @@ func TestDogfoodSuiteProfilesFitEvaluatorContract(t *testing.T) {
 		t.Fatalf("contracts = %#v", contracts)
 	}
 }
+
+func TestPreparePersonalityDogfoodResumeAcceptsOnlyMatchingUniqueSamples(t *testing.T) {
+	profiles := defaultPersonalityDogfoodProfiles()
+	contracts := make([]personality.BehavioralProfileContract, 0, len(profiles))
+	for _, profile := range profiles {
+		contracts = append(contracts, profile.Contract)
+	}
+	scenarios := personality.DogfoodScenarioIDs()
+	sample := personality.DogfoodSample{Surface: personality.DogfoodSurfacePreview, Profile: profiles[0].ID, Scenario: scenarios[0], Response: "Ответ"}
+	checkpoint := personality.DogfoodSuite{
+		Format: personality.DogfoodSuiteFormat, Version: personality.DogfoodFormatVersion, Contracts: contracts,
+		Runs: []personality.DogfoodRun{{Provider: "openrouter", Model: "model/free", Samples: []personality.DogfoodSample{sample}}},
+	}
+	run, captured, err := preparePersonalityDogfoodResume("openrouter", "model/free", contracts, profiles, scenarios, checkpoint, len(profiles)*len(scenarios)*2)
+	if err != nil || len(run.Samples) != 1 || len(captured) != 1 {
+		t.Fatalf("resume run=%#v captured=%d err=%v", run, len(captured), err)
+	}
+
+	mismatch := checkpoint
+	mismatch.Runs = append([]personality.DogfoodRun(nil), checkpoint.Runs...)
+	mismatch.Runs[0].Model = "other"
+	if _, _, err := preparePersonalityDogfoodResume("openrouter", "model/free", contracts, profiles, scenarios, mismatch, 28); err == nil {
+		t.Fatal("resume accepted a different model")
+	}
+	duplicate := checkpoint
+	duplicate.Runs = append([]personality.DogfoodRun(nil), checkpoint.Runs...)
+	duplicate.Runs[0].Samples = []personality.DogfoodSample{sample, sample}
+	if _, _, err := preparePersonalityDogfoodResume("openrouter", "model/free", contracts, profiles, scenarios, duplicate, 28); err == nil {
+		t.Fatal("resume accepted a duplicate sample")
+	}
+}

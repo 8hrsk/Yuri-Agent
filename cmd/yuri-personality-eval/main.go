@@ -33,6 +33,7 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	// Keep the provider-specific spelling convenient for the documented
 	// OpenRouter workflow while using the same OpenAI-compatible capture path.
 	liveOpenRouter := flags.Bool("live-openrouter", false, "alias for -live-openai-compatible")
+	resume := flags.Bool("resume", false, "resume a live capture from the compatible checkpoint at -suite")
 	providerID := flags.String("provider-id", "", "existing OpenAI-compatible provider ID (required with -live-openai-compatible)")
 	suitePath := flags.String("suite", "", "path for a live captured suite (required with a live capture flag)")
 	model := flags.String("model", "", "optional live-capture model override; empty uses the configured provider model")
@@ -65,6 +66,10 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 		fmt.Fprintln(stderr, "-suite, -provider-id, and -model require a live capture flag")
 		return 2
 	}
+	if *resume && liveCaptures == 0 {
+		fmt.Fprintln(stderr, "-resume requires a live capture flag")
+		return 2
+	}
 	if *liveCodex && strings.TrimSpace(*providerID) != "" {
 		fmt.Fprintln(stderr, "-provider-id requires -live-openai-compatible")
 		return 2
@@ -80,8 +85,16 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 
 	var suite personality.DogfoodSuite
 	var err error
+	var checkpoint personality.DogfoodSuite
+	if *resume {
+		checkpoint, err = readSuite(*suitePath)
+		if err != nil {
+			fmt.Fprintf(stderr, "read resume checkpoint: %v\n", err)
+			return 2
+		}
+	}
 	if *liveCodex {
-		suite, err = captureCodexSuite(strings.TrimSpace(*model), stderr)
+		suite, err = captureCodexSuite(strings.TrimSpace(*model), checkpoint, stderr)
 		if dogfoodSuiteHasSamples(suite) {
 			if checkpointErr := writeJSONFile(*suitePath, suite); checkpointErr != nil {
 				err = errors.Join(err, checkpointErr)
@@ -96,7 +109,7 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 			return 2
 		}
 	} else if *liveOpenAI {
-		suite, err = captureOpenAICompatibleSuite(strings.TrimSpace(*providerID), strings.TrimSpace(*model), stderr)
+		suite, err = captureOpenAICompatibleSuite(strings.TrimSpace(*providerID), strings.TrimSpace(*model), checkpoint, stderr)
 		if dogfoodSuiteHasSamples(suite) {
 			if checkpointErr := writeJSONFile(*suitePath, suite); checkpointErr != nil {
 				err = errors.Join(err, checkpointErr)
@@ -149,7 +162,7 @@ func dogfoodSuiteHasSamples(suite personality.DogfoodSuite) bool {
 	return false
 }
 
-func captureCodexSuite(model string, progress io.Writer) (personality.DogfoodSuite, error) {
+func captureCodexSuite(model string, checkpoint personality.DogfoodSuite, progress io.Writer) (personality.DogfoodSuite, error) {
 	profileRoot, err := os.MkdirTemp("", "yuri-personality-dogfood-")
 	if err != nil {
 		return personality.DogfoodSuite{}, err
@@ -186,7 +199,7 @@ func captureCodexSuite(model string, progress io.Writer) (personality.DogfoodSui
 		return personality.DogfoodSuite{}, err
 	}
 	defer bridge.Shutdown(context.Background())
-	return desktop.RunPersonalityDogfood(ctx, bridge, "codex-app-server", func(completed, total int, surface, profile, scenario string) {
+	return desktop.RunPersonalityDogfoodResume(ctx, bridge, "codex-app-server", checkpoint, func(completed, total int, surface, profile, scenario string) {
 		fmt.Fprintf(progress, "[%02d/%02d] %s %s/%s\n", completed, total, surface, profile, scenario)
 	})
 }
@@ -197,7 +210,7 @@ func captureCodexSuite(model string, progress io.Writer) (personality.DogfoodSui
 // The provider's opaque CredentialRef is intentionally retained: Bridge's
 // production wiring resolves it from the system keyring at the adapter
 // boundary. No owner database, conversations, agents, or memories are opened.
-func captureOpenAICompatibleSuite(providerID, model string, progress io.Writer) (personality.DogfoodSuite, error) {
+func captureOpenAICompatibleSuite(providerID, model string, checkpoint personality.DogfoodSuite, progress io.Writer) (personality.DogfoodSuite, error) {
 	providerID = strings.TrimSpace(providerID)
 	if providerID == "" {
 		return personality.DogfoodSuite{}, errors.New("provider ID is required")
@@ -260,7 +273,7 @@ func captureOpenAICompatibleSuite(providerID, model string, progress io.Writer) 
 		return personality.DogfoodSuite{}, err
 	}
 	defer bridge.Shutdown(context.Background())
-	return desktop.RunPersonalityDogfood(ctx, bridge, "OpenAI-compatible · "+providerID, func(completed, total int, surface, profile, scenario string) {
+	return desktop.RunPersonalityDogfoodResume(ctx, bridge, "OpenAI-compatible · "+providerID, checkpoint, func(completed, total int, surface, profile, scenario string) {
 		fmt.Fprintf(progress, "[%02d/%02d] %s %s/%s\n", completed, total, surface, profile, scenario)
 	})
 }

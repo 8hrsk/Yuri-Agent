@@ -69,6 +69,7 @@ func TestRunValidatesLiveCaptureFlagsBeforeProviderAccess(t *testing.T) {
 		{"-live-codex", "-live-openai-compatible", "-suite", "out.json", "-provider-id", "openrouter"},
 		{"-live-openrouter", "-suite", "out.json"},
 		{"-input", "in.json", "-model", "model"},
+		{"-input", "in.json", "-resume"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr, time.Now); code != 2 {

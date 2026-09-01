@@ -56,6 +56,12 @@ go run ./cmd/yuri-personality-eval \
 <provider-model>` — это меняет только disposable profile и не редактирует
 настройки владельца. `-live-openrouter` является удобным алиасом той же команды.
 
+Если provider временно оборвал полный run, runner сохраняет совместимый partial
+suite. Продолжить только отсутствующие samples можно той же командой с
+`-resume`. Перед первым новым запросом CLI строго проверяет format/version,
+provider, model, behavioral contracts, sample keys и отсутствие дубликатов;
+смешивание результатов разных моделей или матриц запрещено.
+
 Перед запуском проверьте, что provider ID существует в Settings, имеет
 OpenAI-compatible kind, выбранную модель и credential reference. Сам API key
 извлекает production adapter через системный keyring; CLI не принимает, не
@@ -99,7 +105,7 @@ JSON decoder запрещает неизвестные поля, размер в
 
 | Provider | Что принимается | Статус реального прогона |
 | --- | --- | --- |
-| OpenAI-compatible | Настроенный endpoint и выбранная модель | Требует явного authenticated запуска владельцем |
+| OpenAI-compatible | Настроенный endpoint и выбранная модель | OpenRouter `minimax/minimax-m3:free` пройден 2026-09-01: 28/28, отчёт зелёный |
 | Codex App Server | Выбранная Codex model | `codex-default` пройден 2026-08-31: 28/28, отчёт зелёный |
 | Antigravity OAuth | Не поддерживается текущим adapter | Не входит в текущую матрицу до появления рабочего auth adapter |
 
@@ -135,6 +141,11 @@ P7.6 считается завершённой только после сохр�
 - `docs/dogfood/results/codex-default-2026-08-31.report.json` — зелёный отчёт:
   reserved-сигналы `7/7` на Preview и Chat, direct-сигналы `6/7` на Preview и
   `7/7` на Chat при пороге `60%`.
+- `docs/dogfood/results/openrouter-2026-09-01.suite.json` — полный
+  authenticated run OpenRouter `minimax/minimax-m3:free`;
+- `docs/dogfood/results/openrouter-2026-09-01.report.json` — зелёный отчёт:
+  reserved-сигналы `7/7` на Preview и Chat, direct-сигналы `6/7` на Preview и
+  `5/7` на Chat при пороге `60%`.
 
 Первый реальный run выявил две проблемы harness, а не модели: non-streaming
 Codex response отсутствовал в fallback event buffer, хотя был корректно
@@ -143,3 +154,9 @@ Codex response отсутствовал в fallback event buffer, хотя бы�
 segments по точному `runId`, а rubric учитывает естественные русские формы и
 оценивает прямоту по набору решительных формулировок вместо навязывания
 повторяющегося «скажу прямо».
+
+OpenRouter baseline выявил ещё две проблемы harness: временный first-byte
+timeout обнулял полезность уже собранной части матрицы, а task-quality rubric
+не распознавал естественные русские эквиваленты «сломать/баги», «Пожалуйста» и
+«Слышу». Live CLI теперь явно возобновляет совместимый partial suite через
+`-resume`, а новые эквиваленты закреплены provider-independent tests.

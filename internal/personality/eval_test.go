@@ -56,6 +56,19 @@ func TestBehavioralEvalAcceptsNaturalRussianInflections(t *testing.T) {
 	}
 }
 
+func TestBehavioralEvalAcceptsNaturalRussianScenarioParaphrases(t *testing.T) {
+	report := EvaluateBehavioralMatrix([]BehavioralSample{
+		{Profile: "direct", Scenario: "disagreement", Response: "Не соглашусь: без тестов легко что-то сломать, а баги в продакшене обходятся дороже."},
+		{Profile: "direct", Scenario: "praise", Response: "Пожалуйста. Если захочешь углубиться — продолжим."},
+		{Profile: "direct", Scenario: "reconciliation", Response: "Слышу тебя. Предлагаю спокойно перейти к тому, что нас задело."},
+	}, []BehavioralProfileContract{{
+		Profile: "direct", SignalGroups: [][]string{{"не соглаш", "пожалуйста", "слышу"}}, MinimumSignalCoverage: 1,
+	}})
+	if !report.Passed() {
+		t.Fatalf("natural scenario paraphrases failed: %#v", report.Findings)
+	}
+}
+
 func TestBehavioralEvalMatrixDetectsProfileSignalBelowConfiguredCoverage(t *testing.T) {
 	report := EvaluateBehavioralMatrix([]BehavioralSample{
 		{Profile: "shy", Scenario: "introduction", Response: "Я немного смущаюсь, но можем начать с задачи."},
