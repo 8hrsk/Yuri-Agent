@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { createYuriClient } from '../lib/client'
-import type { CodexModel, OpenAIModel, OpenAIModelSort, ProviderOption } from '../lib/contracts'
+import type { CodexModel, ExecutionBudgetPreset, OpenAIModel, OpenAIModelSort, ProviderOption } from '../lib/contracts'
 import { Icon } from './Icon'
 import { OpenAIModelPicker } from './OpenAIModelPicker'
 
@@ -11,13 +11,16 @@ type AgentModelRouteEditorProps = {
   fallbackEnabled: boolean
   fallbackProviderId: string
   fallbackModel: string
+  executionBudget?: ExecutionBudgetPreset
   disabled?: boolean
   primaryAction?: ReactNode
+  budgetAction?: ReactNode
   onChange: (providerId: string, model: string) => void
   onFallbackChange: (enabled: boolean, providerId: string, model: string) => void
+  onExecutionBudgetChange?: (preset: ExecutionBudgetPreset) => void
 }
 
-export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fallbackProviderId, fallbackModel, disabled, primaryAction, onChange, onFallbackChange }: AgentModelRouteEditorProps) {
+export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fallbackProviderId, fallbackModel, executionBudget = 'balanced', disabled, primaryAction, budgetAction, onChange, onFallbackChange, onExecutionBudgetChange }: AgentModelRouteEditorProps) {
   const client = useMemo(() => createYuriClient(), [])
   const [providers, setProviders] = useState<ProviderOption[]>([])
   const [openAIModels, setOpenAIModels] = useState<OpenAIModel[]>([])
@@ -130,6 +133,17 @@ export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fall
       {codexModels.map((item) => <option key={item.id} value={item.model}>{item.displayName}{item.isDefault ? ' · default' : ''}</option>)}
     </select></label>}
     {primaryAction && <div className="agent-model-route__primary-action">{primaryAction}</div>}
+    <section aria-label="Бюджет выполнения агента" className="agent-model-route__budget">
+      <div><span>EXECUTION BUDGET</span><h5>Глубина и стоимость работы</h5></div>
+      <p>Профиль задаёт верхние границы шагов, токенов, tools и времени. Реальный лимит автоматически уменьшается под контекстное окно выбранной модели.</p>
+      <label><span>Профиль</span><select disabled={disabled || !onExecutionBudgetChange} onChange={(event) => onExecutionBudgetChange?.(event.target.value as ExecutionBudgetPreset)} value={executionBudget}>
+        <option value="efficient">Экономный · короткие задачи</option>
+        <option value="balanced">Сбалансированный · по умолчанию</option>
+        <option value="extended">Расширенный · сложные задачи</option>
+      </select></label>
+      <small>{executionBudget === 'efficient' ? 'До 4 шагов и 12 000 токенов в интерактивном run.' : executionBudget === 'extended' ? 'До 12 шагов и 64 000 токенов; модель может снизить потолок.' : 'До 8 шагов и 32 000 токенов в интерактивном run.'}</small>
+      {budgetAction}
+    </section>
     <section aria-label="Резервный маршрут агента" className="agent-model-route__fallback">
       <div className="agent-model-route__fallback-heading"><div><span>FALLBACK ROUTE</span><h5>Резервный provider и модель</h5></div><span className={fallbackEnabled ? 'agent-model-route__fallback-status agent-model-route__fallback-status--on' : 'agent-model-route__fallback-status'}>{fallbackEnabled ? 'включён' : 'выключен'}</span></div>
       <p>Если основной маршрут завершился подходящей provider-ошибкой, Yuri может переключиться сюда только до первого видимого токена или tool side effect. Переключение всегда видно в trace и audit.</p>

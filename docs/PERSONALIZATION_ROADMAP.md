@@ -396,7 +396,7 @@ P2 не начинается до готовности compiler contract. P3–P
 
 ### Другой последующий scope
 
-- динамические лимиты внутренних диалогов: отдельные per-agent/per-dialogue budgets для числа реплик, токенов и времени вместо текущего фиксированного короткого exchange; UI должен показывать выбранный budget до запуска, а runtime — завершать разговор по смысловому outcome и жёстким верхним границам;
+- динамические лимиты внутренних диалогов — первый срез реализован: per-agent `efficient|balanced|extended` управляет foreground, background, peer и subagent limits, известное context window модели только сужает budget, а Chat trace показывает фактические hard limits и usage. Следующий срез backlog: явный per-dialogue override перед ручным запуском peer exchange, который может только сузить agent preset, плюс semantic outcome внутри этих границ;
 - Live2D/VRM и сложная мимика;
 - распознавание эмоций пользователя по голосу или камере;
 - публичный каталог готовых character profiles;

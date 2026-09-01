@@ -696,6 +696,41 @@
   background: rgba(var(--mint-rgb), 0.025);
 }
 
+.agent-model-route__budget {
+  display: grid;
+  gap: 11px;
+  padding: 15px;
+  border: 1px solid rgba(var(--mint-rgb), 0.16);
+  border-radius: 12px;
+  background: rgba(var(--mint-rgb), 0.025);
+}
+
+.agent-model-route__budget h5,
+.agent-model-route__budget p,
+.agent-model-route__budget small {
+  margin: 0;
+}
+
+.agent-model-route__budget > div > span {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+
+.agent-model-route__budget h5 {
+  margin-top: 4px;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.agent-model-route__budget p,
+.agent-model-route__budget small {
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
 .agent-route-primary-save {
   display: flex;
   align-items: center;

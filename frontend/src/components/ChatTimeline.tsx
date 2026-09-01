@@ -174,8 +174,15 @@ export const ExecutionTrace = memo(function ExecutionTrace({
   const summary = traceToolCopy(trace)
   const heading = trace.kind === 'subagent' ? 'Субагент' : thinkingOnly ? 'Thinking' : 'Выполнение'
   const route = [trace.providerId, trace.model].filter(Boolean).join(' · ')
-  const usage = trace.totalTokens !== undefined && trace.totalTokens > 0 ? `${trace.totalTokens.toLocaleString('ru-RU')} ток.` : ''
-  const provenance = [route, usage].filter(Boolean).join(' · ')
+  const usage = trace.totalTokens !== undefined && trace.totalTokens > 0
+    ? `${trace.totalTokens.toLocaleString('ru-RU')}${trace.maxTokens ? ` / ${trace.maxTokens.toLocaleString('ru-RU')}` : ''} ток.`
+    : trace.maxTokens ? `лимит ${trace.maxTokens.toLocaleString('ru-RU')} ток.` : ''
+  const budget = [
+    trace.maxSteps ? `${trace.maxSteps} шаг.` : '',
+    trace.maxToolCalls ? `${trace.maxToolCalls} tools` : '',
+    trace.maxDurationSeconds ? `${trace.maxDurationSeconds} сек.` : '',
+  ].filter(Boolean).join(' / ')
+  const provenance = [route, usage, budget].filter(Boolean).join(' · ')
   const failureGuidance = trace.status === 'error' ? inferenceFailureGuidance(trace.failureKind, trace.retryAfterSeconds, trace.retryable) : undefined
   const recoveryActions = showRecovery && trace.status === 'error'
     ? inferenceFailureRecoveryActions(trace.failureKind, trace.retryable).filter((action) => {

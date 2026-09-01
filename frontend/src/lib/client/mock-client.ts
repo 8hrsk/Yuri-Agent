@@ -337,6 +337,15 @@ class MockYuriClient implements YuriClient {
     return { ...next, traits: { ...next.traits }, active: true }
   }
 
+  async updateActiveAgentExecutionBudget(preset: import('../contracts').ExecutionBudgetPreset): Promise<AgentProfile> {
+    if (!this.activeAgentId) throw new Error('Активный агент не выбран.')
+    const agent = this.agents.get(this.activeAgentId)
+    if (!agent) throw new Error('Агент не найден.')
+    const next = { ...agent, executionBudget: preset, updatedAt: nowIso() }
+    this.agents.set(next.id, next)
+    return { ...next, traits: { ...next.traits }, active: true }
+  }
+
   async updateActiveAgentFallbackRoute(enabled: boolean, providerId: string, model: string): Promise<AgentProfile> {
     if (!this.activeAgentId) throw new Error('Активный агент не выбран.')
     const agent = this.agents.get(this.activeAgentId)

@@ -28,6 +28,10 @@ const updateActiveAgentModelRoute = vi.fn(async (providerId: string, model: stri
   persistedActiveAgent = { ...persistedActiveAgent, providerId, model, updatedAt: '2026-09-01T02:00:00Z' }
   return persistedActiveAgent
 })
+const updateActiveAgentExecutionBudget = vi.fn(async (executionBudget: 'efficient' | 'balanced' | 'extended') => {
+  persistedActiveAgent = { ...persistedActiveAgent, executionBudget, updatedAt: '2026-09-01T02:01:00Z' }
+  return persistedActiveAgent
+})
 
 const clientStub = {
   mode: 'mock',
@@ -36,6 +40,7 @@ const clientStub = {
   getActiveAgentPersonalization: async () => ownerSeed,
   updateActiveAgentPersonalization,
   updateActiveAgentModelRoute,
+  updateActiveAgentExecutionBudget,
   listProviders: async () => [
     { id: 'codex', kind: 'codex-app-server', displayName: 'Codex OAuth', model: '', enabled: true, hasSecret: false },
     { id: 'openrouter', kind: 'openai-compatible', displayName: 'OpenRouter', model: 'openrouter/free', enabled: false, hasSecret: true },
@@ -176,5 +181,19 @@ describe('Personality and Relationship are two destinations, not one page', () =
     render(<PersonaRelationshipView section="personality" />)
     expect(await screen.findByRole('combobox', { name: 'Provider' })).toHaveValue('codex')
     expect(await screen.findByRole('combobox', { name: 'Codex model' })).toHaveValue('gpt-5.6-luna')
+  })
+
+  it('persists the per-agent execution budget independently from its model route', async () => {
+    const user = userEvent.setup()
+    persistedActiveAgent = { ...activeAgent, executionBudget: 'balanced' }
+    updateActiveAgentExecutionBudget.mockClear()
+    render(<PersonaRelationshipView section="personality" />)
+
+    const budget = await screen.findByRole('combobox', { name: 'Профиль' })
+    await user.selectOptions(budget, 'extended')
+    await user.click(screen.getByRole('button', { name: 'Сохранить бюджет выполнения' }))
+
+    await waitFor(() => expect(updateActiveAgentExecutionBudget).toHaveBeenCalledWith('extended'))
+    expect(persistedActiveAgent).toMatchObject({ executionBudget: 'extended' })
   })
 })

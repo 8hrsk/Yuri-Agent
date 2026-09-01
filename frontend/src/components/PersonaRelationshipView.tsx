@@ -8,6 +8,7 @@ import type {
   AgentPersonalizationProfile,
   AgentProfile,
   AgentProfileInput,
+  ExecutionBudgetPreset,
   PersonaTrait,
   PersonaVersion,
   PersonalitySnapshot,
@@ -37,7 +38,7 @@ type PersonaRelationshipViewProps = {
 }
 
 type Feedback = { kind: 'success' | 'error'; text: string }
-type BusyAction = 'loading' | 'evolution' | 'policy' | 'pin' | 'rollback' | 'reset' | 'seed' | 'route' | 'fallback' | undefined
+type BusyAction = 'loading' | 'evolution' | 'policy' | 'pin' | 'rollback' | 'reset' | 'seed' | 'route' | 'fallback' | 'budget' | undefined
 
 function ownerSeedDraft(agent: AgentProfile, seed: AgentPersonalizationProfile): AgentProfileInput {
   return {
@@ -51,6 +52,7 @@ function ownerSeedDraft(agent: AgentProfile, seed: AgentPersonalizationProfile):
     fallbackEnabled: agent.fallbackEnabled ?? false,
     fallbackProviderId: agent.fallbackProviderId ?? '',
     fallbackModel: agent.fallbackModel ?? '',
+    executionBudget: agent.executionBudget ?? 'balanced',
     traits: { ...seed.temperament },
     personalization: clonePersonalization(seed),
     creationMode: 'advanced',
@@ -240,6 +242,7 @@ export function PersonaRelationshipView({ section, onActiveAgentChange, onModelR
   const [evolutionPolicy, setEvolutionPolicy] = useState<AgentEvolutionPolicy>()
   const [modelRoute, setModelRoute] = useState({ providerId: '', model: '' })
   const [fallbackRoute, setFallbackRoute] = useState({ enabled: false, providerId: '', model: '' })
+  const [executionBudget, setExecutionBudget] = useState<ExecutionBudgetPreset>('balanced')
   const modelRouteDirty = activeAgent !== undefined && (
     modelRoute.providerId !== (activeAgent.providerId ?? '') || modelRoute.model !== (activeAgent.model ?? '')
   )
@@ -263,6 +266,7 @@ export function PersonaRelationshipView({ section, onActiveAgentChange, onModelR
       if (agent) {
         setModelRoute({ providerId: agent.providerId ?? '', model: agent.model ?? '' })
         setFallbackRoute({ enabled: agent.fallbackEnabled ?? false, providerId: agent.fallbackProviderId ?? '', model: agent.fallbackModel ?? '' })
+        setExecutionBudget(agent.executionBudget ?? 'balanced')
       }
       setOwnerSeed(seed)
       if (seed) setEvolutionPolicy({ ...seed.evolutionPolicy, lockedFields: [...seed.evolutionPolicy.lockedFields], traitBounds: { ...seed.evolutionPolicy.traitBounds } })
@@ -420,6 +424,22 @@ export function PersonaRelationshipView({ section, onActiveAgentChange, onModelR
     }
   }
 
+  const saveExecutionBudget = async () => {
+    setBusy('budget')
+    setFeedback(undefined)
+    try {
+      const next = await client.updateActiveAgentExecutionBudget(executionBudget)
+      setActiveAgent(next)
+      onActiveAgentChange?.(next)
+      setExecutionBudget(next.executionBudget ?? 'balanced')
+      setFeedback({ kind: 'success', text: `${next.name}: профиль выполнения изменён на «${next.executionBudget ?? 'balanced'}».` })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось сохранить бюджет выполнения агента.' })
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const saveEvolutionPolicy = async () => {
     if (!ownerSeed || !activeAgent || !evolutionPolicy) return
     setBusy('policy')
@@ -481,7 +501,9 @@ export function PersonaRelationshipView({ section, onActiveAgentChange, onModelR
     {!relationship && activeAgent && <section className="agent-route-panel" aria-labelledby="agent-route-title">
       <div><span className="section-heading__overline">PER-AGENT MODEL ROUTING</span><h2 id="agent-route-title">Модель {activeAgent.name}</h2><p>Этот маршрут используется в обычном чате, фоновых run и когда агент отвечает другому агенту.</p></div>
       <AgentModelRouteEditor
+        budgetAction={<button className="button button--quiet" disabled={busy !== undefined || executionBudget === (activeAgent.executionBudget ?? 'balanced')} onClick={() => void saveExecutionBudget()} type="button"><Icon name="check" width={14} height={14} /> {busy === 'budget' ? 'Сохраняю…' : 'Сохранить бюджет выполнения'}</button>}
         disabled={busy !== undefined}
+        executionBudget={executionBudget}
         fallbackEnabled={fallbackRoute.enabled}
         fallbackModel={fallbackRoute.model}
         fallbackProviderId={fallbackRoute.providerId}
@@ -491,6 +513,10 @@ export function PersonaRelationshipView({ section, onActiveAgentChange, onModelR
           setFeedback(undefined)
         }}
         onFallbackChange={(enabled, providerId, model) => setFallbackRoute({ enabled, providerId, model })}
+        onExecutionBudgetChange={(preset) => {
+          setExecutionBudget(preset)
+          setFeedback(undefined)
+        }}
         primaryAction={<div className={`agent-route-primary-save${modelRouteDirty ? ' agent-route-primary-save--dirty' : ''}`}>
           <span role="status"><Icon name={modelRouteDirty ? 'warning' : 'check'} width={14} height={14} /> {modelRouteDirty ? 'Выбор ещё не применён к агенту' : 'Основной маршрут сохранён'}</span>
           <button className="button button--accent" disabled={busy !== undefined || !modelRouteDirty} onClick={() => void saveModelRoute()} type="button"><Icon name="check" width={14} height={14} /> {busy === 'route' ? 'Сохраняю…' : `Сохранить основной маршрут ${activeAgent.name}`}</button>

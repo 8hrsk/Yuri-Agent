@@ -112,6 +112,8 @@ export interface AgentPersonalizationUpdate {
   reason: string
 }
 
+export type ExecutionBudgetPreset = 'efficient' | 'balanced' | 'extended'
+
 export interface AgentProfile {
   id: string
   name: string
@@ -126,6 +128,7 @@ export interface AgentProfile {
   fallbackEnabled?: boolean
   fallbackProviderId?: string
   fallbackModel?: string
+  executionBudget?: ExecutionBudgetPreset
   traits: Record<string, number>
   active: boolean
   createdAt: string
@@ -147,6 +150,7 @@ export interface AgentProfileInput {
   fallbackEnabled: boolean
   fallbackProviderId: string
   fallbackModel: string
+  executionBudget?: ExecutionBudgetPreset
   traits: Record<string, number>
   personalization: AgentPersonalizationInput
   /** UI-only draft metadata. Unknown fields are ignored by the Go bridge. */

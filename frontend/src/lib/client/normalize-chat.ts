@@ -22,7 +22,7 @@ function normalizeChatEvent(value: unknown): ChatEvent | undefined {
                 : rawType
   const runId = String(nested.runId ?? nested.run_id ?? '')
   if (!type || !runId) return undefined
-  const base: { runId: string; conversationId?: string; createdAt?: string; timestamp?: string; runKind?: string; parentRunId?: string; providerId?: string; model?: string; inputTokens?: number; outputTokens?: number; totalTokens?: number; failureKind?: RunFailureKind; retryable?: boolean; retryAfterSeconds?: number } = { runId }
+  const base: { runId: string; conversationId?: string; createdAt?: string; timestamp?: string; runKind?: string; parentRunId?: string; providerId?: string; model?: string; inputTokens?: number; outputTokens?: number; totalTokens?: number; maxSteps?: number; maxTokens?: number; maxToolCalls?: number; maxDurationSeconds?: number; failureKind?: RunFailureKind; retryable?: boolean; retryAfterSeconds?: number } = { runId }
   const conversationId = optionalString(nested, 'conversationId', 'conversation_id')
   const createdAt = optionalString(nested, 'createdAt', 'created_at')
   const timestamp = optionalString(nested, 'timestamp', 'at')
@@ -33,6 +33,10 @@ function normalizeChatEvent(value: unknown): ChatEvent | undefined {
   const inputTokens = optionalNumber(nested, 'inputTokens', 'input_tokens')
   const outputTokens = optionalNumber(nested, 'outputTokens', 'output_tokens')
   const totalTokens = optionalNumber(nested, 'totalTokens', 'total_tokens')
+  const maxSteps = optionalNumber(nested, 'maxSteps', 'max_steps')
+  const maxTokens = optionalNumber(nested, 'maxTokens', 'max_tokens')
+  const maxToolCalls = optionalNumber(nested, 'maxToolCalls', 'max_tool_calls')
+  const maxDurationSeconds = optionalNumber(nested, 'maxDurationSeconds', 'max_duration_seconds')
   const failureKind = normalizeRunFailureKind(nested.failureKind ?? nested.failure_kind)
   const retryableValue = nested.retryable ?? nested.failureRetryable ?? nested.failure_retryable
   const retryAfterSeconds = optionalNumber(nested, 'retryAfterSeconds', 'retry_after_seconds', 'failureRetryAfterSeconds', 'failure_retry_after_seconds')
@@ -46,6 +50,10 @@ function normalizeChatEvent(value: unknown): ChatEvent | undefined {
   if (inputTokens !== undefined && inputTokens >= 0) base.inputTokens = Math.round(inputTokens)
   if (outputTokens !== undefined && outputTokens >= 0) base.outputTokens = Math.round(outputTokens)
   if (totalTokens !== undefined && totalTokens >= 0) base.totalTokens = Math.round(totalTokens)
+  if (maxSteps !== undefined && maxSteps >= 0) base.maxSteps = Math.round(maxSteps)
+  if (maxTokens !== undefined && maxTokens >= 0) base.maxTokens = Math.round(maxTokens)
+  if (maxToolCalls !== undefined && maxToolCalls >= 0) base.maxToolCalls = Math.round(maxToolCalls)
+  if (maxDurationSeconds !== undefined && maxDurationSeconds >= 0) base.maxDurationSeconds = Math.round(maxDurationSeconds)
   if (failureKind) base.failureKind = failureKind
   if (typeof retryableValue === 'boolean') base.retryable = retryableValue
   if (retryAfterSeconds !== undefined && retryAfterSeconds >= 0) base.retryAfterSeconds = Math.round(retryAfterSeconds)

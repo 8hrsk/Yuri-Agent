@@ -70,6 +70,10 @@ describe('chat execution trace', () => {
       startedAt: '2026-08-29T09:00:01Z',
       finishedAt: '2026-08-29T09:00:04Z',
       failure: '',
+      max_steps: 8,
+      max_tokens: 32000,
+      max_tool_calls: 32,
+      max_duration_seconds: 600,
       toolCalls: [{
         id: 'call-history-1',
         name: 'filesystem.read',
@@ -87,6 +91,7 @@ describe('chat execution trace', () => {
     expect(trace?.steps.map((step) => step.kind)).toEqual(['thinking', 'tool', 'completion'])
     expect(trace?.steps.find((step) => step.kind === 'tool')).toMatchObject({ toolCall: { name: 'filesystem.read', result: 'blob:result' } })
     expect(JSON.stringify(trace)).not.toContain('must never be rendered')
+    expect(trace).toMatchObject({ maxSteps: 8, maxTokens: 32000, maxToolCalls: 32, maxDurationSeconds: 600 })
   })
 
   it('restores an explicit provider fallback from compact persisted history', () => {

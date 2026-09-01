@@ -142,6 +142,13 @@ describe('Yuri client contract', () => {
                 active: true, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:01:00Z',
               }
             },
+            UpdateActiveAgentExecutionBudget: (input: unknown) => {
+              calls.push(input)
+              return {
+                id: 'agent-emily', name: 'Emily', gender: 'female', execution_budget: 'extended',
+                active: true, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:02:00Z',
+              }
+            },
           },
         },
       },
@@ -156,9 +163,13 @@ describe('Yuri client contract', () => {
       await expect(client.updateActiveAgentFallbackRoute(true, 'openrouter', 'openrouter/free')).resolves.toMatchObject({
         id: 'agent-emily', fallbackEnabled: true, fallbackProviderId: 'openrouter', fallbackModel: 'openrouter/free',
       })
+      await expect(client.updateActiveAgentExecutionBudget('extended')).resolves.toMatchObject({
+        id: 'agent-emily', executionBudget: 'extended',
+      })
       expect(calls).toEqual([
         { providerId: 'openrouter', model: 'openrouter/free' },
         { enabled: true, providerId: 'openrouter', model: 'openrouter/free' },
+        { preset: 'extended' },
       ])
     })
   })

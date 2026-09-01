@@ -105,6 +105,7 @@ export const defaultAgentDraft: AgentProfileInput = {
   fallbackEnabled: false,
   fallbackProviderId: '',
   fallbackModel: '',
+  executionBudget: 'balanced',
   traits: { ...defaultAgentTraits },
   personalization: clonePersonalization(defaultAgentPersonalization),
   creationMode: 'quick',
@@ -230,6 +231,11 @@ export function normalizeAgentProfileInput(value: unknown): AgentProfileInput | 
     fallbackEnabled: source.fallbackEnabled === true || source.fallback_enabled === true,
     fallbackProviderId: typeof source.fallbackProviderId === 'string' && source.fallbackProviderId.trim() ? limitRunes(source.fallbackProviderId.trim(), 128) : typeof source.fallback_provider_id === 'string' ? limitRunes(source.fallback_provider_id.trim(), 128) : '',
     fallbackModel: typeof source.fallbackModel === 'string' && source.fallbackModel.trim() ? limitRunes(source.fallbackModel.trim(), 256) : typeof source.fallback_model === 'string' ? limitRunes(source.fallback_model.trim(), 256) : '',
+    executionBudget: source.executionBudget === 'efficient' || source.execution_budget === 'efficient'
+      ? 'efficient'
+      : source.executionBudget === 'extended' || source.execution_budget === 'extended'
+        ? 'extended'
+        : 'balanced',
     traits: { ...defaultAgentTraits, ...normalizeAgentTraits(source.traits) },
     personalization: normalizePersonalizationInput(source.personalization),
     creationMode: 'advanced',
@@ -408,6 +414,10 @@ export function normalizeAgentProfile(value: unknown): AgentProfile | undefined 
     fallbackEnabled: source.fallbackEnabled === true || source.fallback_enabled === true,
     fallbackProviderId: text(source, 'fallbackProviderId', 'fallback_provider_id') ?? '',
     fallbackModel: text(source, 'fallbackModel', 'fallback_model') ?? '',
+    executionBudget: (() => {
+      const preset = text(source, 'executionBudget', 'execution_budget')
+      return preset === 'efficient' || preset === 'extended' ? preset : 'balanced'
+    })(),
     traits: normalizeAgentTraits(source.traits ?? source.initialTraits ?? source.initial_traits),
     active: source.active === true || source.isActive === true || source.is_active === true,
     createdAt: text(source, 'createdAt', 'created_at') ?? new Date(0).toISOString(),

@@ -15,6 +15,10 @@ interface ChatEventMeta {
   inputTokens?: number
   outputTokens?: number
   totalTokens?: number
+  maxSteps?: number
+  maxTokens?: number
+  maxToolCalls?: number
+  maxDurationSeconds?: number
   failureKind?: RunFailureKind
   retryable?: boolean
   retryAfterSeconds?: number

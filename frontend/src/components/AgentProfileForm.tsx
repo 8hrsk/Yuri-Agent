@@ -160,12 +160,14 @@ function ProviderStep({ value, onChange }: { value: AgentProfileInput; onChange:
   return <section aria-labelledby="agent-step-provider" className="agent-wizard__panel">
     <div className="agent-wizard__heading"><span>02 · MODEL</span><h3 id="agent-step-provider">Какой моделью думает агент?</h3><p>Каждый именованный агент может иметь собственный provider и model. Обезличенные субагенты наследуют маршрут вызвавшего их агента.</p></div>
     <AgentModelRouteEditor
+      executionBudget={value.executionBudget ?? 'balanced'}
       fallbackEnabled={value.fallbackEnabled}
       fallbackModel={value.fallbackModel}
       fallbackProviderId={value.fallbackProviderId}
       model={value.model}
       onChange={(providerId, model) => onChange({ ...value, providerId, model })}
       onFallbackChange={(fallbackEnabled, fallbackProviderId, fallbackModel) => onChange({ ...value, fallbackEnabled, fallbackProviderId, fallbackModel })}
+      onExecutionBudgetChange={(executionBudget) => onChange({ ...value, executionBudget })}
       providerId={value.providerId}
     />
   </section>

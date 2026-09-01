@@ -352,6 +352,12 @@ class WailsYuriClient implements YuriClient {
     return result
   }
 
+  async updateActiveAgentExecutionBudget(preset: import('../contracts').ExecutionBudgetPreset): Promise<AgentProfile> {
+    const result = normalizeAgentProfile(await callBridge<unknown>(['UpdateActiveAgentExecutionBudget'], [{ preset }]))
+    if (!result) throw new Error('Backend не подтвердил бюджет выполнения агента.')
+    return result
+  }
+
   async updateActiveAgentFallbackRoute(enabled: boolean, providerId: string, model: string): Promise<AgentProfile> {
     const result = normalizeAgentProfile(await callBridge<unknown>(['UpdateActiveAgentFallbackRoute'], [{ enabled, providerId, model }]))
     if (!result) throw new Error('Backend не подтвердил резервный маршрут агента.')
