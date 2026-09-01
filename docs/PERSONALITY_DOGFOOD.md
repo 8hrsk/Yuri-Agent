@@ -40,6 +40,38 @@ run выполняет 28 основных model turns: по семь Preview и
 credentials, внутренние идентификаторы и локальные данные пользователя туда
 не попадают.
 
+Для явного authenticated прогона уже настроенного OpenAI-compatible провайдера
+(например, OpenRouter) используйте его существующий `provider ID`:
+
+```bash
+go run ./cmd/yuri-personality-eval \
+  -live-openai-compatible \
+  -provider-id openrouter \
+  -suite /absolute/path/openrouter-suite.json \
+  -report /absolute/path/openrouter-report.json
+```
+
+`-model` здесь также необязателен: по умолчанию берётся модель, сохранённая у
+выбранного провайдера. Для разового сравнения можно передать `-model
+<provider-model>` — это меняет только disposable profile и не редактирует
+настройки владельца. `-live-openrouter` является удобным алиасом той же команды.
+
+Перед запуском проверьте, что provider ID существует в Settings, имеет
+OpenAI-compatible kind, выбранную модель и credential reference. Сам API key
+извлекает production adapter через системный keyring; CLI не принимает, не
+читает и не печатает его. Runner читает только owner config metadata, копирует в
+одноразовый профиль только выбранный route и его opaque `credential_ref`, а
+затем создаёт новую временную SQLite/data директорию. Диалоги, AgentProfile,
+memory, allowed directories, plugins и другие owner-local данные не читаются и
+не копируются. Временный профиль удаляется после завершения.
+
+`-input` нельзя использовать вместе с live-флагом; `-live-codex` и
+`-live-openai-compatible` также взаимоисключающие. Если authenticated provider
+упал после части матрицы, уже собранный suite сохраняется по `-suite` и путь к
+partial suite указывается в stderr. В suite/report остаются только публичные
+provider/model labels, фиксированные prompts/scenarios и ответы модели — не
+токены, keyring values или owner history.
+
 Для ручной фиксации другого провайдера:
 
 1. Создать два или более контрастных агента. Рекомендуемая первая пара — `Застенчивая аналитик` и `Острая цундере`; дополнительный контроль — `Заботливая спутница`.

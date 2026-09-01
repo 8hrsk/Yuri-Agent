@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/OrdoAI/yuri-agent/internal/config"
 	"github.com/OrdoAI/yuri-agent/internal/personality"
 )
 
@@ -58,11 +60,96 @@ func TestRunReturnsOneForBehavioralFailure(t *testing.T) {
 }
 
 func TestRunValidatesLiveCaptureFlagsBeforeProviderAccess(t *testing.T) {
-	for _, args := range [][]string{{"-live-codex"}, {"-live-codex", "-suite", "out.json", "-input", "in.json"}} {
+	for _, args := range [][]string{
+		{"-live-codex"},
+		{"-live-codex", "-suite", "out.json", "-input", "in.json"},
+		{"-live-codex", "-suite", "out.json", "-provider-id", "openrouter"},
+		{"-live-openai-compatible", "-suite", "out.json"},
+		{"-live-openai-compatible", "-suite", "out.json", "-provider-id", "openrouter", "-input", "in.json"},
+		{"-live-codex", "-live-openai-compatible", "-suite", "out.json", "-provider-id", "openrouter"},
+		{"-live-openrouter", "-suite", "out.json"},
+		{"-input", "in.json", "-model", "model"},
+	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr, time.Now); code != 2 {
 			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
 		}
+	}
+}
+
+func TestCloneOpenAICompatibleConfigUsesOnlySelectedRoute(t *testing.T) {
+	owner := config.Config{
+		Version:       1,
+		Locale:        "ru-RU",
+		LogLevel:      "info",
+		DataDirectory: filepath.Join(t.TempDir(), "owner-data"),
+		AllowedDirectories: []string{
+			filepath.Join(t.TempDir(), "private-documents"),
+		},
+		Providers: []config.ProviderConfig{
+			{
+				ID: "unused", Kind: config.ProviderOpenAICompatible, DisplayName: "Unused", BaseURL: "https://unused.example/v1",
+				Model: "unused-model", CredentialRef: "provider.unused.api-key", Enabled: true,
+			},
+			{
+				ID: "openrouter", Kind: config.ProviderOpenAICompatible, DisplayName: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1",
+				Model: "openrouter/free", APIStyle: config.ProviderAPIStyleChatCompletions, FavoriteModels: []string{"openrouter/free"},
+				CredentialRef: "provider.openrouter.api-key", Enabled: false,
+			},
+		},
+	}
+	isolated := config.Paths{DataDirectory: filepath.Join(t.TempDir(), "isolated-data")}
+	clone, err := cloneOpenAICompatibleConfig(owner, isolated, "openrouter", "openrouter/auto")
+	if err != nil {
+		t.Fatalf("cloneOpenAICompatibleConfig() error = %v", err)
+	}
+	if clone.DataDirectory != isolated.DataDirectory {
+		t.Fatalf("clone data directory = %q, want %q", clone.DataDirectory, isolated.DataDirectory)
+	}
+	if len(clone.Providers) != 1 {
+		t.Fatalf("clone providers = %#v, want only selected provider", clone.Providers)
+	}
+	provider := clone.Providers[0]
+	if provider.ID != "openrouter" || provider.Model != "openrouter/auto" || !provider.Enabled {
+		t.Fatalf("cloned route = %#v", provider)
+	}
+	if provider.CredentialRef != "provider.openrouter.api-key" {
+		t.Fatalf("credential reference = %q, want opaque owner reference", provider.CredentialRef)
+	}
+	if len(clone.AllowedDirectories) != 0 || clone.WebSearch.Enabled || clone.PluginDevMode {
+		t.Fatalf("clone retained owner-local access/configuration: %#v", clone)
+	}
+	if clone.Persona.AutoEvolution {
+		t.Fatal("isolated capture must disable post-turn evolution")
+	}
+	encoded, err := json.Marshal(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "api_key") || strings.Contains(string(encoded), "sk-owner-secret") {
+		t.Fatalf("clone serialized secret-like material: %s", encoded)
+	}
+}
+
+func TestCloneOpenAICompatibleConfigRejectsMissingRouteData(t *testing.T) {
+	paths := config.Paths{DataDirectory: filepath.Join(t.TempDir(), "isolated-data")}
+	owner := config.Default(paths)
+	owner.Providers = []config.ProviderConfig{{
+		ID: "codex", Kind: config.ProviderCodexAppServer, DisplayName: "Codex", Enabled: true,
+	}}
+	for _, test := range []struct {
+		name       string
+		providerID string
+		model      string
+	}{
+		{name: "unknown provider", providerID: "missing", model: "model"},
+		{name: "wrong provider kind", providerID: "codex", model: "model"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := cloneOpenAICompatibleConfig(owner, paths, test.providerID, test.model); err == nil {
+				t.Fatal("cloneOpenAICompatibleConfig() accepted invalid route")
+			}
+		})
 	}
 }
 
