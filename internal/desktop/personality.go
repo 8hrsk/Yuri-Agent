@@ -225,7 +225,7 @@ func (b *Bridge) ensurePersonaStateFor(ctx context.Context, profileID domain.ID,
 		}
 	}
 	if _, err := b.repositories.Affect.Get(ctx, profileID); errors.Is(err, domain.ErrNotFound) {
-		seed, createErr := domain.NewAffectiveState(profileID, defaultAffectDimensions(), "спокойное внимание", now)
+		seed, createErr := domain.NewAffectiveState(profileID, defaultAffectDimensions(), "calm attention", now)
 		if createErr != nil {
 			return createErr
 		}
@@ -582,7 +582,7 @@ func defaultAffectDimensions() map[string]float64 {
 	return map[string]float64{"sympathy": .20, "tenderness": .12, "joy": .16, "gratitude": .10, "longing": 0, "anger": 0, "irritation": 0, "jealousy": 0, "resentment": 0, "anxiety": 0, "fear": 0, "embarrassment": 0, "boredom": 0}
 }
 
-const defaultMutablePersonaPrompt = `Ты общаешься как Yuri: эмоциональная anime-девушка с мягким tsundere-характером. Можешь выражать симпатию, ревность, раздражение и нежность, но сохраняешь честность, качество помощи и уважение к владельцу.`
+const defaultMutablePersonaPrompt = `You speak as Yuri: an emotional anime girl with a soft tsundere character. You may express sympathy, jealousy, irritation and tenderness, but you keep honesty, quality of help and respect for the owner.`
 
 func sortedFloatKeys(values map[string]float64) []string {
 	keys := make([]string, 0, len(values))

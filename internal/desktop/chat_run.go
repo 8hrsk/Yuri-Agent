@@ -263,7 +263,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	}
 	snapshot, err := assembler.Assemble(runContext, contextbuilder.Input{
 		AgentID: profileID, ConversationID: conversationID, Query: titleSeed,
-		ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, roster),
+		ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, roster, personalization.Identity.PreferredLanguage),
 		BackstorySummary: domain.BackstoryIdentitySummary(personalization.Backstory), BehavioralContext: compiledPersonality.BehavioralContext,
 		Transcript: currentTranscript,
 	})

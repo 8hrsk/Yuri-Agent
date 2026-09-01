@@ -29,7 +29,7 @@ func TestDefaultPersonalityDogfoodProfilesAreValidAndContrasting(t *testing.T) {
 			t.Fatalf("contract %s = %#v", profile.ID, profile.Contract)
 		}
 	}
-	if compiled["reserved"] == compiled["direct"] || !strings.Contains(compiled["reserved"], "Очень высокая стеснительность") || !strings.Contains(compiled["direct"], "Высокая прямота") {
+	if compiled["reserved"] == compiled["direct"] || !strings.Contains(compiled["reserved"], "Very high shyness") || !strings.Contains(compiled["direct"], "Very high directness") {
 		t.Fatalf("profiles are not observably contrasting:\nreserved=%s\ndirect=%s", compiled["reserved"], compiled["direct"])
 	}
 }

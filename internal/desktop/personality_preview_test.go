@@ -97,7 +97,7 @@ func TestPersonalityPreviewUsesProductionCreationStateAndCompilerWithoutPersiste
 	for _, message := range backend.request.Messages {
 		requestText += message.Content + "\n"
 	}
-	if compiled.Characters == 0 || !strings.Contains(requestText, "Очень высокая стеснительность") || !strings.Contains(requestText, personalityPreviewScenarios[input.Scenario].Prompt) {
+	if compiled.Characters == 0 || !strings.Contains(requestText, "Very high shyness") || !strings.Contains(requestText, personalityPreviewScenarios[input.Scenario].Prompt) {
 		t.Fatalf("preview did not use production compiler/scenario: %s", requestText)
 	}
 	if !strings.Contains(requestText, `"kind":"fictional_identity_summary"`) || !strings.Contains(requestText, `"kind":"compiled_personality_behavior"`) {

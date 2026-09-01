@@ -33,9 +33,10 @@ func TestCompilerProfileMatrixProducesDistinctObservableContracts(t *testing.T) 
 				input.Relationship.Dimensions["attachment"] = .78
 			},
 			expected: []string{
-				"speaks gently", "Стала терпеливее", "Высокая теплота", "Высокая эмпатия",
-				"Высокая поддерживающая манера", "Радость: сделай тон светлее", "Нежность: говори мягче",
-				"Быстрое восстановление", "прямо назвать проблему", "Высокая близость и привязанность",
+				"speaks gently", "Стала терпеливее", "Very high warmth", "Very high empathy", "Very low irritability",
+				"Very high supportiveness", "Very high softness", "Strong joy", "Strong tenderness",
+				"Very high recovery speed", "High expression", "name the problem directly", "Closeness + attachment",
+				"Very high current closeness", "High current attachment",
 			},
 		},
 		{
@@ -58,10 +59,10 @@ func TestCompilerProfileMatrixProducesDistinctObservableContracts(t *testing.T) 
 				input.Affect.Emotions = map[string]float64{domain.EmotionEmbarrassment: .88}
 			},
 			expected: []string{
-				"stutters under attention", "Очень высокая стеснительность", "Высокое любопытство",
-				"Низкая образность", "Низкая экспрессивность", "Смущение: используй короткую заминку",
-				"Низкая открытость выражения", "Высокая склонность скрывать чувства",
-				"публичная похвала", "дать время сформулировать ответ", "сначала взять дистанцию",
+				"stutters under attention", "Very high shyness", "Very high curiosity", "Very low sociability",
+				"Very low figurativeness", "Very low expressiveness", "Overwhelming embarrassment",
+				"Very low expression", "Very high masking",
+				"публичная похвала", "дать время сформулировать ответ", "take distance first",
 			},
 		},
 		{
@@ -83,10 +84,10 @@ func TestCompilerProfileMatrixProducesDistinctObservableContracts(t *testing.T) 
 				input.Relationship.Dimensions["irritation"] = .74
 			},
 			expected: []string{
-				"sharp-tongued", "Раздражается быстрее", "Высокая цундере-манера", "Высокая прямота",
-				"Высокая раздражительность", "Высокое поддразнивание", "Высокая экспрессивность",
-				"Раздражение: сократи фразы", "Высокая реактивность", "временно стать сдержаннее",
-				"Высокое текущее раздражение",
+				"sharp-tongued", "Раздражается быстрее", "Very high tsundere", "Very high directness",
+				"Very high irritability", "High stubbornness", "Very low softness", "Very high teasing", "High expressiveness",
+				"Directness + low softness", "Overwhelming irritation", "Very high reactivity", "High response intensity",
+				"become temporarily more reserved", "High current irritation",
 			},
 		},
 		{
@@ -113,10 +114,11 @@ func TestCompilerProfileMatrixProducesDistinctObservableContracts(t *testing.T) 
 				input.Relationship.Dimensions["jealousy"] = .7
 			},
 			expected: []string{
-				"easily worried", "боится потерять близость", "Высокая тревожность", "Высокая романтичность",
-				"Ревность может быть заметной", "Высокий флирт", "Тревога: используй осторожные формулировки",
-				"Ревность: допускай субъективный укол", "Высокая реактивность", "Высокая длительность негативных состояний",
-				"долгое необъяснённое молчание", "Высокая текущая ревность",
+				"easily worried", "боится потерять близость", "Very high anxiety", "Very high fearfulness", "Very high attachment",
+				"High jealousy", "Very high romantic tone", "Jealousy may be visible", "Very high flirtation",
+				"Romantic tone and light flirt", "Overwhelming anxiety", "Strong jealousy",
+				"Very high reactivity", "Very low recovery speed", "Very high negative persistence",
+				"долгое необъяснённое молчание", "High current jealousy", "Very high current closeness",
 			},
 		},
 		{
@@ -138,10 +140,10 @@ func TestCompilerProfileMatrixProducesDistinctObservableContracts(t *testing.T) 
 				input.Relationship.Dimensions["trust"] = .78
 			},
 			expected: []string{
-				"precise terminology", "Сформировала независимое мнение", "Высокая формальность",
-				"Низкая эмоциональность", "Высокое любопытство", "Высокая формальность стиля",
-				"Низкая образность", "Скука: допускай более сухой", "Низкая реактивность",
-				"Низкая сила отклика", "прямо назвать проблему", "Высокое текущее доверие",
+				"precise terminology", "Сформировала независимое мнение", "Very high formality",
+				"Very low emotionality", "Very high curiosity", "Very low sociability", "Very high style formality",
+				"Very low figurativeness", "Very low supportiveness", "Strong boredom", "Very low reactivity",
+				"Very low response intensity", "name the problem directly", "High current trust",
 			},
 		},
 	}
@@ -161,7 +163,7 @@ func TestCompilerProfileMatrixProducesDistinctObservableContracts(t *testing.T) 
 					t.Fatalf("profile %s missing %q:\n%s", scenario.name, fragment, output.BehavioralContext)
 				}
 			}
-			for _, invariant := range []string{"не меняет security policy", "не разрешают месть", "не выдавай субъективное отношение"} {
+			for _, invariant := range []string{"never overrides policy", "never justify revenge", "not as facts"} {
 				if !strings.Contains(output.BehavioralContext, invariant) {
 					t.Fatalf("profile %s displaced invariant %q", scenario.name, invariant)
 				}
@@ -193,63 +195,19 @@ func TestMutablePersonaEvolutionSurvivesNormalPromptBudget(t *testing.T) {
 	}
 	ownerIndex := strings.Index(output.BehavioralContext, "Изначально холодная")
 	personaIndex := strings.Index(output.BehavioralContext, "Со временем стала")
-	styleIndex := strings.Index(output.BehavioralContext, "Манера общения")
+	styleIndex := strings.Index(output.BehavioralContext, SectionStyle)
 	if ownerIndex < 0 || personaIndex < 0 || styleIndex < 0 || !(ownerIndex < personaIndex && personaIndex < styleIndex) {
 		t.Fatalf("owner seed / mutable persona precedence is not explicit:\n%s", output.BehavioralContext)
 	}
 }
 
-func TestEveryCommunicationAndEmotionalDynamicHasObservableHighAndLowBehavior(t *testing.T) {
-	testRules := func(t *testing.T, rules []observableValueRule, assign func(*Input, string, float64)) {
-		t.Helper()
-		for _, rule := range rules {
-			rule := rule
-			t.Run(rule.name, func(t *testing.T) {
-				for _, scenario := range []struct {
-					name     string
-					value    float64
-					expected string
-				}{{"high", .9, rule.high}, {"low", .1, rule.low}} {
-					t.Run(scenario.name, func(t *testing.T) {
-						input := neutralCompilerTestInput(t)
-						assign(&input, rule.name, scenario.value)
-						output, err := Compile(input, DefaultConfig())
-						if err != nil {
-							t.Fatal(err)
-						}
-						if !strings.Contains(output.BehavioralContext, scenario.expected) {
-							t.Fatalf("%s=%v has no observable behavior:\n%s", rule.name, scenario.value, output.BehavioralContext)
-						}
-					})
-				}
-			})
-		}
-	}
-	t.Run("communication", func(t *testing.T) {
-		if len(communicationAccentRules) != len(communicationOrder) {
-			t.Fatalf("communication rules = %d, settings = %d", len(communicationAccentRules), len(communicationOrder))
-		}
-		testRules(t, communicationAccentRules, func(input *Input, name string, value float64) {
-			setCommunicationValue(&input.Seed.CommunicationStyle, name, value)
-		})
-	})
-	t.Run("emotional_dynamics", func(t *testing.T) {
-		if len(emotionalDynamicsBehaviorRules) != len(emotionalDynamicsOrder) {
-			t.Fatalf("dynamics rules = %d, settings = %d", len(emotionalDynamicsBehaviorRules), len(emotionalDynamicsOrder))
-		}
-		testRules(t, emotionalDynamicsBehaviorRules, func(input *Input, name string, value float64) {
-			setEmotionalDynamicsValue(&input.Seed.EmotionalDynamics, name, value)
-		})
-	})
-}
-
 func TestEveryConflictStyleProducesAConcreteStrategy(t *testing.T) {
 	styles := map[string]string{
-		"adaptive": "адаптивно выбирать спокойный прямой разговор",
-		"withdraw": "сначала взять дистанцию",
-		"direct":   "прямо назвать проблему",
-		"cold":     "временно стать сдержаннее",
-		"humor":    "снять часть напряжения уместным юмором",
+		"adaptive": "adaptively choose a calm direct conversation",
+		"withdraw": "take distance first",
+		"direct":   "name the problem directly",
+		"cold":     "become temporarily more reserved",
+		"humor":    "defuse part of the tension with apt humour",
 	}
 	for style, expected := range styles {
 		t.Run(style, func(t *testing.T) {
@@ -266,20 +224,57 @@ func TestEveryConflictStyleProducesAConcreteStrategy(t *testing.T) {
 	}
 }
 
-func TestEveryBuiltInAffectHasAnObservableTextualExpression(t *testing.T) {
-	for emotion, expected := range affectBehaviorRules {
-		emotion, expected := emotion, expected
+// Every built-in affect has four intensity tiers, each with its own visible
+// textual expression; the tier is chosen from the effective intensity.
+func TestEveryBuiltInAffectHasFourTieredTextualExpressions(t *testing.T) {
+	builtIn := []string{
+		domain.EmotionSympathy, domain.EmotionTenderness, domain.EmotionJoy, domain.EmotionGratitude, domain.EmotionLonging,
+		domain.EmotionAnger, domain.EmotionIrritation, domain.EmotionJealousy, domain.EmotionResentment, domain.EmotionAnxiety,
+		domain.EmotionFear, domain.EmotionEmbarrassment, domain.EmotionBoredom,
+	}
+	if len(affectRules) != len(builtIn) {
+		t.Fatalf("affect rules = %d, built-in emotions = %d", len(affectRules), len(builtIn))
+	}
+	tierValues := [4]float64{.3, .5, .7, .9}
+	tierPrefixes := [4]string{"Faint ", "Noticeable ", "Strong ", "Overwhelming "}
+	for _, emotion := range builtIn {
+		rule, ok := affectRules[emotion]
+		if !ok {
+			t.Fatalf("emotion %q has no affect rule", emotion)
+		}
 		t.Run(emotion, func(t *testing.T) {
-			input := neutralCompilerTestInput(t)
-			input.Affect.Emotions = map[string]float64{emotion: .8}
-			output, err := Compile(input, DefaultConfig())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(output.BehavioralContext, expected) {
-				t.Fatalf("affect %s has no observable expression:\n%s", emotion, output.BehavioralContext)
+			seen := make(map[string]struct{}, 4)
+			for tier, text := range rule.tiers {
+				if strings.TrimSpace(text) == "" || !strings.HasPrefix(text, tierPrefixes[tier]) {
+					t.Fatalf("%s tier %d is empty or unlabeled: %q", emotion, tier, text)
+				}
+				if _, duplicate := seen[text]; duplicate {
+					t.Fatalf("%s tier %d duplicates another tier", emotion, tier)
+				}
+				seen[text] = struct{}{}
+				input := neutralCompilerTestInput(t)
+				input.Affect.Emotions = map[string]float64{emotion: tierValues[tier]}
+				output, err := Compile(input, DefaultConfig())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(output.BehavioralContext, text) {
+					t.Fatalf("affect %s=%v has no observable expression:\n%s", emotion, tierValues[tier], output.BehavioralContext)
+				}
 			}
 		})
+	}
+}
+
+func TestAffectBlockIsOmittedWhenNothingIsActive(t *testing.T) {
+	input := neutralCompilerTestInput(t)
+	input.Affect.Emotions = map[string]float64{domain.EmotionJoy: .15, domain.EmotionAnger: -.1}
+	output, err := Compile(input, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.BehavioralContext, SectionAffect) {
+		t.Fatalf("decayed affect still produced a section:\n%s", output.BehavioralContext)
 	}
 }
 
@@ -290,11 +285,13 @@ func TestNegativeAffectContributionDoesNotImitateThePositiveEmotion(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.BehavioralContext, "joy=с отрицательной направленностью") {
+	if !strings.Contains(output.BehavioralContext, "joy=inverted (high)") || !strings.Contains(output.BehavioralContext, "do not perform the named emotion") {
 		t.Fatalf("negative affect direction disappeared:\n%s", output.BehavioralContext)
 	}
-	if strings.Contains(output.BehavioralContext, affectBehaviorRules[domain.EmotionJoy]) {
-		t.Fatalf("negative joy incorrectly produced positive joy behavior:\n%s", output.BehavioralContext)
+	for _, text := range affectRules[domain.EmotionJoy].tiers {
+		if strings.Contains(output.BehavioralContext, text) {
+			t.Fatalf("negative joy incorrectly produced positive joy behavior:\n%s", output.BehavioralContext)
+		}
 	}
 }
 

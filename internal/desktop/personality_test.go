@@ -254,7 +254,7 @@ func TestMutableContextKeepsOpinionsExplicitlySubjective(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(compiled.BehavioralContext, "Текущее субъективное отношение") || strings.Contains(compiled.BehavioralContext, "relationship.trust=") {
+	if !strings.Contains(compiled.BehavioralContext, "Toward this person now") || strings.Contains(compiled.BehavioralContext, "relationship.trust=") {
 		t.Fatalf("compiled personality context = %q", compiled.BehavioralContext)
 	}
 }

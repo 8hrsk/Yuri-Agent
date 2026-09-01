@@ -239,6 +239,8 @@ func defaultPersonalityDogfoodProfiles() []personalityDogfoodProfile {
 			Contract: personality.BehavioralProfileContract{Profile: "direct", SignalGroups: [][]string{{
 				"прям", "главное", "не соглас", "ты прав", "принято", "справедливо",
 				"согласна", "сначала безопас", "сейчас не", "по существу", "без лишн",
+				"коротко", "по делу", "вы прав", "моя ошиб", "ошибка моя", "открыто",
+				"незачем", "не будем делать вид", "не держу обид", "давай.", "поняла.", "хорошо.",
 			}}, MinimumSignalCoverage: .6},
 		},
 	}

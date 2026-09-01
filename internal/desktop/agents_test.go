@@ -577,8 +577,8 @@ func TestAgentIdentitySeedDeclaresBackstoryBoundaryWithoutEmbeddingRawText(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	seed := agentIdentitySeed(profile, []domain.AgentProfile{profile})
-	for _, required := range []string{"вымышленная личная история", "subjective identity summary", "fictional episodes", "не воспринимай их как факт", "разрешение"} {
+	seed := agentIdentitySeed(profile, []domain.AgentProfile{profile}, "ru-RU")
+	for _, required := range []string{"fictional personal history", "subjective identity summary", "fictional episodes", "not facts about the real world", "permission"} {
 		if !strings.Contains(strings.ToLower(seed), strings.ToLower(required)) {
 			t.Fatalf("identity seed missing boundary %q: %s", required, seed)
 		}
@@ -618,7 +618,7 @@ func TestAgentRosterExposesPeersWithoutPrivatePreferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seed := agentIdentitySeed(profiles[1], profiles)
+	seed := agentIdentitySeed(profiles[1], profiles, "")
 	if !strings.Contains(seed, "Юри") || strings.Contains(seed, "private-one") || strings.Contains(seed, "private-two") {
 		t.Fatalf("peer registry seed = %q", seed)
 	}
@@ -652,11 +652,29 @@ func TestAgentIdentitySeedBoundsPeerRoster(t *testing.T) {
 		}
 		roster = append(roster, peer)
 	}
-	seed := agentIdentitySeed(active, roster)
+	seed := agentIdentitySeed(active, roster, "ru-RU")
 	if count := strings.Count(seed, "\n- "); count != maxAgentRosterContextEntries {
 		t.Fatalf("peer context count = %d, want %d", count, maxAgentRosterContextEntries)
 	}
-	if !strings.Contains(seed, "Ещё peers вне текущего bounded roster: 5.") || strings.Contains(seed, "private-") {
+	if !strings.Contains(seed, "5 more peers outside the bounded roster.") || strings.Contains(seed, "private-") {
 		t.Fatalf("bounded peer seed = %q", seed)
+	}
+}
+
+func TestAgentIdentitySeedFollowsUserLanguageWithOptionalFallback(t *testing.T) {
+	profile, err := domain.NewAgentProfile("agent_lang", "Yuri", 21, "female", "", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutFallback := agentIdentitySeed(profile, []domain.AgentProfile{profile}, "")
+	if !strings.Contains(withoutFallback, "Reply in the language of the user's latest message") || strings.Contains(withoutFallback, "ru-RU") {
+		t.Fatalf("seed without fallback = %q", withoutFallback)
+	}
+	withFallback := agentIdentitySeed(profile, []domain.AgentProfile{profile}, "ru-RU")
+	if !strings.Contains(withFallback, "if it is ambiguous") || !strings.Contains(withFallback, "use ru-RU") {
+		t.Fatalf("seed with fallback = %q", withFallback)
+	}
+	if strings.Contains(withFallback, "Отвечай по-русски") {
+		t.Fatalf("seed hard-codes Russian: %q", withFallback)
 	}
 }

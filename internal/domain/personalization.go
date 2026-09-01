@@ -376,7 +376,7 @@ func NewPersonalizationSeed(profile AgentProfile, traits, relationship map[strin
 			Flirtation: temperament.RomanticTone, ConversationalInitiative: temperament.Initiative,
 		},
 		Temperament: temperament, EmotionalDynamics: DefaultEmotionalDynamics(temperament),
-		RelationshipSeed: RelationshipSeed{Preset: RelationshipSeedNew, Dimensions: cloneFloatMap(relationship), Summary: "Связь только начинает формироваться."},
+		RelationshipSeed: RelationshipSeed{Preset: RelationshipSeedNew, Dimensions: cloneFloatMap(relationship), Summary: "The bond is only beginning to form."},
 		Backstory:        StructuredBackstory{Narrative: profile.Backstory},
 		EvolutionPolicy:  defaultPersonalizationEvolutionPolicy(temperament),
 		Reason:           "owner personalization seed", CreatedAt: now.UTC(), UpdatedAt: now.UTC(),

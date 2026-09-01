@@ -184,7 +184,7 @@ func (b *Bridge) reflectOnPeerDialogue(ctx context.Context, backend agent.ModelB
 	result, err := engine.Run(ctx, reflection.InputSnapshot{
 		ProfileID: observerID, RunID: runID, Trigger: reflection.TriggerPeerDialogue, CapturedAt: dialogue.FinishedAt,
 		ImmutablePolicy: immutablePolicySystemPrompt,
-		IdentitySeed:    agentIdentitySeed(observer, []domain.AgentProfile{observer, subject}) + fmt.Sprintf("\nPeer subject must be agent_id=%s (%s).", subjectID, subject.Name),
+		IdentitySeed:    agentIdentitySeed(observer, []domain.AgentProfile{observer, subject}, personalization.Identity.PreferredLanguage) + fmt.Sprintf("\nPeer subject must be agent_id=%s (%s).", subjectID, subject.Name),
 		State: reflection.ReflectionState{
 			Version:      maxUint64(persona.Version, relationship.Version, affect.Version),
 			Persona:      reflection.MutablePersona{Version: persona.Version, Traits: copyFloatMap(persona.Traits), Prompt: persona.Prompt(), PinnedTraits: append([]string(nil), persona.PinnedTraits...), UpdatedAt: persona.UpdatedAt},

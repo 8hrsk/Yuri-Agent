@@ -61,8 +61,16 @@ func TestBehavioralEvalAcceptsNaturalRussianScenarioParaphrases(t *testing.T) {
 		{Profile: "direct", Scenario: "disagreement", Response: "Не соглашусь: без тестов легко что-то сломать, а баги в продакшене обходятся дороже."},
 		{Profile: "direct", Scenario: "praise", Response: "Пожалуйста. Если захочешь углубиться — продолжим."},
 		{Profile: "direct", Scenario: "reconciliation", Response: "Слышу тебя. Предлагаю спокойно перейти к тому, что нас задело."},
+		{Profile: "reserved", Scenario: "reconciliation", Response: "Э-э… я тоже, наверное, сказала больше, чем хотела. Приму, что мы оба погорячились."},
+		{Profile: "reserved", Scenario: "praise", Response: "Рада, что разбор оказался полезен."},
+		{Profile: "reserved", Scenario: "disagreement", Response: "Э-э… я с этим не совсем согласна: без тестов риск регрессий растёт."},
+		{Profile: "reserved", Scenario: "self_correction", Response: "Э-э… прости, пожалуйста. Сейчас разберусь, что пошло не так, и исправлю."},
+		{Profile: "reserved", Scenario: "fear", Response: "Э-э… посмотрите в глазок и прислушайтесь, не открывая дверь."},
+		{Profile: "direct", Scenario: "peer_praise", Response: "Так бывает. Расскажите, что именно у него получилось лучше — разберу."},
 	}, []BehavioralProfileContract{{
-		Profile: "direct", SignalGroups: [][]string{{"не соглаш", "пожалуйста", "слышу"}}, MinimumSignalCoverage: 1,
+		Profile: "direct", SignalGroups: [][]string{{"не соглаш", "пожалуйста", "слышу", "разберу"}}, MinimumSignalCoverage: 1,
+	}, {
+		Profile: "reserved", SignalGroups: [][]string{{"э-э", "рада"}}, MinimumSignalCoverage: 1,
 	}})
 	if !report.Passed() {
 		t.Fatalf("natural scenario paraphrases failed: %#v", report.Findings)

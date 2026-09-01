@@ -114,7 +114,7 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 	}
 	result, err := engine.Run(ctx, reflection.InputSnapshot{
 		ProfileID: profileID, RunID: turn.RunID, Trigger: reflection.TriggerPostTurn,
-		CapturedAt: turn.Now, ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, roster),
+		CapturedAt: turn.Now, ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, roster, domainState.personalization.Identity.PreferredLanguage),
 		AffectPolicy: appraisalPolicy, State: state, Evidence: evidence,
 	})
 	if err != nil {
