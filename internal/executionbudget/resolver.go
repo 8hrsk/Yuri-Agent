@@ -49,6 +49,14 @@ func ResolvePeer(preset domain.ExecutionBudgetPreset, limits ModelLimits) domain
 	return result
 }
 
+func BoundTotalTokens(value int64, limits ModelLimits) int64 {
+	return contextBound(value, limits.ContextWindow)
+}
+
+func BoundOutputTokens(value int64, limits ModelLimits) int64 {
+	return positiveMin(value, limits.MaxCompletionTokens)
+}
+
 func runDefaults(preset domain.ExecutionBudgetPreset, workload Workload) ResolvedRun {
 	if workload == WorkloadSubagent {
 		switch preset {
@@ -78,7 +86,7 @@ func contextBound(value, contextWindow int64) int64 {
 	// run budget for provider framing, tool schemas, and accounting variance.
 	bound := contextWindow * 3 / 4
 	if bound < 1_024 {
-		bound = 1_024
+		bound = min(contextWindow, 1_024)
 	}
 	return positiveMin(value, bound)
 }

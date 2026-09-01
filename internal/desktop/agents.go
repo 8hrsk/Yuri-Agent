@@ -26,6 +26,7 @@ type AgentProfileView struct {
 	FallbackEnabled    bool               `json:"fallbackEnabled,omitempty"`
 	FallbackProviderID string             `json:"fallbackProviderId,omitempty"`
 	FallbackModel      string             `json:"fallbackModel,omitempty"`
+	ExecutionBudget    string             `json:"executionBudget"`
 	Traits             map[string]float64 `json:"traits,omitempty"`
 	Active             bool               `json:"active"`
 	CreatedAt          string             `json:"createdAt"`
@@ -64,6 +65,7 @@ type CreateAgentInput struct {
 	FallbackEnabled    bool                             `json:"fallbackEnabled,omitempty"`
 	FallbackProviderID string                           `json:"fallbackProviderId,omitempty"`
 	FallbackModel      string                           `json:"fallbackModel,omitempty"`
+	ExecutionBudget    string                           `json:"executionBudget,omitempty"`
 	Traits             map[string]float64               `json:"traits,omitempty"`
 	Personalization    *CreateAgentPersonalizationInput `json:"personalization,omitempty"`
 }
@@ -245,6 +247,10 @@ type UpdateAgentFallbackRouteInput struct {
 	Model      string `json:"model,omitempty"`
 }
 
+type UpdateAgentExecutionBudgetInput struct {
+	Preset string `json:"preset"`
+}
+
 const maxAgentRosterContextEntries = 32
 
 func (b *Bridge) ListAgents() ([]AgentProfileView, error) {
@@ -413,6 +419,7 @@ func buildAgentCreationState(id domain.ID, input CreateAgentInput, now time.Time
 	profile.FallbackEnabled = input.FallbackEnabled
 	profile.FallbackProviderID = strings.TrimSpace(input.FallbackProviderID)
 	profile.FallbackModel = strings.TrimSpace(input.FallbackModel)
+	profile.ExecutionBudget = domain.ExecutionBudgetPreset(strings.TrimSpace(input.ExecutionBudget)).Normalized()
 	if err := profile.Validate(); err != nil {
 		return agentCreationState{}, err
 	}
@@ -525,6 +532,26 @@ func (b *Bridge) UpdateActiveAgentModelRoute(input UpdateAgentModelRouteInput) (
 	return agentProfileView(profile, true, persona.Traits), nil
 }
 
+// UpdateActiveAgentExecutionBudget changes the bounded execution policy used
+// by the active named agent. The preset is resolved again for every run and
+// may be narrowed by provider model metadata or an explicitly smaller job
+// budget; it never grants permissions or expands security policy.
+func (b *Bridge) UpdateActiveAgentExecutionBudget(input UpdateAgentExecutionBudgetInput) (AgentProfileView, error) {
+	preset := domain.ExecutionBudgetPreset(strings.TrimSpace(input.Preset))
+	if !preset.Valid() {
+		return AgentProfileView{}, fmt.Errorf("%w: invalid execution budget preset %q", domain.ErrInvalidArgument, preset)
+	}
+	ctx, cancel := b.context()
+	defer cancel()
+	agentID := b.personaProfileID()
+	profile, err := b.repositories.Agents.UpdateExecutionBudget(ctx, agentID, preset.Normalized(), time.Now().UTC())
+	if err != nil {
+		return AgentProfileView{}, err
+	}
+	persona, _ := b.repositories.Persona.Get(ctx, agentID)
+	return agentProfileView(profile, true, persona.Traits), nil
+}
+
 func (b *Bridge) activateAgent(id domain.ID, configured bool) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -589,7 +616,8 @@ func agentProfileView(profile domain.AgentProfile, active bool, traits map[strin
 		ID: string(profile.ID), Name: profile.Name, Age: profile.Age, Gender: profile.Gender,
 		Preferences: profile.Preferences, Backstory: profile.Backstory, ProviderID: profile.ProviderID, Model: profile.Model,
 		FallbackEnabled: profile.FallbackEnabled, FallbackProviderID: profile.FallbackProviderID, FallbackModel: profile.FallbackModel,
-		Traits: copyFloatMap(traits), Active: active,
+		ExecutionBudget: string(profile.ExecutionBudget.Normalized()),
+		Traits:          copyFloatMap(traits), Active: active,
 		CreatedAt: profile.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: profile.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }

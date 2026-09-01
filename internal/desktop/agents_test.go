@@ -193,6 +193,34 @@ func TestAgentModelRouteIsDurableAndIndependentFromActiveProvider(t *testing.T) 
 	}
 }
 
+func TestActiveAgentExecutionBudgetIsDurableAndValidated(t *testing.T) {
+	bridge := newAgentTestBridge(t)
+	created, err := bridge.CreateAgent(CreateAgentInput{Name: "Эмили", Gender: "female", ExecutionBudget: "efficient"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ExecutionBudget != "efficient" {
+		t.Fatalf("created execution budget = %q", created.ExecutionBudget)
+	}
+	updated, err := bridge.UpdateActiveAgentExecutionBudget(UpdateAgentExecutionBudgetInput{Preset: "extended"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ExecutionBudget != "extended" {
+		t.Fatalf("updated execution budget = %q", updated.ExecutionBudget)
+	}
+	stored, err := bridge.repositories.Agents.Get(context.Background(), domain.ID(created.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ExecutionBudget != domain.ExecutionBudgetExtended {
+		t.Fatalf("stored execution budget = %q", stored.ExecutionBudget)
+	}
+	if _, err := bridge.UpdateActiveAgentExecutionBudget(UpdateAgentExecutionBudgetInput{Preset: "unbounded"}); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("invalid execution budget error = %v", err)
+	}
+}
+
 func TestUpdateActiveAgentPersonalizationAppendsOwnerBaselineWithoutResettingRuntime(t *testing.T) {
 	bridge := newAgentTestBridge(t)
 	created, err := bridge.CreateAgent(CreateAgentInput{Name: "Эми", Gender: "female"})

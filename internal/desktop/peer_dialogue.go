@@ -14,6 +14,7 @@ import (
 
 	"github.com/OrdoAI/yuri-agent/internal/agent"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
+	"github.com/OrdoAI/yuri-agent/internal/executionbudget"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 )
 
@@ -25,11 +26,7 @@ const (
 	peerDialogueMaxOutputTokens = int64(600)
 )
 
-var defaultPeerDialogueBudget = domain.PeerDialogueBudget{
-	// MaxTokens includes both the identity/personality input and generated
-	// output. Keep the response itself short through MaxOutputTokens below.
-	MinTurns: 2, MaxTurns: 4, MaxTokens: 8_000, MaxDurationSeconds: 90, CooldownSeconds: 300,
-}
+var defaultPeerDialogueBudget = executionbudget.ResolvePeer(domain.ExecutionBudgetBalanced, executionbudget.ModelLimits{})
 
 var peerDialogueInputSchema = json.RawMessage(`{
   "type":"object",
@@ -150,7 +147,12 @@ func (tool peerDialogueAgentTool) Execute(ctx context.Context, call agent.ToolCa
 		return agent.ToolResult{}, err
 	}
 	pairKey := domain.AgentPairKey(tool.initiatorAgentID, peerID)
-	recent, err := tool.bridge.repositories.PeerDialogues.HasRecentPair(ctx, pairKey, time.Now().UTC().Add(-time.Duration(defaultPeerDialogueBudget.CooldownSeconds)*time.Second))
+	initiator, err := tool.bridge.repositories.Agents.Get(ctx, tool.initiatorAgentID)
+	if err != nil {
+		return agent.ToolResult{}, err
+	}
+	dialogueBudget := executionbudget.ResolvePeer(initiator.ExecutionBudget, modelExecutionLimits(tool.backend, tool.model))
+	recent, err := tool.bridge.repositories.PeerDialogues.HasRecentPair(ctx, pairKey, time.Now().UTC().Add(-time.Duration(dialogueBudget.CooldownSeconds)*time.Second))
 	if err != nil {
 		return agent.ToolResult{}, err
 	}
@@ -159,7 +161,7 @@ func (tool peerDialogueAgentTool) Execute(ctx context.Context, call agent.ToolCa
 	}
 	dialogueID := peerDialogueID(tool.triggerRunID, call.ID)
 	now := time.Now().UTC()
-	dialogue, err := domain.NewPeerDialogue(dialogueID, tool.initiatorAgentID, peerID, tool.triggerRunID, input.Purpose, call.ID, requestHash, defaultPeerDialogueBudget, now)
+	dialogue, err := domain.NewPeerDialogue(dialogueID, tool.initiatorAgentID, peerID, tool.triggerRunID, input.Purpose, call.ID, requestHash, dialogueBudget, now)
 	if err != nil {
 		return agent.ToolResult{}, err
 	}
@@ -530,6 +532,7 @@ func (b *Bridge) runPeerDialogueTurn(ctx context.Context, dialogue domain.PeerDi
 	// the aggregate before another turn can start.
 	perTurnTokens := dialogue.Budget.MaxTokens - dialogue.TokensUsed
 	maxOutputTokens := min(peerDialogueMaxOutputTokens, perTurnTokens)
+	maxOutputTokens = executionbudget.BoundOutputTokens(maxOutputTokens, modelExecutionLimits(backend, model))
 	run.Budget = domain.RunBudget{MaxSteps: 1, MaxTokens: perTurnTokens, MaxToolCalls: 1, MaxToolOutputBytes: domain.PeerDialogueMessageMaxBytes, MaxDurationSeconds: min(30, dialogue.Budget.MaxDurationSeconds)}
 	if err := b.repositories.Runs.Create(ctx, run); err != nil {
 		return peerDialogueTurn{}, domain.AgentRun{}, agent.Usage{}, err

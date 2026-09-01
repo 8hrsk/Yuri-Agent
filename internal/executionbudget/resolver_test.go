@@ -31,3 +31,10 @@ func TestResolvePeerKeepsSemanticRangeAndContextHeadroom(t *testing.T) {
 		t.Fatalf("efficient peer = %#v", efficient)
 	}
 }
+
+func TestTinyPublishedContextNeverExpandsPastModelLimit(t *testing.T) {
+	resolved := ResolveRun(domain.ExecutionBudgetExtended, WorkloadInteractive, ModelLimits{ContextWindow: 512, MaxCompletionTokens: 128})
+	if resolved.Budget.MaxTokens != 512 || resolved.MaxOutputTokensPerStep != 128 {
+		t.Fatalf("tiny context resolution = %#v", resolved)
+	}
+}

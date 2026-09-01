@@ -11,6 +11,7 @@ import (
 	"github.com/OrdoAI/yuri-agent/internal/agent"
 	contextbuilder "github.com/OrdoAI/yuri-agent/internal/context"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
+	"github.com/OrdoAI/yuri-agent/internal/executionbudget"
 	"github.com/OrdoAI/yuri-agent/internal/memory"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 )
@@ -126,22 +127,12 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 		return ChatRunResult{}, err
 	}
 	run.Inference = routePlan.Primary
-	run.Budget = domain.RunBudget{MaxSteps: 8, MaxTokens: 32_000, MaxToolCalls: 32, MaxToolOutputBytes: 256 * 1024, MaxDurationSeconds: 600}
-	if requestedBudget.MaxSteps > 0 {
-		run.Budget.MaxSteps = requestedBudget.MaxSteps
+	profileForBudget, err := b.repositories.Agents.Get(runContext, agentID)
+	if err != nil {
+		return ChatRunResult{}, err
 	}
-	if requestedBudget.MaxTokens > 0 {
-		run.Budget.MaxTokens = requestedBudget.MaxTokens
-	}
-	if requestedBudget.MaxToolCalls > 0 {
-		run.Budget.MaxToolCalls = requestedBudget.MaxToolCalls
-	}
-	if requestedBudget.MaxToolOutputBytes > 0 {
-		run.Budget.MaxToolOutputBytes = requestedBudget.MaxToolOutputBytes
-	}
-	if requestedBudget.MaxDurationSeconds > 0 {
-		run.Budget.MaxDurationSeconds = requestedBudget.MaxDurationSeconds
-	}
+	resolvedBudget := mergeRequestedRunBudget(executionbudget.ResolveRun(profileForBudget.ExecutionBudget, runWorkload(runKind), executionbudget.ModelLimits{}), requestedBudget)
+	run.Budget = resolvedBudget.Budget
 	if err := b.repositories.Runs.Create(runContext, run); err != nil {
 		return ChatRunResult{}, err
 	}
@@ -167,6 +158,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	}
 	emitter := newChatEmitter(b, string(conversationID), string(runID), string(assistantMessageID))
 	emitter.setInference(run.Inference)
+	emitter.setBudget(run.Budget)
 	// Whatever ends this run — success, provider error, owner cancellation —
 	// the renderer gets its pending deltas, a closed assistant segment and
 	// exactly one terminal event.
@@ -206,6 +198,11 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	backend, model := execution.backend, execution.model
 	runtime, memoryEngine := execution.runtime, execution.memory
 	emitter.tools = execution.tools
+	resolvedBudget = mergeRequestedRunBudget(executionbudget.ResolveRun(profileForBudget.ExecutionBudget, runWorkload(runKind), modelExecutionLimits(backend, model)), requestedBudget)
+	if err := b.persistResolvedRunBudget(runContext, &run, resolvedBudget.Budget); err != nil {
+		return b.failChatRun(runContext, &run, emitter, err), nil
+	}
+	emitter.setBudget(run.Budget)
 
 	transcript, err := b.repositories.Messages.ListByConversation(runContext, conversationID)
 	if err != nil {
@@ -274,7 +271,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
 
-	modelRequest := agent.ModelRequest{Model: model, Messages: snapshot.Messages, ToolChoice: toolChoice}
+	modelRequest := agent.ModelRequest{Model: model, Messages: snapshot.Messages, ToolChoice: toolChoice, MaxOutputTokens: resolvedBudget.MaxOutputTokensPerStep}
 	attemptSink := newPreOutputAttemptSink(emitter.Sink)
 	runtimeSink := agent.EventSink(attemptSink.Sink)
 	if runStartedEmitted {
@@ -299,10 +296,17 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 				runtime, memoryEngine = execution.runtime, execution.memory
 				emitter.tools = execution.tools
 				modelRequest.Model = model
-				result, runErr = runtime.Run(runContext, agent.RunRequest{
-					RunID: runID, ConversationID: conversationID, Budget: run.Budget,
-					ModelRequest: modelRequest, Sink: skipRunStartedSink(emitter.Sink),
-				})
+				resolvedBudget = mergeRequestedRunBudget(executionbudget.ResolveRun(profileForBudget.ExecutionBudget, runWorkload(runKind), modelExecutionLimits(backend, model)), requestedBudget)
+				if budgetErr := b.persistResolvedRunBudget(runContext, &run, resolvedBudget.Budget); budgetErr != nil {
+					runErr = budgetErr
+				} else {
+					emitter.setBudget(run.Budget)
+					modelRequest.MaxOutputTokens = resolvedBudget.MaxOutputTokensPerStep
+					result, runErr = runtime.Run(runContext, agent.RunRequest{
+						RunID: runID, ConversationID: conversationID, Budget: run.Budget,
+						ModelRequest: modelRequest, Sink: skipRunStartedSink(emitter.Sink),
+					})
+				}
 			}
 		}
 	} else if runErr != nil && !runStartedEmitted {

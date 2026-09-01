@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OrdoAI/yuri-agent/internal/executionbudget"
+
 	"github.com/OrdoAI/yuri-agent/internal/agent"
 )
 
@@ -251,6 +253,19 @@ func (c *Client) ModelCapabilities(model string) (ModelCapabilities, bool) {
 		return ModelCapabilities{}, false
 	}
 	return cachedModelCapabilities(c.catalogScope(), model, time.Now())
+}
+
+// ExecutionModelLimits exposes only secret-free numeric catalog metadata to
+// the orchestration budget resolver. It never fetches the network by itself.
+func (c *Client) ExecutionModelLimits(model string) (executionbudget.ModelLimits, bool) {
+	capabilities, found := c.ModelCapabilities(model)
+	if !found {
+		return executionbudget.ModelLimits{}, false
+	}
+	return executionbudget.ModelLimits{
+		ContextWindow:       int64(capabilities.ContextLength),
+		MaxCompletionTokens: int64(capabilities.MaxCompletionTokens),
+	}, true
 }
 
 // validateRequiredCapabilities performs a conservative preflight. A catalog

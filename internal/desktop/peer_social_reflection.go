@@ -13,6 +13,7 @@ import (
 
 	"github.com/OrdoAI/yuri-agent/internal/agent"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
+	"github.com/OrdoAI/yuri-agent/internal/executionbudget"
 	"github.com/OrdoAI/yuri-agent/internal/reflection"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 )
@@ -165,6 +166,7 @@ func (b *Bridge) reflectOnPeerDialogue(ctx context.Context, backend agent.ModelB
 	config.Analyzer, config.Coordinator, config.Cooldown = modelAnalyzer, b.reflectionRuns, 0
 	config.MaxDelta, config.MinimumEvidence, config.MinimumEvidenceWeight = .08, 1, .5
 	config.Budget = reflectionBudgetForPolicy(personalization.EvolutionPolicy, reflection.ReflectionBudget{MaxDuration: 45 * time.Second, MaxTokens: 1_200, MaxInputBytes: 32 * 1024, MaxOutputBytes: 8 * 1024, MaxEvidence: 8})
+	config.Budget.MaxTokens = executionbudget.BoundTotalTokens(config.Budget.MaxTokens, modelExecutionLimits(backend, model))
 	config.TraitRanges = rangesFor(persona.Traits, 0, 1)
 	config.RelationshipRanges = rangesFor(relationship.Dimensions, 0, 1)
 	config.AffectRanges = rangesFor(affectValues(affect), 0, 1)

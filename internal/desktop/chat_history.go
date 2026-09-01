@@ -368,7 +368,9 @@ func runTraceView(run domain.AgentRun, calls []storage.ToolCall) RunTraceView {
 		CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339Nano), Failure: safeError(run.Failure),
 		ProviderID: run.Inference.ProviderID, Model: run.Inference.Model,
 		InputTokens: run.Usage.InputTokens, OutputTokens: run.Usage.OutputTokens, TotalTokens: run.Usage.TotalTokens,
-		FailureKind: string(run.FailureInfo.Kind), Retryable: run.FailureInfo.Retryable, RetryAfterSeconds: run.FailureInfo.RetryAfterSeconds,
+		MaxSteps: run.Budget.MaxSteps, MaxTokens: run.Budget.MaxTokens, MaxToolCalls: run.Budget.MaxToolCalls,
+		MaxDurationSeconds: int64(run.Budget.MaxDurationSeconds),
+		FailureKind:        string(run.FailureInfo.Kind), Retryable: run.FailureInfo.Retryable, RetryAfterSeconds: run.FailureInfo.RetryAfterSeconds,
 		ToolCalls: make([]ToolCallView, 0, len(calls)),
 	}
 	if !run.StartedAt.IsZero() {

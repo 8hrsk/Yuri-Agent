@@ -31,6 +31,7 @@ type chatEmitter struct {
 	providerID     string
 	model          string
 	usage          domain.RunUsage
+	budget         domain.RunBudget
 
 	// deliver observes every dispatched event. Production leaves it nil and
 	// delivery goes through the Wails runtime; it is assigned once, before the
@@ -86,7 +87,8 @@ func newChatEmitter(b *Bridge, conversationID, runID, messageID string) *chatEmi
 
 func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
 	now := time.Now().UTC()
-	view := ChatEvent{ConversationID: emitter.conversationID, RunID: emitter.runID, CreatedAt: now.Format(time.RFC3339Nano), ProviderID: emitter.providerID, Model: emitter.model}
+	view := ChatEvent{ConversationID: emitter.conversationID, RunID: emitter.runID, CreatedAt: now.Format(time.RFC3339Nano), ProviderID: emitter.providerID, Model: emitter.model,
+		MaxSteps: emitter.budget.MaxSteps, MaxTokens: emitter.budget.MaxTokens, MaxToolCalls: emitter.budget.MaxToolCalls, MaxDurationSeconds: emitter.budget.MaxDurationSeconds}
 	switch event.Type {
 	case agent.EventRunStarted:
 		view.Type = "run.started"
@@ -186,6 +188,10 @@ func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
 
 func (emitter *chatEmitter) setInference(route domain.RunInferenceRoute) {
 	emitter.providerID, emitter.model = route.ProviderID, route.Model
+}
+
+func (emitter *chatEmitter) setBudget(budget domain.RunBudget) {
+	emitter.budget = budget
 }
 
 func runUsage(usage agent.Usage) domain.RunUsage {

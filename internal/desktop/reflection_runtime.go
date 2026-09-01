@@ -14,6 +14,7 @@ import (
 
 	"github.com/OrdoAI/yuri-agent/internal/agent"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
+	"github.com/OrdoAI/yuri-agent/internal/executionbudget"
 	"github.com/OrdoAI/yuri-agent/internal/memory"
 	"github.com/OrdoAI/yuri-agent/internal/reflection"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
@@ -71,6 +72,7 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 	config.Budget = reflectionBudgetForPolicy(domainState.personalization.EvolutionPolicy, reflection.ReflectionBudget{
 		MaxDuration: 60 * time.Second, MaxTokens: 2_500, MaxInputBytes: 64 * 1024, MaxOutputBytes: 16 * 1024, MaxEvidence: 8,
 	})
+	config.Budget.MaxTokens = executionbudget.BoundTotalTokens(config.Budget.MaxTokens, modelExecutionLimits(backend, model))
 	config.TraitRanges = rangesFor(state.Persona.Traits, 0, 1)
 	config.RelationshipRanges = rangesFor(state.Relationship.Dimensions, 0, 1)
 	config.AffectRanges = rangesFor(state.Affect.Dimensions, 0, 1)
