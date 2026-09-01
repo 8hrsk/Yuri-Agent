@@ -8,6 +8,7 @@ import type { RunFailureKind } from './chat'
  */
 export type PeerDialogueStatus = 'queued' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled' | 'expired' | 'unknown'
 export type PeerDialogueTriggerKind = 'agent_tool' | 'autonomous' | 'unknown'
+export type PeerDialogueBudgetOrigin = 'agent_default' | 'owner_custom' | 'owner_recommendation'
 /** Why a peer exchange stopped. Hard limits are intentionally distinct from semantic completion. */
 export type PeerDialogueCompletionReason = 'semantic' | 'implicit' | 'max_turns' | 'max_tokens' | 'max_duration' | 'cancelled' | 'failed' | 'unknown'
 
@@ -50,7 +51,10 @@ export interface PeerDialogue {
   tokensUsed: number
   maxTokens: number
   maxDurationSeconds: number
+  durationUsedSeconds: number
   cooldownSeconds: number
+  budgetOrigin: PeerDialogueBudgetOrigin
+  recommendation?: AppliedPeerBudgetRecommendation
   completionReason?: PeerDialogueCompletionReason
   createdAt: string
   finishedAt?: string
@@ -72,6 +76,7 @@ export interface ManualPeerDialogueInput {
   maxTurns?: number
   maxTokens?: number
   maxDurationSeconds?: number
+  budgetSource?: 'custom' | 'recommendation'
 }
 
 export interface PeerDialogueStart {
@@ -99,6 +104,12 @@ export interface PeerDialogueBudgetRecommendation {
   sampleCount: number
   confidence: PeerDialogueRecommendationConfidence
   rationale: string
+}
+
+export interface AppliedPeerBudgetRecommendation extends PeerDialogueBudget {
+  basis: PeerDialogueRecommendationBasis
+  sampleCount: number
+  confidence: PeerDialogueRecommendationConfidence
 }
 
 /** The active agent's directional, subjective relationship to one peer. */

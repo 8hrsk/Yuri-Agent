@@ -1576,7 +1576,7 @@ describe('Yuri client contract', () => {
         peerAgentId: 'agent-mira', peerName: 'Мира', purpose: 'Сверить план.', status: 'running',
         triggerKind: 'autonomous', triggerReason: 'Нужна независимая проверка плана.',
         turnCount: 0, minTurns: 1, maxTurns: 1, tokensUsed: 0, maxTokens: 1200,
-        maxDurationSeconds: 0, cooldownSeconds: 0,
+        maxDurationSeconds: 0, durationUsedSeconds: 0, cooldownSeconds: 0, budgetOrigin: 'agent_default',
         createdAt: '2026-08-29T09:00:00.000Z', finishedAt: undefined, failure: undefined,
         messages: [{
           id: 'message-1', sequence: 0, senderAgentId: 'agent-yuri', senderName: 'Юри',

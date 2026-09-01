@@ -131,7 +131,9 @@ function starterPeerDialogues(): PeerDialogue[] {
       tokensUsed: 486,
       maxTokens: 8000,
       maxDurationSeconds: 90,
+      durationUsedSeconds: 60,
       cooldownSeconds: 300,
+      budgetOrigin: 'agent_default',
       completionReason: 'semantic',
       createdAt: new Date(now - 1000 * 60 * 18).toISOString(),
       finishedAt: new Date(now - 1000 * 60 * 17).toISOString(),
@@ -174,7 +176,9 @@ function starterPeerDialogues(): PeerDialogue[] {
       tokensUsed: 0,
       maxTokens: 8000,
       maxDurationSeconds: 90,
+      durationUsedSeconds: 0,
       cooldownSeconds: 300,
+      budgetOrigin: 'agent_default',
       createdAt: new Date(now - 1000 * 32).toISOString(),
       messages: [
         {

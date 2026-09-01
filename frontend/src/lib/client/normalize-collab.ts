@@ -4,6 +4,7 @@ import type {
   ActivityType,
   PeerDialogueCompletionReason,
   PeerDialogue,
+  AppliedPeerBudgetRecommendation,
   PeerDialogueMessage,
   PeerDialogueStatus,
   PeerDialogueTriggerKind,
@@ -47,6 +48,23 @@ function normalizePeerDialogueCompletionReason(value: unknown): PeerDialogueComp
   if (reason === 'cancelled' || reason === 'canceled' || reason === 'aborted') return 'cancelled'
   if (reason === 'failed' || reason === 'failure' || reason === 'error') return 'failed'
   return 'unknown'
+}
+
+function normalizeAppliedRecommendation(value: unknown): AppliedPeerBudgetRecommendation | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as UnknownRecord
+  const basis = source.basis === 'similar_history' || source.basis === 'pair_history' ? source.basis : source.basis === 'purpose_only' ? 'purpose_only' : undefined
+  if (!basis) return undefined
+  const maxTurns = Math.max(1, Math.round(optionalNumber(source, 'maxTurns', 'max_turns') ?? 0))
+  const minTurns = Math.min(maxTurns, Math.max(1, Math.round(optionalNumber(source, 'minTurns', 'min_turns') ?? 1)))
+  const confidence = source.confidence === 'high' || source.confidence === 'medium' ? source.confidence : 'low'
+  return {
+    minTurns, maxTurns,
+    maxTokens: Math.max(1, Math.round(optionalNumber(source, 'maxTokens', 'max_tokens') ?? 0)),
+    maxDurationSeconds: Math.max(5, Math.round(optionalNumber(source, 'maxDurationSeconds', 'max_duration_seconds') ?? 0)),
+    basis, confidence,
+    sampleCount: Math.max(0, Math.round(optionalNumber(source, 'sampleCount', 'sample_count') ?? 0)),
+  }
 }
 
 function normalizePeerDialogueMessage(value: unknown): PeerDialogueMessage | undefined {
@@ -110,6 +128,9 @@ function normalizePeerDialogue(value: unknown): PeerDialogue | undefined {
   const maxTurns = Math.max(0, Math.round(budgetNumber('maxTurns', 'max_turns', 'turnLimit', 'turn_limit') ?? 0))
   const minTurns = Math.max(0, Math.round(budgetNumber('minTurns', 'min_turns', 'minimumTurns', 'minimum_turns', 'minTurnCount', 'min_turn_count') ?? (maxTurns > 0 ? Math.min(1, maxTurns) : 0)))
   const completionReason = normalizePeerDialogueCompletionReason(source.completionReason ?? source.completion_reason ?? source.stopReason ?? source.stop_reason ?? source.terminationReason ?? source.termination_reason)
+  const rawBudgetOrigin = optionalString(source, 'budgetOrigin', 'budget_origin')
+  const budgetOrigin = rawBudgetOrigin === 'owner_recommendation' || rawBudgetOrigin === 'owner_custom' ? rawBudgetOrigin : 'agent_default'
+  const recommendation = normalizeAppliedRecommendation(source.recommendation)
   return {
     id,
     initiatorAgentId,
@@ -130,7 +151,10 @@ function normalizePeerDialogue(value: unknown): PeerDialogue | undefined {
     tokensUsed: Math.max(0, Math.round(optionalNumber(source, 'tokensUsed', 'tokens_used', 'usedTokens', 'used_tokens') ?? 0)),
     maxTokens: Math.max(0, Math.round(budgetNumber('maxTokens', 'max_tokens', 'tokenLimit', 'token_limit') ?? 0)),
     maxDurationSeconds: Math.max(0, Math.round(budgetNumber('maxDurationSeconds', 'max_duration_seconds', 'durationLimit', 'duration_limit') ?? 0)),
+    durationUsedSeconds: Math.max(0, Math.round(optionalNumber(source, 'durationUsedSeconds', 'duration_used_seconds') ?? 0)),
     cooldownSeconds: Math.max(0, Math.round(budgetNumber('cooldownSeconds', 'cooldown_seconds', 'cooldown') ?? 0)),
+    budgetOrigin,
+    ...(budgetOrigin === 'owner_recommendation' && recommendation ? { recommendation } : {}),
     ...(completionReason ? { completionReason } : {}),
     createdAt: optionalString(source, 'createdAt', 'created_at', 'timestamp') ?? nowIso(),
     finishedAt: optionalString(source, 'finishedAt', 'finished_at', 'completedAt', 'completed_at'),

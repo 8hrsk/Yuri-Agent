@@ -963,11 +963,25 @@ class MockYuriClient implements YuriClient {
       maxTokens: Math.min(defaults.maxTokens, requestedTokens),
       maxDurationSeconds: Math.min(defaults.maxDurationSeconds, requestedDuration),
     }
+    const recommendationResult = input.budgetSource === 'recommendation'
+      ? await this.recommendPeerDialogueBudget(input.peerAgentId, input.purpose)
+      : undefined
+    const appliedRecommendation = recommendationResult?.recommended
+    if (appliedRecommendation && (budget.maxTurns !== appliedRecommendation.maxTurns || budget.maxTokens !== appliedRecommendation.maxTokens || budget.maxDurationSeconds !== appliedRecommendation.maxDurationSeconds)) {
+      throw new Error('Рекомендация устарела или была изменена. Рассчитайте её заново.')
+    }
     const id = `peer-manual-${Date.now()}`
     this.peerDialogues = [{
       id, initiatorAgentId: initiator.id, initiatorName: initiator.name, peerAgentId: peer.id, peerName: peer.name,
       triggerKind: 'agent_tool', triggerReason: 'Владелец вручную запустил внутренний диалог из Collaboration.',
       purpose: input.purpose, status: 'queued', turnCount: 0, tokensUsed: 0, cooldownSeconds: 300,
+      durationUsedSeconds: 0, budgetOrigin: appliedRecommendation ? 'owner_recommendation' : 'owner_custom',
+      ...(appliedRecommendation && recommendationResult ? { recommendation: {
+        ...appliedRecommendation,
+        basis: recommendationResult.basis,
+        sampleCount: recommendationResult.sampleCount,
+        confidence: recommendationResult.confidence,
+      } } : {}),
       ...budget, createdAt: nowIso(), messages: [{
         id: `${id}-message-0`, sequence: 0, senderAgentId: initiator.id, senderName: initiator.name,
         recipientAgentId: peer.id, recipientName: peer.name, content: input.message, createdAt: nowIso(),

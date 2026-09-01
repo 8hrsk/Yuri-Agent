@@ -93,6 +93,7 @@ export type {
 export type {
   PeerDialogueStatus,
   PeerDialogueTriggerKind,
+  PeerDialogueBudgetOrigin,
   PeerDialogueCompletionReason,
   PeerDialogueMessage,
   PeerDialogue,
@@ -100,6 +101,7 @@ export type {
   PeerDialogueStart,
   PeerDialogueBudget,
   PeerDialogueBudgetRecommendation,
+  AppliedPeerBudgetRecommendation,
   PeerDialogueRecommendationBasis,
   PeerDialogueRecommendationConfidence,
   PeerDialogueListOptions,

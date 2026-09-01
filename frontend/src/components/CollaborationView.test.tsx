@@ -27,7 +27,7 @@ const autonomousDialogue: PeerDialogue = {
   initiatorProviderId: 'codex', initiatorModel: 'gpt-5.6', peerProviderId: 'openrouter', peerModel: 'openrouter/free',
   triggerKind: 'autonomous', triggerReason: 'Нужна независимая проверка архитектурного решения.', purpose: 'Сверить границы нового среза',
   status: 'completed', turnCount: 1, minTurns: 1, maxTurns: 2, tokensUsed: 180, maxTokens: 2400,
-  maxDurationSeconds: 90, cooldownSeconds: 300, completionReason: 'semantic',
+  maxDurationSeconds: 90, durationUsedSeconds: 5, cooldownSeconds: 300, budgetOrigin: 'agent_default', completionReason: 'semantic',
   createdAt: '2026-08-30T10:00:00.000Z', finishedAt: '2026-08-30T10:00:05.000Z', messages: [],
 }
 
@@ -98,9 +98,39 @@ describe('Collaboration peer relationships', () => {
 
     await waitFor(() => expect(startPeerDialogue).toHaveBeenCalledWith({
       peerAgentId: 'agent-mira', purpose: 'Проверить план', message: 'Посмотри архитектуру.',
-      maxTurns: 1, maxTokens: 2000, maxDurationSeconds: 30,
+      maxTurns: 1, maxTokens: 2000, maxDurationSeconds: 30, budgetSource: 'custom',
     }))
     expect(await screen.findByText(/1–1 ходов, до 2 000 токенов и 30 с/)).toBeInTheDocument()
+  })
+
+  it('starts with recommendation provenance when the owner keeps the proposed values', async () => {
+    const recommendPeerDialogueBudget = vi.fn(async () => ({
+      recommended: { minTurns: 2, maxTurns: 3, maxTokens: 6500, maxDurationSeconds: 70 },
+      ceiling: { minTurns: 2, maxTurns: 4, maxTokens: 8000, maxDurationSeconds: 90 },
+      basis: 'pair_history' as const, sampleCount: 2, confidence: 'medium' as const, rationale: 'История пары.',
+    }))
+    const startPeerDialogue = vi.fn(async () => ({ id: 'manual-recommended', minTurns: 2, maxTurns: 3, maxTokens: 6500, maxDurationSeconds: 70 }))
+    clientStub = {
+      mode: 'mock',
+      listAgents: async () => [
+        { id: 'agent-yuri', name: 'Юри', gender: 'female', preferences: '', backstory: '', traits: {}, active: true, executionBudget: 'balanced', createdAt: '2026-08-30T09:00:00Z', updatedAt: '2026-08-30T09:00:00Z' },
+        { id: 'agent-mira', name: 'Мира', gender: 'female', preferences: '', backstory: '', traits: {}, active: false, executionBudget: 'efficient', createdAt: '2026-08-30T09:00:00Z', updatedAt: '2026-08-30T09:00:00Z' },
+      ],
+      listPeerDialogues: async () => [], listPeerRelationships: async () => [], recommendPeerDialogueBudget, startPeerDialogue,
+    } as unknown as YuriClient
+    const user = userEvent.setup()
+    render(<CollaborationView activeAgentId="agent-yuri" />)
+
+    await user.type(await screen.findByRole('textbox', { name: 'Цель' }), 'Сверить архитектуру')
+    await user.type(screen.getByRole('textbox', { name: 'Первое сообщение' }), 'Посмотри границы среза.')
+    await user.click(screen.getByRole('button', { name: 'Подобрать лимит' }))
+    await user.click(await screen.findByRole('button', { name: 'Начать bounded-диалог' }))
+
+    await waitFor(() => expect(startPeerDialogue).toHaveBeenCalledWith({
+      peerAgentId: 'agent-mira', purpose: 'Сверить архитектуру', message: 'Посмотри границы среза.',
+      maxTurns: 3, maxTokens: 6500, maxDurationSeconds: 70, budgetSource: 'recommendation',
+    }))
+    expect(screen.queryByText('Рекомендация применена')).not.toBeInTheDocument()
   })
 
   it('marks opinions as subjective and exposes append-only recovery controls', async () => {
@@ -183,6 +213,46 @@ describe('Collaboration peer relationships', () => {
     expect(await screen.findByLabelText('Бюджет диалога')).toHaveTextContent('4 · 2–4')
     expect(screen.getByLabelText('Причина завершения')).toHaveTextContent('достигнут максимум ходов')
     expect(screen.getByLabelText('Причина завершения')).toHaveTextContent('max_turns')
+  })
+
+  it('compares an applied recommendation with actual usage and calibrates its historical route', async () => {
+    const recommendedDialogue: PeerDialogue = {
+      ...autonomousDialogue,
+      id: 'dialogue-recommended',
+      budgetOrigin: 'owner_recommendation',
+      turnCount: 2,
+      tokensUsed: 2800,
+      durationUsedSeconds: 45,
+      maxTurns: 3,
+      maxTokens: 6500,
+      maxDurationSeconds: 70,
+      recommendation: {
+        minTurns: 2, maxTurns: 3, maxTokens: 6500, maxDurationSeconds: 70,
+        basis: 'pair_history', sampleCount: 2, confidence: 'medium',
+      },
+    }
+    clientStub = {
+      mode: 'mock',
+      listPeerDialogues: async () => [recommendedDialogue],
+      listPeerRelationships: async () => [],
+    } as unknown as YuriClient
+    render(<CollaborationView activeAgentId="agent-yuri" />)
+
+    const comparison = await screen.findByLabelText('Рекомендация и фактический расход')
+    expect(comparison).toHaveTextContent('Рекомендация попала в рабочий диапазон')
+    expect(comparison).toHaveTextContent('история этой пары · 2 прим.')
+    expect(comparison).toHaveTextContent('2 / 3')
+    expect(comparison).toHaveTextContent('2 800 / 6 500')
+    expect(comparison).toHaveTextContent('45 с / 1 мин 10 с')
+
+    const calibration = screen.getByRole('heading', { name: 'Рекомендации по маршрутам' }).closest('section')
+    expect(calibration).not.toBeNull()
+    expect(calibration).toHaveTextContent('codex · gpt-5.6 ↔ openrouter · openrouter/free')
+    expect(calibration).toHaveTextContent('1 пример')
+    expect(calibration).toHaveTextContent('Ходы67%')
+    expect(calibration).toHaveTextContent('Токены43%')
+    expect(calibration).toHaveTextContent('Время64%')
+    expect(calibration).toHaveTextContent('Жёсткие стопы0 / 1')
   })
 
   it('explains a typed peer failure and keeps route choice explicit', async () => {
