@@ -17,6 +17,16 @@ type ResolvedRun struct {
 	MaxOutputTokensPerStep int64
 }
 
+// PeerOverride contains optional owner-requested upper bounds for one manual
+// exchange. Zero means "use the resolved per-agent limit". Applying it is a
+// pure intersection, so an oversized or stale UI value can never expand the
+// current agent/model budget.
+type PeerOverride struct {
+	MaxTurns           int
+	MaxTokens          int64
+	MaxDurationSeconds int
+}
+
 type Workload string
 
 const (
@@ -46,6 +56,23 @@ func ResolvePeer(preset domain.ExecutionBudgetPreset, limits ModelLimits) domain
 		result = domain.PeerDialogueBudget{MinTurns: 2, MaxTurns: 4, MaxTokens: 8_000, MaxDurationSeconds: 90, CooldownSeconds: 300}
 	}
 	result.MaxTokens = contextBound(result.MaxTokens, limits.ContextWindow)
+	return result
+}
+
+func NarrowPeer(base domain.PeerDialogueBudget, override PeerOverride) domain.PeerDialogueBudget {
+	result := base
+	if override.MaxTurns > 0 {
+		result.MaxTurns = min(result.MaxTurns, override.MaxTurns)
+	}
+	if result.MinTurns > result.MaxTurns {
+		result.MinTurns = result.MaxTurns
+	}
+	if override.MaxTokens > 0 {
+		result.MaxTokens = min(result.MaxTokens, override.MaxTokens)
+	}
+	if override.MaxDurationSeconds > 0 {
+		result.MaxDurationSeconds = min(result.MaxDurationSeconds, override.MaxDurationSeconds)
+	}
 	return result
 }
 

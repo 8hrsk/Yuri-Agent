@@ -38,3 +38,15 @@ func TestTinyPublishedContextNeverExpandsPastModelLimit(t *testing.T) {
 		t.Fatalf("tiny context resolution = %#v", resolved)
 	}
 }
+
+func TestPeerOverrideCanOnlyNarrowResolvedBudget(t *testing.T) {
+	base := ResolvePeer(domain.ExecutionBudgetBalanced, ModelLimits{})
+	narrowed := NarrowPeer(base, PeerOverride{MaxTurns: 1, MaxTokens: 2_000, MaxDurationSeconds: 30})
+	if narrowed.MinTurns != 1 || narrowed.MaxTurns != 1 || narrowed.MaxTokens != 2_000 || narrowed.MaxDurationSeconds != 30 || !narrowed.Valid() {
+		t.Fatalf("narrowed peer = %#v", narrowed)
+	}
+	oversized := NarrowPeer(base, PeerOverride{MaxTurns: 99, MaxTokens: 99_000, MaxDurationSeconds: 999})
+	if oversized != base {
+		t.Fatalf("oversized override expanded base: %#v != %#v", oversized, base)
+	}
+}

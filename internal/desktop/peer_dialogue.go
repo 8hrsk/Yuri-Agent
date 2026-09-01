@@ -47,6 +47,8 @@ type peerDialogueAgentTool struct {
 	model            string
 	initiatorAgentID domain.ID
 	triggerRunID     domain.ID
+	budgetOverride   executionbudget.PeerOverride
+	triggerReason    string
 }
 
 type peerDialogueToolInput struct {
@@ -151,7 +153,15 @@ func (tool peerDialogueAgentTool) Execute(ctx context.Context, call agent.ToolCa
 	if err != nil {
 		return agent.ToolResult{}, err
 	}
-	dialogueBudget := executionbudget.ResolvePeer(initiator.ExecutionBudget, modelExecutionLimits(tool.backend, tool.model))
+	backend, model := tool.backend, tool.model
+	if backend == nil {
+		backend, model, err = tool.bridge.chatBackendForAgent(ctx, tool.initiatorAgentID)
+		if err != nil {
+			return agent.ToolResult{}, err
+		}
+	}
+	dialogueBudget := executionbudget.ResolvePeer(initiator.ExecutionBudget, modelExecutionLimits(backend, model))
+	dialogueBudget = executionbudget.NarrowPeer(dialogueBudget, tool.budgetOverride)
 	recent, err := tool.bridge.repositories.PeerDialogues.HasRecentPair(ctx, pairKey, time.Now().UTC().Add(-time.Duration(dialogueBudget.CooldownSeconds)*time.Second))
 	if err != nil {
 		return agent.ToolResult{}, err
@@ -164,6 +174,9 @@ func (tool peerDialogueAgentTool) Execute(ctx context.Context, call agent.ToolCa
 	dialogue, err := domain.NewPeerDialogue(dialogueID, tool.initiatorAgentID, peerID, tool.triggerRunID, input.Purpose, call.ID, requestHash, dialogueBudget, now)
 	if err != nil {
 		return agent.ToolResult{}, err
+	}
+	if reason := strings.TrimSpace(tool.triggerReason); reason != "" {
+		dialogue.TriggerReason = reason
 	}
 	initial := domain.PeerDialogueMessage{
 		ID: domain.ID(string(dialogueID) + "_message_0"), DialogueID: dialogueID, Sequence: 0,
@@ -179,7 +192,7 @@ func (tool peerDialogueAgentTool) Execute(ctx context.Context, call agent.ToolCa
 		return agent.ToolResult{}, err
 	}
 	_ = tool.bridge.appendPeerDialogueAudit(ctx, dialogue, "peer_dialogue.queued", domain.PermissionAllow)
-	if err := tool.bridge.startPeerDialogue(dialogue, tool.backend, tool.model); err != nil {
+	if err := tool.bridge.startPeerDialogue(dialogue, backend, model); err != nil {
 		tool.bridge.failPeerDialogue(dialogue, err)
 		return agent.ToolResult{}, err
 	}
