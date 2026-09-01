@@ -1,6 +1,7 @@
 package executionbudget
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/OrdoAI/yuri-agent/internal/domain"
@@ -48,5 +49,35 @@ func TestPeerOverrideCanOnlyNarrowResolvedBudget(t *testing.T) {
 	oversized := NarrowPeer(base, PeerOverride{MaxTurns: 99, MaxTokens: 99_000, MaxDurationSeconds: 999})
 	if oversized != base {
 		t.Fatalf("oversized override expanded base: %#v != %#v", oversized, base)
+	}
+}
+
+func TestPeerRecommendationUsesSimilarObservedCostInsideCeiling(t *testing.T) {
+	ceiling := ResolvePeer(domain.ExecutionBudgetExtended, ModelLimits{})
+	recommendation, err := RecommendPeer(ceiling, "Проверить архитектуру плана", []PeerHistorySample{
+		{Purpose: "Проверить архитектуру нового плана", Turns: 4, Tokens: 7_200, DurationSeconds: 88, HitHardLimit: true},
+		{Purpose: "Поговорить о погоде", Turns: 2, Tokens: 1_500, DurationSeconds: 18},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recommendation.Basis != PeerRecommendationSimilarHistory || recommendation.SampleCount != 1 {
+		t.Fatalf("recommendation provenance = %#v", recommendation)
+	}
+	if recommendation.Budget.MaxTurns != 5 || recommendation.Budget.MaxTokens != 9_500 || recommendation.Budget.MaxDurationSeconds != 115 || !recommendation.Budget.Valid() {
+		t.Fatalf("adaptive recommendation = %#v", recommendation.Budget)
+	}
+}
+
+func TestPeerRecommendationNeverExpandsResolvedCeiling(t *testing.T) {
+	ceiling := ResolvePeer(domain.ExecutionBudgetEfficient, ModelLimits{ContextWindow: 4_000})
+	recommendation, err := RecommendPeer(ceiling, strings.Repeat("сложная составная цель; ", 10), []PeerHistorySample{
+		{Purpose: "сложная составная цель", Turns: 8, Tokens: 15_000, DurationSeconds: 299, HitHardLimit: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recommendation.Budget != ceiling {
+		t.Fatalf("recommendation expanded ceiling: %#v != %#v", recommendation.Budget, ceiling)
 	}
 }
