@@ -27,6 +27,7 @@ export type PersonaRelationshipSection = 'personality' | 'relationship'
 type PersonaRelationshipViewProps = {
   section: PersonaRelationshipSection
   onActiveAgentChange?: (agent: AgentProfile) => void
+  onModelRouteDirtyChange?: (dirty: boolean) => void
   /**
    * The two sections are two shell destinations. The in-view tabs move the
    * whole shell rather than swapping content behind a nav rail that still
@@ -225,7 +226,7 @@ function PersonalityLayerMap({ snapshot, ownerSeed, section }: { snapshot: Perso
   return <section aria-label="Слои личности агента" className="personality-layer-map">{cards.map((card) => <article className={`personality-layer personality-layer--${card.id}${section === 'relationship' && (card.id === 'relationship' || card.id === 'opinion') ? ' personality-layer--active' : section === 'personality' && (card.id === 'owner_seed' || card.id === 'mutable_persona' || card.id === 'affect') ? ' personality-layer--active' : ''}`} key={card.id}><span>{card.label}</span><strong>{card.value}</strong><small>{card.detail}</small></article>)}</section>
 }
 
-export function PersonaRelationshipView({ section, onActiveAgentChange, onSelectSection }: PersonaRelationshipViewProps) {
+export function PersonaRelationshipView({ section, onActiveAgentChange, onModelRouteDirtyChange, onSelectSection }: PersonaRelationshipViewProps) {
   const client = useMemo(() => createYuriClient(), [])
   const [snapshot, setSnapshot] = useState<PersonalitySnapshot>(() => createStarterPersonalitySnapshot())
   const [busy, setBusy] = useState<BusyAction>('loading')
@@ -239,6 +240,14 @@ export function PersonaRelationshipView({ section, onActiveAgentChange, onSelect
   const [evolutionPolicy, setEvolutionPolicy] = useState<AgentEvolutionPolicy>()
   const [modelRoute, setModelRoute] = useState({ providerId: '', model: '' })
   const [fallbackRoute, setFallbackRoute] = useState({ enabled: false, providerId: '', model: '' })
+  const modelRouteDirty = activeAgent !== undefined && (
+    modelRoute.providerId !== (activeAgent.providerId ?? '') || modelRoute.model !== (activeAgent.model ?? '')
+  )
+
+  useEffect(() => {
+    onModelRouteDirtyChange?.(modelRouteDirty)
+    return () => onModelRouteDirtyChange?.(false)
+  }, [modelRouteDirty, onModelRouteDirtyChange])
 
   const load = useCallback(async () => {
     setBusy('loading')
@@ -471,9 +480,24 @@ export function PersonaRelationshipView({ section, onActiveAgentChange, onSelect
 
     {!relationship && activeAgent && <section className="agent-route-panel" aria-labelledby="agent-route-title">
       <div><span className="section-heading__overline">PER-AGENT MODEL ROUTING</span><h2 id="agent-route-title">Модель {activeAgent.name}</h2><p>Этот маршрут используется в обычном чате, фоновых run и когда агент отвечает другому агенту.</p></div>
-      <AgentModelRouteEditor disabled={busy !== undefined} fallbackEnabled={fallbackRoute.enabled} fallbackModel={fallbackRoute.model} fallbackProviderId={fallbackRoute.providerId} model={modelRoute.model} onChange={(providerId, model) => setModelRoute({ providerId, model })} onFallbackChange={(enabled, providerId, model) => setFallbackRoute({ enabled, providerId, model })} providerId={modelRoute.providerId} />
+      <AgentModelRouteEditor
+        disabled={busy !== undefined}
+        fallbackEnabled={fallbackRoute.enabled}
+        fallbackModel={fallbackRoute.model}
+        fallbackProviderId={fallbackRoute.providerId}
+        model={modelRoute.model}
+        onChange={(providerId, model) => {
+          setModelRoute({ providerId, model })
+          setFeedback(undefined)
+        }}
+        onFallbackChange={(enabled, providerId, model) => setFallbackRoute({ enabled, providerId, model })}
+        primaryAction={<div className={`agent-route-primary-save${modelRouteDirty ? ' agent-route-primary-save--dirty' : ''}`}>
+          <span role="status"><Icon name={modelRouteDirty ? 'warning' : 'check'} width={14} height={14} /> {modelRouteDirty ? 'Выбор ещё не применён к агенту' : 'Основной маршрут сохранён'}</span>
+          <button className="button button--accent" disabled={busy !== undefined || !modelRouteDirty} onClick={() => void saveModelRoute()} type="button"><Icon name="check" width={14} height={14} /> {busy === 'route' ? 'Сохраняю…' : `Сохранить основной маршрут ${activeAgent.name}`}</button>
+        </div>}
+        providerId={modelRoute.providerId}
+      />
       <div className="agent-route-panel__actions">
-        <button className="button button--accent" disabled={busy !== undefined || (modelRoute.providerId === (activeAgent.providerId ?? '') && modelRoute.model === (activeAgent.model ?? ''))} onClick={() => void saveModelRoute()} type="button"><Icon name="check" width={14} height={14} /> {busy === 'route' ? 'Сохраняю…' : 'Сохранить модель агента · основной маршрут'}</button>
         <button className="button button--quiet" disabled={busy !== undefined || (fallbackRoute.enabled === (activeAgent.fallbackEnabled ?? false) && fallbackRoute.providerId === (activeAgent.fallbackProviderId ?? '') && fallbackRoute.model === (activeAgent.fallbackModel ?? ''))} onClick={() => void saveFallbackRoute()} type="button"><Icon name="check" width={14} height={14} /> {busy === 'fallback' ? 'Сохраняю…' : 'Сохранить резервный маршрут'}</button>
       </div>
     </section>}

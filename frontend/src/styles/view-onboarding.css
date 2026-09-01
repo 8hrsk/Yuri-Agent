@@ -689,6 +689,36 @@
   line-height: 1.6;
 }
 
+.agent-model-route__primary-action {
+  padding: 13px;
+  border: 1px solid rgba(var(--mint-rgb), 0.16);
+  border-radius: 11px;
+  background: rgba(var(--mint-rgb), 0.025);
+}
+
+.agent-route-primary-save {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.agent-route-primary-save > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--mint);
+  font-size: 10px;
+}
+
+.agent-route-primary-save--dirty > span {
+  color: var(--pink);
+}
+
+.agent-route-primary-save .button {
+  flex: 0 0 auto;
+}
+
 .agent-model-route__fallback {
   display: grid;
   gap: 12px;
@@ -1205,9 +1235,14 @@
   }
 
   .agent-wizard__toolbar,
-  .agent-episodes__heading {
+  .agent-episodes__heading,
+  .agent-route-primary-save {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .agent-route-primary-save .button {
+    width: 100%;
   }
 
   .agent-wizard__panel {

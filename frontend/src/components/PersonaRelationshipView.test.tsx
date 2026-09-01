@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest'
 
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AgentPersonalizationProfile, AgentProfile, PersonalitySnapshot, YuriClient } from '../lib/contracts'
 import { clonePersonalization, defaultAgentDraft } from '../lib/agents'
@@ -22,18 +22,26 @@ const ownerSeed: AgentPersonalizationProfile = {
   operation: 'owner_create', reason: 'initial owner seed', createdAt: activeAgent.createdAt, updatedAt: activeAgent.updatedAt,
   temperament: { ...defaultAgentDraft.traits },
 }
+let persistedActiveAgent: AgentProfile = { ...activeAgent }
 const updateActiveAgentPersonalization = vi.fn(async (input: { personalization: AgentPersonalizationProfile }) => ({ ...ownerSeed, ...clonePersonalization(input.personalization), version: 2, revisionId: 'seed-2' }))
-const updateActiveAgentModelRoute = vi.fn(async (providerId: string, model: string) => ({ ...activeAgent, providerId, model, updatedAt: '2026-09-01T02:00:00Z' }))
+const updateActiveAgentModelRoute = vi.fn(async (providerId: string, model: string) => {
+  persistedActiveAgent = { ...persistedActiveAgent, providerId, model, updatedAt: '2026-09-01T02:00:00Z' }
+  return persistedActiveAgent
+})
 
 const clientStub = {
   mode: 'mock',
   getPersonaSnapshot: async () => snapshot,
-  getActiveAgent: async () => activeAgent,
+  getActiveAgent: async () => persistedActiveAgent,
   getActiveAgentPersonalization: async () => ownerSeed,
   updateActiveAgentPersonalization,
   updateActiveAgentModelRoute,
-  listProviders: async () => [{ id: 'openrouter', kind: 'openai-compatible', displayName: 'OpenRouter', model: 'openrouter/free', enabled: false, hasSecret: true }],
+  listProviders: async () => [
+    { id: 'codex', kind: 'codex-app-server', displayName: 'Codex OAuth', model: '', enabled: true, hasSecret: false },
+    { id: 'openrouter', kind: 'openai-compatible', displayName: 'OpenRouter', model: 'openrouter/free', enabled: false, hasSecret: true },
+  ],
   getOpenAIModels: async () => [],
+  getCodexModels: async () => [{ id: 'gpt-5.6-luna', model: 'gpt-5.6-luna', displayName: 'GPT-5.6 Luna', isDefault: false, inputModalities: ['text'] }],
   setOpenAIModelFavorite: async () => undefined,
 } as unknown as YuriClient
 
@@ -50,6 +58,10 @@ vi.mock('../lib/client', () => ({
  * recovery controls were all on screen either way.
  */
 describe('Personality and Relationship are two destinations, not one page', () => {
+  beforeEach(() => {
+    persistedActiveAgent = { ...activeAgent }
+  })
+
   it('shows the persona surfaces on Personality and none of them on Relationship', async () => {
     render(<PersonaRelationshipView section="personality" />)
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Черты характера' })).toBeInTheDocument())
@@ -137,9 +149,32 @@ describe('Personality and Relationship are two destinations, not one page', () =
 
     const provider = await screen.findByRole('combobox', { name: 'Provider' })
     await user.selectOptions(provider, 'openrouter')
-    await user.click(screen.getByRole('button', { name: /Сохранить модель агента/ }))
+    await user.click(screen.getByRole('button', { name: /Сохранить основной маршрут Yuri/ }))
 
     await waitFor(() => expect(updateActiveAgentModelRoute).toHaveBeenCalledWith('openrouter', 'openrouter/free'))
     expect(onActiveAgentChange).toHaveBeenCalledWith(expect.objectContaining({ providerId: 'openrouter', model: 'openrouter/free' }))
+  })
+
+  it('persists a Codex Luna route and restores it after reopening agent settings', async () => {
+    const user = userEvent.setup()
+    persistedActiveAgent = { ...activeAgent, name: 'Emily', providerId: 'openrouter', model: 'minimax/minimax-m3:free' }
+    updateActiveAgentModelRoute.mockClear()
+    const first = render(<PersonaRelationshipView section="personality" />)
+
+    const provider = await screen.findByRole('combobox', { name: 'Provider' })
+    expect(provider).toHaveValue('openrouter')
+    await user.selectOptions(provider, 'codex')
+    const codexModel = await screen.findByRole('combobox', { name: 'Codex model' })
+    await user.selectOptions(codexModel, 'gpt-5.6-luna')
+
+    expect(screen.getByText(/Выбор ещё не применён/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Сохранить основной маршрут Emily/ }))
+    await waitFor(() => expect(updateActiveAgentModelRoute).toHaveBeenCalledWith('codex', 'gpt-5.6-luna'))
+    expect(screen.getByText(/Основной маршрут сохранён/)).toBeInTheDocument()
+
+    first.unmount()
+    render(<PersonaRelationshipView section="personality" />)
+    expect(await screen.findByRole('combobox', { name: 'Provider' })).toHaveValue('codex')
+    expect(await screen.findByRole('combobox', { name: 'Codex model' })).toHaveValue('gpt-5.6-luna')
   })
 })

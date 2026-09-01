@@ -39,6 +39,8 @@ function App() {
   const [agentError, setAgentError] = useState<string>()
   const [agentNotice, setAgentNotice] = useState<string>()
   const [importedProfilePath, setImportedProfilePath] = useState<string>()
+  const [modelRouteDirty, setModelRouteDirty] = useState(false)
+  const [modelRouteDiscardVersion, setModelRouteDiscardVersion] = useState(0)
   const backend = useBackendConnection()
   const sidebar = useSidebarCollapse()
   const activeItem = useMemo(() => navItems.find((item) => item.id === activeId) ?? navItems[0], [activeId])
@@ -71,9 +73,33 @@ function App() {
     return () => { mounted = false }
   }, [client, onboardingStatus])
 
+  const confirmModelRouteDiscard = useCallback((): boolean => {
+    if (!modelRouteDirty) return true
+    if (!window.confirm('Основной provider или модель агента ещё не сохранены. Отменить изменения и уйти со страницы?')) return false
+    setModelRouteDirty(false)
+    setModelRouteDiscardVersion((version) => version + 1)
+    return true
+  }, [modelRouteDirty])
+
+  const navigateTo = useCallback((next: NavId) => {
+    if (!confirmModelRouteDiscard()) return
+    setActiveId(next)
+  }, [confirmModelRouteDiscard])
+
+  useEffect(() => {
+    if (!modelRouteDirty) return
+    const warnBeforeClose = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeClose)
+    return () => window.removeEventListener('beforeunload', warnBeforeClose)
+  }, [modelRouteDirty])
+
   const handleSelectAgent = async (agentId: string): Promise<boolean> => {
     if (agentId === activeAgent?.id) return true
     if (agentBusy) return false
+    if (!confirmModelRouteDiscard()) return false
     setAgentBusy(true)
     setAgentError(undefined)
     try {
@@ -91,9 +117,9 @@ function App() {
 
   // Handed to the always-mounted chat surface, so they must not change identity
   // on every App render.
-  const openSettingsTab = useCallback(() => setActiveId('settings'), [])
-  const openChatTab = useCallback(() => setActiveId('chat'), [])
-  const openPersonalityTab = useCallback(() => setActiveId('personality'), [])
+  const openSettingsTab = useCallback(() => navigateTo('settings'), [navigateTo])
+  const openChatTab = useCallback(() => navigateTo('chat'), [navigateTo])
+  const openPersonalityTab = useCallback(() => navigateTo('personality'), [navigateTo])
   const openAgentPersonality = (agentId: string) => {
     void handleSelectAgent(agentId).then((selected) => { if (selected) setActiveId('personality') })
   }
@@ -188,7 +214,7 @@ function App() {
         onCreateAgent={openAgentForm}
         onExportAgent={() => void handleExportAgent()}
         onImportAgent={() => void handleImportAgent()}
-        onNavigate={setActiveId}
+        onNavigate={navigateTo}
         onSelectAgent={(agentId) => void handleSelectAgent(agentId)}
         onToggleCollapsed={sidebar.toggle}
       />
@@ -241,7 +267,7 @@ function App() {
                   onOpenSettings={openSettingsTab}
                 />
               ) : activeId === 'relationship' || activeId === 'personality' ? (
-                <PersonaRelationshipView key={activeAgent?.id ?? 'no-active-agent'} onActiveAgentChange={handleActiveAgentChange} onSelectSection={setActiveId} section={activeId} />
+                <PersonaRelationshipView key={`${activeAgent?.id ?? 'no-active-agent'}-${modelRouteDiscardVersion}`} onActiveAgentChange={handleActiveAgentChange} onModelRouteDirtyChange={setModelRouteDirty} onSelectSection={navigateTo} section={activeId} />
               ) : activeId === 'plugins' ? (
                 <PluginView />
               ) : activeId === 'settings' ? (

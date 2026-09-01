@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { createYuriClient } from '../lib/client'
 import type { CodexModel, OpenAIModel, OpenAIModelSort, ProviderOption } from '../lib/contracts'
@@ -12,11 +12,12 @@ type AgentModelRouteEditorProps = {
   fallbackProviderId: string
   fallbackModel: string
   disabled?: boolean
+  primaryAction?: ReactNode
   onChange: (providerId: string, model: string) => void
   onFallbackChange: (enabled: boolean, providerId: string, model: string) => void
 }
 
-export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fallbackProviderId, fallbackModel, disabled, onChange, onFallbackChange }: AgentModelRouteEditorProps) {
+export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fallbackProviderId, fallbackModel, disabled, primaryAction, onChange, onFallbackChange }: AgentModelRouteEditorProps) {
   const client = useMemo(() => createYuriClient(), [])
   const [providers, setProviders] = useState<ProviderOption[]>([])
   const [openAIModels, setOpenAIModels] = useState<OpenAIModel[]>([])
@@ -128,6 +129,7 @@ export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fall
       <option value="">Автоматически · provider default</option>
       {codexModels.map((item) => <option key={item.id} value={item.model}>{item.displayName}{item.isDefault ? ' · default' : ''}</option>)}
     </select></label>}
+    {primaryAction && <div className="agent-model-route__primary-action">{primaryAction}</div>}
     <section aria-label="Резервный маршрут агента" className="agent-model-route__fallback">
       <div className="agent-model-route__fallback-heading"><div><span>FALLBACK ROUTE</span><h5>Резервный provider и модель</h5></div><span className={fallbackEnabled ? 'agent-model-route__fallback-status agent-model-route__fallback-status--on' : 'agent-model-route__fallback-status'}>{fallbackEnabled ? 'включён' : 'выключен'}</span></div>
       <p>Если основной маршрут завершился подходящей provider-ошибкой, Yuri может переключиться сюда только до первого видимого токена или tool side effect. Переключение всегда видно в trace и audit.</p>

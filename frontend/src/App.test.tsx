@@ -30,6 +30,12 @@ vi.mock('./lib/client', () => ({
   subscribePersonaUpdates: () => () => undefined,
 }))
 
+vi.mock('./components/PersonaRelationshipView', () => ({
+  PersonaRelationshipView: ({ onModelRouteDirtyChange }: { onModelRouteDirtyChange?: (dirty: boolean) => void }) => (
+    <button onClick={() => onModelRouteDirtyChange?.(true)} type="button">Изменить маршрут без сохранения</button>
+  ),
+}))
+
 const agent: AgentProfile = {
   id: 'agent-1',
   name: 'Юри',
@@ -224,6 +230,27 @@ describe('the transcript is not re-fetched on every visit to Chat (M-35)', () =>
     expect(windowed()).toBe(40)
     expect(screen.getByText('Реплика 199')).toBeInTheDocument()
     expect(screen.queryByText('Реплика 0')).not.toBeInTheDocument()
+  })
+})
+
+describe('unsaved per-agent model route', () => {
+  it('blocks navigation until the owner explicitly discards the draft', async () => {
+    const user = userEvent.setup()
+    const harness = createHarness()
+    await bootChat(harness)
+    await user.click(screen.getByRole('button', { name: /Personality/ }))
+    await user.click(await screen.findByRole('button', { name: 'Изменить маршрут без сохранения' }))
+
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    const tasks = screen.getByRole('button', { name: /Tasks/ })
+    await user.click(tasks)
+    expect(tasks).not.toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: 'Изменить маршрут без сохранения' })).toBeInTheDocument()
+
+    await user.click(tasks)
+    expect(tasks).toHaveAttribute('aria-current', 'page')
+    expect(screen.queryByRole('button', { name: 'Изменить маршрут без сохранения' })).not.toBeInTheDocument()
+    expect(confirm).toHaveBeenCalledTimes(2)
   })
 })
 

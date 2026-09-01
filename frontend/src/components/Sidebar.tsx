@@ -1,4 +1,4 @@
-import { useState, type Dispatch, type SetStateAction } from 'react'
+import { useState } from 'react'
 
 import { ConnectionBadge } from './ConnectionBadge'
 import { Icon, type IconName } from './Icon'
@@ -22,7 +22,7 @@ type SidebarProps = {
    * expand: the toggle is hidden rather than offering a state it cannot reach.
    */
   onToggleCollapsed?: () => void
-  onNavigate: Dispatch<SetStateAction<NavId>>
+  onNavigate: (next: NavId) => void
   onSelectAgent: (agentId: string) => void
   onCreateAgent: () => void
   onExportAgent: () => void
