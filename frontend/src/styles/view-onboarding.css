@@ -306,20 +306,36 @@
   margin-top: 20px;
 }
 
-.onboarding-form label {
+/*
+ * The field styles are keyed on the route editor as well as the form.
+ *
+ * AgentModelRouteEditor renders bare `<label><span>…</span><select>` markup and
+ * relied on these rules alone. That works in the creation dialog, which wraps it
+ * in .onboarding-form, but the Personality view mounts the same component inside
+ * .agent-route-panel, where nothing matched: the label stayed inline at the
+ * inherited 20px body size and the select fell back to the native macOS control,
+ * so "Provider", "Codex model" and "Профиль" ran underneath their own dropdowns.
+ *
+ * Extending the selector lists rather than writing a second block keeps the two
+ * mount points rendering identically and keeps one declaration per property.
+ */
+.onboarding-form label,
+.agent-model-route label {
   display: grid;
   gap: 7px;
   color: #918b9f;
   font-size: 9px;
 }
 
-.onboarding-form label > span {
+.onboarding-form label > span,
+.agent-model-route label > span {
   font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
   font-size: 8px;
   text-transform: uppercase;
 }
 
-.onboarding-form label small {
+.onboarding-form label small,
+.agent-model-route label small {
   color: #626073;
   font-size: 8px;
   text-transform: none;
@@ -327,7 +343,9 @@
 
 .onboarding-form input,
 .onboarding-form select,
-.onboarding-form textarea {
+.onboarding-form textarea,
+.agent-model-route input,
+.agent-model-route select {
   width: 100%;
   min-height: 36px;
   padding: 8px 10px;
@@ -353,7 +371,9 @@
 
 .onboarding-form input:focus,
 .onboarding-form select:focus,
-.onboarding-form textarea:focus {
+.onboarding-form textarea:focus,
+.agent-model-route input:focus,
+.agent-model-route select:focus {
   border-color: rgba(var(--accent-rgb), 0.45);
 }
 
@@ -694,6 +714,17 @@
   border: 1px solid rgba(var(--mint-rgb), 0.16);
   border-radius: 11px;
   background: rgba(var(--mint-rgb), 0.025);
+}
+
+/*
+ * Each section ends with the button that saves it. Without this wrapper a
+ * .button dropped straight into the section's grid stretched to the full column
+ * width, so the budget save read as a banner while the other two read as
+ * buttons.
+ */
+.agent-model-route__section-action {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .agent-model-route__budget {

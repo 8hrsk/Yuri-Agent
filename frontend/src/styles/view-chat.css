@@ -57,6 +57,25 @@
   gap: 16px;
 }
 
+/*
+ * The chat header wraps on its own width, not on the window's.
+ *
+ * The only responsive rule for it was a window-level @media at 860px, but the
+ * header's width is the window minus the rail (76 or 246px) and the
+ * conversation list (up to 250px), so the panel was already too narrow several
+ * hundred pixels before that breakpoint fired: the overline broke onto two
+ * lines and the model and affect chips were clipped mid-word.
+ *
+ * flex-wrap lives on the solo .chat-main__header rule further down and the
+ * flex-basis that triggers the wrap lives on .chat-main__header-persona in
+ * avatar.css; both are noted there. Without that basis the line never overflows
+ * -- either child can shrink to nothing -- and the title truncates away to make
+ * room for the chips instead of the chips moving to their own row.
+ */
+.chat-main__header-title {
+  min-width: 0;
+}
+
 .conversation-panel__header {
   padding: 24px 18px 17px;
 }
@@ -269,7 +288,9 @@
  * row rhythm.
  */
 .conversation-more {
-  justify-self: center;
+  /* align-self, not justify-self: the panel is a flex column, and justify-self
+   * has no effect on a flex item, so the button sat flush left. */
+  align-self: center;
   gap: 6px;
   padding: 10px 8px 2px;
 }
@@ -333,11 +354,18 @@
   min-height: 83px;
   padding: 18px 24px;
   border-bottom: 1px solid var(--line);
+
+  /* See the note beside .chat-main__header-title: the meta row drops to its
+   * own line once the panel is too narrow to hold it beside the title. */
+  flex-wrap: wrap;
 }
 
 .chat-main__header-meta {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 15px;
 }
 
@@ -351,8 +379,19 @@
   color: #b9add9;
   font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
   font-size: 8px;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * The route label truncates on this span, not on the flex container above it.
+ * text-overflow only draws its ellipsis on a block container's line box, so
+ * while the label was a bare text child of the inline-flex row a long
+ * provider/model pair was hard-clipped mid-character with no ellipsis.
+ */
+.chat-model-route > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-model-route svg {
@@ -416,6 +455,9 @@
 
 .run-state i,
 .chat-error > svg + span::before {
+  /* An inline box ignores width and height, so the separator dot in .chat-error
+   * collapsed to nothing and left an uneven gap where it should have been. */
+  display: inline-block;
   width: 5px;
   height: 5px;
   border-radius: 50%;
@@ -449,9 +491,16 @@
   text-transform: uppercase;
 }
 
+/*
+ * Wrapping flex row rather than a three-column grid. The grid's middle track was
+ * free to collapse to nothing, so between roughly 860 and 1100px of window the
+ * chips were squeezed out of existence while the allowed-directories block kept
+ * its full 170px. Wrapping moves that block to a second line instead, and the
+ * chip row keeps a real minimum width.
+ */
 .tool-availability {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) minmax(170px, auto);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin: 10px 24px 0;
@@ -510,11 +559,20 @@
   text-decoration: underline;
 }
 
+/*
+ * The mark is also matched by `.tool-availability__heading > span` above, which
+ * is one point more specific and sets display: inline-flex -- so `display: grid`
+ * lost and `place-items` stopped applying, leaving the 13px glyph in the top
+ * left of its 24px box. Centring it with flex properties works under either
+ * display value.
+ */
 .tool-availability__mark {
   display: grid;
   width: 24px;
   height: 24px;
   place-items: center;
+  align-items: center;
+  justify-content: center;
   border: 1px solid rgba(var(--accent-rgb), 0.18);
   border-radius: 7px;
   color: var(--accent-light);
@@ -523,9 +581,23 @@
 
 .tool-availability__tools {
   gap: 5px;
-  min-width: 0;
+
+  /*
+   * A real minimum, not 0: it is what forces the allowed-directories block onto
+   * a second line when the bar runs out of room, instead of the chip row being
+   * squeezed to nothing while that block keeps its width.
+   */
+  flex: 1 1 160px;
+  min-width: 150px;
   overflow-x: auto;
   scrollbar-width: none;
+
+  /*
+   * The scrollbar is hidden, so the row needs some other cue that it continues.
+   * Without it the last chip was cut through the middle of a word and read as a
+   * rendering fault rather than as a scrollable list.
+   */
+  mask-image: linear-gradient(90deg, #000 calc(100% - 22px), transparent);
 }
 
 .tool-availability__tools::-webkit-scrollbar { display: none; }
@@ -573,6 +645,11 @@
 .tool-availability__scope {
   justify-content: flex-end;
   gap: 6px;
+
+  /* Sits at the far end of the row, and drops to its own line when the chips
+   * claim the width. */
+  flex: 0 1 auto;
+  margin-left: auto;
   min-width: 0;
   overflow: hidden;
 }
@@ -608,6 +685,24 @@
 .conversation-earlier {
   align-self: center;
   gap: 6px;
+}
+
+/*
+ * "К последним сообщениям". It is pinned over the transcript, so it needs a
+ * surface of its own: as a bare transparent text button its label sat directly
+ * on top of the message lines scrolling underneath it.
+ */
+.transcript-jump {
+  position: sticky;
+  z-index: 1;
+  bottom: 8px;
+  align-self: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid rgba(var(--accent-rgb), 0.22);
+  border-radius: 999px;
+  background: rgba(24, 24, 39, 0.94);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 
 .empty-conversation {
@@ -1268,8 +1363,16 @@
   grid-template-columns: 108px minmax(0, 1fr);
 }
 
+/*
+ * 24px matches the message column, the tool bar and the error row; at 19px the
+ * composer was five pixels wider than everything stacked above it. The
+ * padding-bottom is reset because .composer-wrap in view-home.css adds 25px of
+ * its own, which added to this margin and left a 43px gap under the composer
+ * against 15px above it.
+ */
 .composer-wrap--active {
-  margin: 0 19px 18px;
+  margin: 0 24px 18px;
+  padding-bottom: 0;
 }
 
 .composer-wrap--active .composer {

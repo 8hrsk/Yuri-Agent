@@ -112,17 +112,6 @@
   font-size: 12px;
 }
 
-.agent-route-panel__actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 9px;
-}
-
-.agent-route-panel__actions .button {
-  justify-self: end;
-}
-
 .owner-seed-summary h2,
 .owner-seed-editor h2 {
   margin: 5px 0 0;
@@ -1018,7 +1007,10 @@
   position: absolute;
   top: 7px;
   bottom: 7px;
-  left: 15px;
+
+  /* Centre of the 45px marker column below, so the line runs through the
+   * markers instead of 7.5px to their left. */
+  left: 22px;
   width: 1px;
   background: rgba(var(--accent-rgb), 0.16);
   content: '';

@@ -102,9 +102,8 @@ export function TranscriptFeed({
       />
       {!followingBottom && (
         <button
-          className="text-button"
+          className="text-button transcript-jump"
           onClick={onJumpToBottom}
-          style={{ position: 'sticky', bottom: 0, alignSelf: 'center', zIndex: 1 }}
           type="button"
         >
           К последним сообщениям <Icon height={13} name="chevron-right" style={{ transform: 'rotate(90deg)' }} width={13} />

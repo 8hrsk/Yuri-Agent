@@ -65,7 +65,13 @@ export function ChatHeader({ affect, agentName, avatarState, model, onRename, pr
     <header className="chat-main__header">
       <div className="chat-main__header-persona">
         <YuriAvatar affect={affect} label={`${agentName} · ${runLabel}${affect?.mood ? ` · ${affect.mood}` : ''}`} size="sm" state={avatarState} />
-        <div>
+        {/*
+          * Carries min-width: 0. The h2 below truncates with an ellipsis, but a
+          * flex child defaults to min-width: auto, so without a class here the
+          * chain broke at this div and an 80-character title pushed the meta row
+          * out of the header instead of being clipped.
+          */}
+        <div className="chat-main__header-title">
           <span className="section-heading__overline">Conversation · local</span>
           {editing ? (
             <form className="chat-title-editor" onSubmit={(event) => void submit(event)}>
@@ -98,7 +104,7 @@ export function ChatHeader({ affect, agentName, avatarState, model, onRename, pr
         </div>
       </div>
       <div className="chat-main__header-meta">
-        <span aria-label={`Модель агента: ${modelRouteLabel(providerId, model)}`} className="chat-model-route"><Icon name="spark" width={12} height={12} /> {modelRouteLabel(providerId, model)}</span>
+        <span aria-label={`Модель агента: ${modelRouteLabel(providerId, model)}`} className="chat-model-route"><Icon name="spark" width={12} height={12} /><span>{modelRouteLabel(providerId, model)}</span></span>
         {affect && <span aria-label={`Текущее эмоциональное состояние: ${affect.mood}`} className={`affect-state affect-state--${affectMood}`} title={affect.reason}><i /><span>{affect.mood}</span>{activeEmotions.length > 0 && <small>{activeEmotions.map((emotion) => `${emotion.label} ${Math.round(emotion.value * 100)}%`).join(' · ')}</small>}</span>}
         <span className={`run-state run-state--${runStatus}`} role="status"><i /> {runLabel}</span>
         <span className="chat-main__privacy"><Icon name="lock" width={13} height={13} /> private</span>

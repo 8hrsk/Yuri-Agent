@@ -113,16 +113,15 @@
   color: var(--accent-light);
 }
 
-.sidebar::after {
-  position: absolute;
-  right: -1px;
-  top: 98px;
-  width: 1px;
-  height: 108px;
-  background: linear-gradient(var(--accent), transparent);
-  content: '';
-  opacity: 0.7;
-}
+/*
+ * The rail used to carry a `.sidebar::after` accent hairline pinned at
+ * top: 98px; height: 108px. Expanded, the brand block ends at 86px, the agent
+ * picker occupies 86-139px and the nav starts at 164px; collapsed, those become
+ * 119px, 119-166px and 188px. The hairline lined up with none of them in either
+ * mode and drifted further the moment the rail collapsed, so it read as a stray
+ * mark next to the agent card rather than as an accent on anything. Removed
+ * instead of re-pinned: there is no element at that edge for it to track.
+ */
 
 .sidebar__brand {
   display: flex;
@@ -181,8 +180,6 @@
 
 .brand-version {
   margin-left: auto;
-  align-self: flex-start;
-  padding-top: 2px;
   color: var(--quiet);
   font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
   font-size: 9px;
@@ -246,6 +243,19 @@
 .profile-copy strong {
   font-size: 12px;
   font-weight: 700;
+}
+
+/*
+ * The name and the route each stay on one line. min-width: 0 above lets the
+ * grid track shrink, but shrinking is what makes a long route such as
+ * "CODEX · GPT-5.6-LUNA" wrap onto a second line, which grew the card and
+ * pulled the status dot and chevron away from the text they belong to.
+ */
+.profile-copy strong,
+.profile-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .profile-status {
@@ -656,6 +666,13 @@
 .icon-button {
   display: inline-flex;
   align-items: center;
+
+  /*
+   * Needed wherever the button is given a fixed size -- the 24x24 close button
+   * in a notification toast, the refresh button in Activity. Without it the
+   * icon sat against the left padding instead of in the middle of the box.
+   */
+  justify-content: center;
   gap: 8px;
   padding: 7px 8px;
   border: 1px solid transparent;
