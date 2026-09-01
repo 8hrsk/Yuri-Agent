@@ -15,7 +15,7 @@ import (
 
 func TestPortableAgentProfileExportsOnlyOwnerCreationContractAndRoundTrips(t *testing.T) {
 	bridge := newAgentTestBridge(t)
-	if _, err := bridge.CreateAgent(CreateAgentInput{Name: "Yuri", Gender: "female"}); err != nil {
+	if _, err := bridge.CreateAgent(CreateAgentInput{Name: "Yuri", Gender: "female", ExecutionBudget: "extended"}); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "agent.json")
@@ -53,7 +53,7 @@ func TestPortableAgentProfileExportsOnlyOwnerCreationContractAndRoundTrips(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.ID == "owner" || created.Name != exported.Profile.Name {
+	if created.ID == "owner" || created.Name != exported.Profile.Name || created.ExecutionBudget != "extended" {
 		t.Fatalf("imported agent = %#v", created)
 	}
 	seed, err := bridge.repositories.Personalization.Get(context.Background(), domain.ID(created.ID))
