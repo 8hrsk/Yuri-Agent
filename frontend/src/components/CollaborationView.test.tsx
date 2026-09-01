@@ -26,7 +26,8 @@ const autonomousDialogue: PeerDialogue = {
   id: 'dialogue-auto', initiatorAgentId: 'agent-yuri', initiatorName: 'Юри', peerAgentId: 'agent-mira', peerName: 'Мира',
   initiatorProviderId: 'codex', initiatorModel: 'gpt-5.6', peerProviderId: 'openrouter', peerModel: 'openrouter/free',
   triggerKind: 'autonomous', triggerReason: 'Нужна независимая проверка архитектурного решения.', purpose: 'Сверить границы нового среза',
-  status: 'completed', turnCount: 1, maxTurns: 2, tokensUsed: 180, maxTokens: 2400,
+  status: 'completed', turnCount: 1, minTurns: 1, maxTurns: 2, tokensUsed: 180, maxTokens: 2400,
+  maxDurationSeconds: 90, cooldownSeconds: 300, completionReason: 'semantic',
   createdAt: '2026-08-30T10:00:00.000Z', finishedAt: '2026-08-30T10:00:05.000Z', messages: [],
 }
 
@@ -88,9 +89,33 @@ describe('Collaboration peer relationships', () => {
     expect(routes).toHaveTextContent('codex · gpt-5.6')
     expect(routes).toHaveTextContent('openrouter · openrouter/free')
     expect(screen.getByLabelText('Бюджет диалога')).toHaveTextContent('180')
+    expect(screen.getByLabelText('Бюджет диалога')).toHaveTextContent('1 · 1–2')
+    expect(screen.getByLabelText('Причина завершения')).toHaveTextContent('агент завершил диалог по смыслу')
     expect(screen.getByText('Исторический ответ.')).toBeInTheDocument()
     expect(screen.getByText('openrouter · historic/model')).toBeInTheDocument()
     expect(screen.getByText('150 ток.')).toBeInTheDocument()
+  })
+
+  it('distinguishes a hard turn limit from semantic completion', async () => {
+    const hardLimitDialogue: PeerDialogue = {
+      ...autonomousDialogue,
+      id: 'dialogue-turn-limit',
+      purpose: 'Сверить план до жёсткого лимита.',
+      turnCount: 4,
+      minTurns: 2,
+      maxTurns: 4,
+      completionReason: 'max_turns',
+    }
+    clientStub = {
+      mode: 'mock',
+      listPeerDialogues: async () => [hardLimitDialogue],
+      listPeerRelationships: async () => [],
+    } as unknown as YuriClient
+    render(<CollaborationView activeAgentId="agent-yuri" />)
+
+    expect(await screen.findByLabelText('Бюджет диалога')).toHaveTextContent('4 · 2–4')
+    expect(screen.getByLabelText('Причина завершения')).toHaveTextContent('достигнут максимум ходов')
+    expect(screen.getByLabelText('Причина завершения')).toHaveTextContent('max_turns')
   })
 
   it('explains a typed peer failure and keeps route choice explicit', async () => {

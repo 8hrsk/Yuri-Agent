@@ -92,6 +92,7 @@ export type {
 export type {
   PeerDialogueStatus,
   PeerDialogueTriggerKind,
+  PeerDialogueCompletionReason,
   PeerDialogueMessage,
   PeerDialogue,
   PeerDialogueListOptions,

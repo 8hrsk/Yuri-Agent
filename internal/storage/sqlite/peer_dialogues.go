@@ -115,14 +115,18 @@ func insertPeerDialogueTx(ctx context.Context, tx *sql.Tx, dialogue domain.PeerD
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO peer_dialogues(
 			id, initiator_agent_id, peer_agent_id, trigger_run_id, trigger_kind, trigger_reason, pair_key, purpose, status,
-			max_turns, max_tokens, max_duration_seconds, cooldown_seconds, turn_count, tokens_used,
+			min_turns, max_turns, max_tokens, max_duration_seconds, cooldown_seconds, turn_count, tokens_used,
+			completion_reason,
 			idempotency_key, request_hash, failure, failure_kind, failure_retryable, failure_retry_after_seconds,
 			version, created_at, updated_at, started_at, finished_at, expires_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?)`,
 		string(dialogue.ID), string(dialogue.InitiatorAgentID), string(dialogue.PeerAgentID), string(dialogue.TriggerRunID),
 		string(dialogue.TriggerKind), strings.TrimSpace(dialogue.TriggerReason), dialogue.PairKey, strings.TrimSpace(dialogue.Purpose), string(dialogue.Status),
-		dialogue.Budget.MaxTurns, dialogue.Budget.MaxTokens, dialogue.Budget.MaxDurationSeconds, dialogue.Budget.CooldownSeconds,
-		dialogue.TurnCount, dialogue.TokensUsed, strings.TrimSpace(dialogue.IdempotencyKey), strings.TrimSpace(dialogue.RequestHash),
+		dialogue.Budget.MinTurns, dialogue.Budget.MaxTurns, dialogue.Budget.MaxTokens, dialogue.Budget.MaxDurationSeconds, dialogue.Budget.CooldownSeconds,
+		dialogue.TurnCount, dialogue.TokensUsed, string(dialogue.CompletionReason), strings.TrimSpace(dialogue.IdempotencyKey), strings.TrimSpace(dialogue.RequestHash),
 		dialogue.Failure, string(dialogue.FailureInfo.Kind), dialogue.FailureInfo.Retryable, dialogue.FailureInfo.RetryAfterSeconds,
 		dialogue.Version, createdAt, updatedAt, nullableTimeValue(dialogue.StartedAt), nullableTimeValue(dialogue.FinishedAt), expiresAt)
 	return wrappedSQLError("create peer dialogue", err)
@@ -511,13 +515,13 @@ func savePeerDialogue(ctx context.Context, database *sql.DB, dialogue domain.Pee
 	}
 	result, err := database.ExecContext(ctx, `
 		UPDATE peer_dialogues SET
-			purpose = ?, status = ?, max_turns = ?, max_tokens = ?, max_duration_seconds = ?, cooldown_seconds = ?,
-			turn_count = ?, tokens_used = ?, failure = ?, failure_kind = ?, failure_retryable = ?, failure_retry_after_seconds = ?,
+			purpose = ?, status = ?, min_turns = ?, max_turns = ?, max_tokens = ?, max_duration_seconds = ?, cooldown_seconds = ?,
+			turn_count = ?, tokens_used = ?, completion_reason = ?, failure = ?, failure_kind = ?, failure_retryable = ?, failure_retry_after_seconds = ?,
 			version = ?, updated_at = ?, started_at = ?, finished_at = ?, expires_at = ?
 		WHERE id = ? AND version = ?`,
-		strings.TrimSpace(dialogue.Purpose), string(dialogue.Status), dialogue.Budget.MaxTurns, dialogue.Budget.MaxTokens,
+		strings.TrimSpace(dialogue.Purpose), string(dialogue.Status), dialogue.Budget.MinTurns, dialogue.Budget.MaxTurns, dialogue.Budget.MaxTokens,
 		dialogue.Budget.MaxDurationSeconds, dialogue.Budget.CooldownSeconds, dialogue.TurnCount, dialogue.TokensUsed,
-		dialogue.Failure, string(dialogue.FailureInfo.Kind), dialogue.FailureInfo.Retryable, dialogue.FailureInfo.RetryAfterSeconds,
+		string(dialogue.CompletionReason), dialogue.Failure, string(dialogue.FailureInfo.Kind), dialogue.FailureInfo.Retryable, dialogue.FailureInfo.RetryAfterSeconds,
 		dialogue.Version, updatedAt, nullableTimeValue(dialogue.StartedAt), nullableTimeValue(dialogue.FinishedAt),
 		formatTime(dialogue.ExpiresAt), string(dialogue.ID), expectedVersion)
 	if err != nil {
@@ -619,13 +623,13 @@ func updatePeerDialogueTx(ctx context.Context, tx *sql.Tx, dialogue domain.PeerD
 	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE peer_dialogues SET
-			purpose = ?, status = ?, max_turns = ?, max_tokens = ?, max_duration_seconds = ?, cooldown_seconds = ?,
-			turn_count = ?, tokens_used = ?, failure = ?, failure_kind = ?, failure_retryable = ?, failure_retry_after_seconds = ?,
+			purpose = ?, status = ?, min_turns = ?, max_turns = ?, max_tokens = ?, max_duration_seconds = ?, cooldown_seconds = ?,
+			turn_count = ?, tokens_used = ?, completion_reason = ?, failure = ?, failure_kind = ?, failure_retryable = ?, failure_retry_after_seconds = ?,
 			version = ?, updated_at = ?, started_at = ?, finished_at = ?, expires_at = ?
 		WHERE id = ? AND version = ?`,
-		strings.TrimSpace(dialogue.Purpose), string(dialogue.Status), dialogue.Budget.MaxTurns, dialogue.Budget.MaxTokens,
+		strings.TrimSpace(dialogue.Purpose), string(dialogue.Status), dialogue.Budget.MinTurns, dialogue.Budget.MaxTurns, dialogue.Budget.MaxTokens,
 		dialogue.Budget.MaxDurationSeconds, dialogue.Budget.CooldownSeconds, dialogue.TurnCount, dialogue.TokensUsed,
-		dialogue.Failure, string(dialogue.FailureInfo.Kind), dialogue.FailureInfo.Retryable, dialogue.FailureInfo.RetryAfterSeconds,
+		string(dialogue.CompletionReason), dialogue.Failure, string(dialogue.FailureInfo.Kind), dialogue.FailureInfo.Retryable, dialogue.FailureInfo.RetryAfterSeconds,
 		dialogue.Version, updatedAt, nullableTimeValue(dialogue.StartedAt), nullableTimeValue(dialogue.FinishedAt),
 		formatTime(dialogue.ExpiresAt), string(dialogue.ID), expectedVersion)
 	if err != nil {
@@ -645,7 +649,8 @@ func updatePeerDialogueTx(ctx context.Context, tx *sql.Tx, dialogue domain.PeerD
 // ListByParticipant share one scanner and one round-trip per query.
 const peerDialogueSelect = `
 	SELECT id, initiator_agent_id, peer_agent_id, trigger_run_id, trigger_kind, trigger_reason, pair_key, purpose, status,
-	       max_turns, max_tokens, max_duration_seconds, cooldown_seconds, turn_count, tokens_used,
+	       min_turns, max_turns, max_tokens, max_duration_seconds, cooldown_seconds, turn_count, tokens_used,
+	       completion_reason,
 	       idempotency_key, request_hash, failure, failure_kind, failure_retryable, failure_retry_after_seconds,
 	       version, created_at, updated_at, started_at, finished_at, expires_at
 	FROM peer_dialogues`
@@ -668,11 +673,12 @@ func scanPeerDialogue(scanner peerDialogueScanner) (domain.PeerDialogue, error) 
 		id, initiatorID, peerID, triggerRunID, triggerKind, status string
 		createdAt, updatedAt, expiresAt                            string
 		startedAt, finishedAt                                      sql.NullString
+		completionReason                                           string
 	)
 	if err := scanner.Scan(
 		&id, &initiatorID, &peerID, &triggerRunID, &triggerKind, &dialogue.TriggerReason, &dialogue.PairKey, &dialogue.Purpose, &status,
-		&dialogue.Budget.MaxTurns, &dialogue.Budget.MaxTokens, &dialogue.Budget.MaxDurationSeconds, &dialogue.Budget.CooldownSeconds,
-		&dialogue.TurnCount, &dialogue.TokensUsed, &dialogue.IdempotencyKey, &dialogue.RequestHash, &dialogue.Failure,
+		&dialogue.Budget.MinTurns, &dialogue.Budget.MaxTurns, &dialogue.Budget.MaxTokens, &dialogue.Budget.MaxDurationSeconds, &dialogue.Budget.CooldownSeconds,
+		&dialogue.TurnCount, &dialogue.TokensUsed, &completionReason, &dialogue.IdempotencyKey, &dialogue.RequestHash, &dialogue.Failure,
 		&dialogue.FailureInfo.Kind, &dialogue.FailureInfo.Retryable, &dialogue.FailureInfo.RetryAfterSeconds,
 		&dialogue.Version, &createdAt, &updatedAt, &startedAt, &finishedAt, &expiresAt); err != nil {
 		return domain.PeerDialogue{}, wrappedSQLError("scan peer dialogue", err)
@@ -683,6 +689,7 @@ func scanPeerDialogue(scanner peerDialogueScanner) (domain.PeerDialogue, error) 
 	dialogue.TriggerRunID = domain.ID(triggerRunID)
 	dialogue.TriggerKind = domain.PeerDialogueTriggerKind(triggerKind)
 	dialogue.Status = domain.PeerDialogueStatus(status)
+	dialogue.CompletionReason = domain.PeerDialogueCompletionReason(completionReason)
 	var err error
 	if dialogue.CreatedAt, err = scanTime(createdAt); err != nil {
 		return domain.PeerDialogue{}, err

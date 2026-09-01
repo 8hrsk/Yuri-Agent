@@ -618,6 +618,85 @@
   white-space: nowrap;
 }
 
+.collaboration-card__policy {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin: -3px 0 12px;
+  border: 1px solid rgba(var(--accent-rgb), 0.08);
+  border-radius: 7px;
+  background: rgba(var(--accent-rgb), 0.05);
+}
+
+.collaboration-card__policy > span {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 7px 8px;
+  background: rgba(var(--accent-rgb), 0.02);
+}
+
+.collaboration-card__policy small,
+.collaboration-card__completion small {
+  color: #6e687b;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  text-transform: uppercase;
+}
+
+.collaboration-card__policy strong {
+  overflow: hidden;
+  color: #aaa1bd;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collaboration-card__completion {
+  display: flex;
+  align-items: start;
+  gap: 7px;
+  margin: -2px 0 11px;
+  padding: 7px 8px;
+  border: 1px solid rgba(var(--mint-rgb), 0.14);
+  border-radius: 7px;
+  color: var(--mint);
+  background: rgba(var(--mint-rgb), 0.035);
+}
+
+.collaboration-card__completion > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.collaboration-card__completion strong {
+  color: #aaa9b8;
+  font-size: 8px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.collaboration-card__completion em {
+  color: #827c90;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  font-style: normal;
+}
+
+.collaboration-card__completion--max_turns,
+.collaboration-card__completion--max_tokens,
+.collaboration-card__completion--max_duration,
+.collaboration-card__completion--cancelled,
+.collaboration-card__completion--failed,
+.collaboration-card__completion--unknown {
+  border-color: rgba(217, 191, 135, 0.16);
+  color: #d9bf87;
+  background: rgba(217, 191, 135, 0.035);
+}
+
 .collaboration-card__transcript {
   border-top: 1px solid var(--line);
 }
@@ -894,5 +973,9 @@
   .collaboration-card__header {
     align-items: start;
     flex-direction: column;
+  }
+
+  .collaboration-card__policy {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

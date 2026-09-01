@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
-import type { PeerDialogue, PeerDialogueStatus, PeerRelationship, PeerRelationshipDetail, PeerRelationshipVersion } from '../lib/contracts'
+import type { PeerDialogue, PeerDialogueCompletionReason, PeerDialogueStatus, PeerRelationship, PeerRelationshipDetail, PeerRelationshipVersion } from '../lib/contracts'
 import { modelRouteLabel } from '../lib/agents'
 import {
   inferenceFailureGuidance,
@@ -35,8 +35,40 @@ function budgetLabel(used: number, max: number, unit: string): string {
   return max > 0 ? `${used.toLocaleString('ru-RU')} / ${max.toLocaleString('ru-RU')} ${unit}` : `${used.toLocaleString('ru-RU')} ${unit}`
 }
 
+function turnBudgetLabel(used: number, min: number, max: number): string {
+  if (min > 0 && max > 0) return `${used.toLocaleString('ru-RU')} · ${min.toLocaleString('ru-RU')}–${max.toLocaleString('ru-RU')}`
+  return budgetLabel(used, max, '')
+}
+
 function statusClass(status: PeerDialogueStatus): string {
   return `collaboration-status collaboration-status--${status}`
+}
+
+const completionReasonLabels: Record<PeerDialogueCompletionReason, string> = {
+  semantic: 'агент завершил диалог по смыслу',
+  implicit: 'завершено после минимального числа ходов',
+  max_turns: 'достигнут максимум ходов',
+  max_tokens: 'достигнут лимит токенов',
+  max_duration: 'истёк лимит времени',
+  cancelled: 'диалог остановлен',
+  failed: 'диалог завершился ошибкой',
+  unknown: 'причина не указана',
+}
+
+function completionReasonLabel(reason: PeerDialogueCompletionReason): string {
+  return completionReasonLabels[reason] ?? completionReasonLabels.unknown
+}
+
+function durationLabel(seconds: number): string {
+  if (seconds <= 0) return '—'
+  if (seconds < 60) return `${seconds} с`
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  return remainder === 0 ? `${minutes} мин` : `${minutes} мин ${remainder} с`
+}
+
+function limitLabel(value: number): string {
+  return value > 0 ? value.toLocaleString('ru-RU') : '—'
 }
 
 const relationshipDimensionLabels: Record<string, string> = {
@@ -145,10 +177,22 @@ function PeerDialogueCard({ dialogue, busy, onCancel, onOpenAgentPersonality, on
     </div>
 
     <div className="collaboration-card__budget" aria-label="Бюджет диалога">
-      <span><small>Ходы</small><strong>{budgetLabel(dialogue.turnCount, dialogue.maxTurns, '')}</strong></span>
+      <span><small>Ходы · диапазон мин–макс</small><strong>{turnBudgetLabel(dialogue.turnCount, dialogue.minTurns, dialogue.maxTurns)}</strong></span>
       <span><small>Токены</small><strong>{budgetLabel(dialogue.tokensUsed, dialogue.maxTokens, '')}</strong></span>
       <span><small>Режим</small><strong>tools off</strong></span>
     </div>
+
+    <div className="collaboration-card__policy" aria-label="Политика peer-диалога">
+      <span><small>Мин. ходов</small><strong>{limitLabel(dialogue.minTurns)}</strong></span>
+      <span><small>Макс. ходов</small><strong>{limitLabel(dialogue.maxTurns)}</strong></span>
+      <span><small>Время</small><strong>{durationLabel(dialogue.maxDurationSeconds)}</strong></span>
+      <span><small>Cooldown</small><strong>{durationLabel(dialogue.cooldownSeconds)}</strong></span>
+    </div>
+
+    {dialogue.completionReason && <div className={`collaboration-card__completion collaboration-card__completion--${dialogue.completionReason}`} aria-label="Причина завершения">
+      <Icon name={dialogue.completionReason === 'semantic' || dialogue.completionReason === 'implicit' ? 'check' : 'warning'} width={13} height={13} />
+      <span><small>Причина завершения</small><strong>{completionReasonLabel(dialogue.completionReason)} <em>{dialogue.completionReason}</em></strong></span>
+    </div>}
 
     <details className="collaboration-card__transcript">
       <summary><Icon name="chevron-right" width={13} height={13} /> Сообщения <span>{dialogue.messages.length}</span></summary>

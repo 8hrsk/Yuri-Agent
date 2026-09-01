@@ -8,6 +8,8 @@ import type { RunFailureKind } from './chat'
  */
 export type PeerDialogueStatus = 'queued' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled' | 'expired' | 'unknown'
 export type PeerDialogueTriggerKind = 'agent_tool' | 'autonomous' | 'unknown'
+/** Why a peer exchange stopped. Hard limits are intentionally distinct from semantic completion. */
+export type PeerDialogueCompletionReason = 'semantic' | 'implicit' | 'max_turns' | 'max_tokens' | 'max_duration' | 'cancelled' | 'failed' | 'unknown'
 
 export interface PeerDialogueMessage {
   id: string
@@ -43,9 +45,13 @@ export interface PeerDialogue {
   purpose: string
   status: PeerDialogueStatus
   turnCount: number
+  minTurns: number
   maxTurns: number
   tokensUsed: number
   maxTokens: number
+  maxDurationSeconds: number
+  cooldownSeconds: number
+  completionReason?: PeerDialogueCompletionReason
   createdAt: string
   finishedAt?: string
   failure?: string

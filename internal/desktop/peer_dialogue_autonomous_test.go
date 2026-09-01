@@ -21,9 +21,10 @@ func TestAutonomousPeerTriggerCreatesOneExplainableDialogueAndRespectsCooldown(t
 	bridge.config.Proactivity.AutonomousPeerCooldownMinutes = 120
 	bridge.config.Proactivity.QuietHoursEnabled = false
 	bridge.config.Proactivity.Timezone = "UTC"
-	backend := &delegationBackendStub{events: []agent.ModelEvent{
-		{Type: agent.ModelEventTextDelta, Delta: `{"outcome":"start","peer_agent_id":"` + peerID.String() + `","purpose":"Проверить границы плана","message":"Оцени структуру плана и назови один существенный пробел.","reason":"Независимая критика улучшит следующий шаг."}`},
-		{Type: agent.ModelEventCompleted, Usage: agent.Usage{TotalTokens: 30}},
+	backend := &delegationBackendStub{batches: [][]agent.ModelEvent{
+		{{Type: agent.ModelEventTextDelta, Delta: `{"outcome":"start","peer_agent_id":"` + peerID.String() + `","purpose":"Проверить границы плана","message":"Оцени структуру плана и назови один существенный пробел.","reason":"Независимая критика улучшит следующий шаг."}`}, {Type: agent.ModelEventCompleted, Usage: agent.Usage{TotalTokens: 30}}},
+		{{Type: agent.ModelEventTextDelta, Delta: `{"message":"Не хватает критерия завершения.","outcome":"complete"}`}, {Type: agent.ModelEventCompleted, Usage: agent.Usage{TotalTokens: 20}}},
+		{{Type: agent.ModelEventTextDelta, Delta: `{"message":"Согласна, зафиксируем измеримый критерий.","outcome":"complete"}`}, {Type: agent.ModelEventCompleted, Usage: agent.Usage{TotalTokens: 20}}},
 	}}
 	turn := memory.Turn{RunID: parent.ID, AgentID: initiatorID, ConversationID: parent.ConversationID, Now: time.Now().UTC(), Messages: []memory.TranscriptMessage{{ID: "turn-user", ConversationID: parent.ConversationID, Role: "user", Content: "Помоги составить сложный план исследования", CreatedAt: time.Now().UTC()}}}
 
@@ -37,7 +38,7 @@ func TestAutonomousPeerTriggerCreatesOneExplainableDialogueAndRespectsCooldown(t
 		t.Fatalf("autonomous dialogues=%#v err=%v", dialogues, err)
 	}
 	got := dialogues[0]
-	if got.TriggerKind != domain.PeerDialogueTriggerAutonomous || got.TriggerReason != "Независимая критика улучшит следующий шаг." || got.Status != domain.PeerDialogueCompleted {
+	if got.TriggerKind != domain.PeerDialogueTriggerAutonomous || got.TriggerReason != "Независимая критика улучшит следующий шаг." || got.Status != domain.PeerDialogueCompleted || got.CompletionReason != domain.PeerDialogueCompletionSemantic || got.TurnCount != 2 {
 		t.Fatalf("autonomous dialogue provenance=%#v", got)
 	}
 
@@ -45,7 +46,7 @@ func TestAutonomousPeerTriggerCreatesOneExplainableDialogueAndRespectsCooldown(t
 	if err != nil || started {
 		t.Fatalf("cooldown trigger started=%t err=%v", started, err)
 	}
-	if requests := backend.snapshot(); len(requests) != 2 {
+	if requests := backend.snapshot(); len(requests) != 3 {
 		t.Fatalf("cooldown called model again: requests=%d", len(requests))
 	}
 	views, err := bridge.ListPeerDialogues(PeerDialogueListInput{Limit: 10})
@@ -68,8 +69,12 @@ func TestAutonomousPeerDialogueBridgeLifecycleSmoke(t *testing.T) {
 			{Type: agent.ModelEventCompleted},
 		},
 		{
-			{Type: agent.ModelEventTextDelta, Delta: "В плане не определён критерий завершения."},
+			{Type: agent.ModelEventTextDelta, Delta: `{"message":"В плане не определён критерий завершения.","outcome":"complete"}`},
 			{Type: agent.ModelEventCompleted, Usage: agent.Usage{TotalTokens: 18}},
+		},
+		{
+			{Type: agent.ModelEventTextDelta, Delta: `{"message":"Добавлю измеримый критерий и проверку результата.","outcome":"complete"}`},
+			{Type: agent.ModelEventCompleted, Usage: agent.Usage{TotalTokens: 16}},
 		},
 	}}
 	turn := memory.Turn{
@@ -82,7 +87,7 @@ func TestAutonomousPeerDialogueBridgeLifecycleSmoke(t *testing.T) {
 	}
 	bridge.background.Wait()
 	views, err := bridge.ListPeerDialogues(PeerDialogueListInput{Limit: 10})
-	if err != nil || len(views) != 1 || views[0].Status != "completed" || views[0].TriggerKind != "autonomous" || len(views[0].Messages) != 2 {
+	if err != nil || len(views) != 1 || views[0].Status != "completed" || views[0].TriggerKind != "autonomous" || len(views[0].Messages) != 3 || views[0].CompletionReason != "semantic" {
 		t.Fatalf("autonomous smoke views=%#v err=%v", views, err)
 	}
 	if views[0].TriggerReason != "Второй взгляд поможет перед следующим шагом." || views[0].Messages[1].Content != "В плане не определён критерий завершения." {

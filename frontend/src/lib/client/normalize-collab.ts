@@ -2,6 +2,7 @@ import type {
   ActivityEvent,
   ActivityStatus,
   ActivityType,
+  PeerDialogueCompletionReason,
   PeerDialogue,
   PeerDialogueMessage,
   PeerDialogueStatus,
@@ -32,6 +33,19 @@ function normalizePeerDialogueTriggerKind(value: unknown): PeerDialogueTriggerKi
   const kind = String(value ?? '').trim().toLowerCase()
   if (kind === 'agent_tool' || kind === 'tool' || kind === 'manual') return 'agent_tool'
   if (kind === 'autonomous' || kind === 'automatic' || kind === 'background') return 'autonomous'
+  return 'unknown'
+}
+
+function normalizePeerDialogueCompletionReason(value: unknown): PeerDialogueCompletionReason | undefined {
+  if (value === undefined || value === null || String(value).trim() === '') return undefined
+  const reason = String(value).trim().toLowerCase().replace(/[-\s]/g, '_')
+  if (reason === 'semantic' || reason === 'semantic_completion' || reason === 'agent_complete' || reason === 'model_complete') return 'semantic'
+  if (reason === 'implicit' || reason === 'implicit_completion' || reason === 'minimum_turns' || reason === 'min_turns') return 'implicit'
+  if (reason === 'max_turns' || reason === 'turn_limit' || reason === 'turns_limit' || reason === 'turn_budget') return 'max_turns'
+  if (reason === 'max_tokens' || reason === 'token_limit' || reason === 'tokens_limit' || reason === 'token_budget') return 'max_tokens'
+  if (reason === 'max_duration' || reason === 'max_duration_seconds' || reason === 'duration_limit' || reason === 'deadline' || reason === 'timeout' || reason === 'timed_out') return 'max_duration'
+  if (reason === 'cancelled' || reason === 'canceled' || reason === 'aborted') return 'cancelled'
+  if (reason === 'failed' || reason === 'failure' || reason === 'error') return 'failed'
   return 'unknown'
 }
 
@@ -82,9 +96,20 @@ function normalizePeerDialogue(value: unknown): PeerDialogue | undefined {
   const initiatorModel = optionalString(source, 'initiatorModel', 'initiator_model')
   const peerProviderId = optionalString(source, 'peerProviderId', 'peer_provider_id')
   const peerModel = optionalString(source, 'peerModel', 'peer_model')
+  const budget = source.budget && typeof source.budget === 'object' && !Array.isArray(source.budget)
+    ? source.budget as UnknownRecord
+    : undefined
+  const policy = source.policy && typeof source.policy === 'object' && !Array.isArray(source.policy)
+    ? source.policy as UnknownRecord
+    : undefined
+  const budgetNumber = (...keys: string[]): number | undefined =>
+    optionalNumber(source, ...keys) ?? optionalNumber(budget ?? {}, ...keys) ?? optionalNumber(policy ?? {}, ...keys)
   const failureKind = normalizeRunFailureKind(source.failureKind ?? source.failure_kind)
   const retryableValue = source.retryable ?? source.failureRetryable ?? source.failure_retryable
   const retryAfterSeconds = Math.max(0, Math.round(optionalNumber(source, 'retryAfterSeconds', 'retry_after_seconds', 'failureRetryAfterSeconds', 'failure_retry_after_seconds') ?? 0)) || undefined
+  const maxTurns = Math.max(0, Math.round(budgetNumber('maxTurns', 'max_turns', 'turnLimit', 'turn_limit') ?? 0))
+  const minTurns = Math.max(0, Math.round(budgetNumber('minTurns', 'min_turns', 'minimumTurns', 'minimum_turns', 'minTurnCount', 'min_turn_count') ?? (maxTurns > 0 ? Math.min(1, maxTurns) : 0)))
+  const completionReason = normalizePeerDialogueCompletionReason(source.completionReason ?? source.completion_reason ?? source.stopReason ?? source.stop_reason ?? source.terminationReason ?? source.termination_reason)
   return {
     id,
     initiatorAgentId,
@@ -100,9 +125,13 @@ function normalizePeerDialogue(value: unknown): PeerDialogue | undefined {
     purpose: optionalString(source, 'purpose', 'goal', 'summary') ?? 'Внутренний диалог',
     status: normalizePeerDialogueStatus(source.status ?? source.state),
     turnCount: Math.max(0, Math.round(optionalNumber(source, 'turnCount', 'turn_count', 'turns') ?? messages.length)),
-    maxTurns: Math.max(0, Math.round(optionalNumber(source, 'maxTurns', 'max_turns', 'turnLimit', 'turn_limit') ?? 0)),
+    minTurns,
+    maxTurns,
     tokensUsed: Math.max(0, Math.round(optionalNumber(source, 'tokensUsed', 'tokens_used', 'usedTokens', 'used_tokens') ?? 0)),
-    maxTokens: Math.max(0, Math.round(optionalNumber(source, 'maxTokens', 'max_tokens', 'tokenLimit', 'token_limit') ?? 0)),
+    maxTokens: Math.max(0, Math.round(budgetNumber('maxTokens', 'max_tokens', 'tokenLimit', 'token_limit') ?? 0)),
+    maxDurationSeconds: Math.max(0, Math.round(budgetNumber('maxDurationSeconds', 'max_duration_seconds', 'durationLimit', 'duration_limit') ?? 0)),
+    cooldownSeconds: Math.max(0, Math.round(budgetNumber('cooldownSeconds', 'cooldown_seconds', 'cooldown') ?? 0)),
+    ...(completionReason ? { completionReason } : {}),
     createdAt: optionalString(source, 'createdAt', 'created_at', 'timestamp') ?? nowIso(),
     finishedAt: optionalString(source, 'finishedAt', 'finished_at', 'completedAt', 'completed_at'),
     failure: optionalString(source, 'failure', 'error', 'lastError', 'last_error'),

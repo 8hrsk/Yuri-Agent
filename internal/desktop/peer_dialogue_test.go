@@ -32,11 +32,11 @@ func TestPeerDialogueToolRunsCapturedPeerInBackgroundWithoutToolsOrPrivateLeak(t
 	}
 	dialogueID, _ := result.Metadata["dialogue_id"].(string)
 	stored := waitForPeerDialogue(t, bridge, domain.ID(dialogueID), domain.PeerDialogueCompleted)
-	if stored.TurnCount != 1 || stored.TokensUsed != 24 || stored.InitiatorAgentID != initiatorID || stored.PeerAgentID != peerID {
+	if stored.TurnCount != 2 || stored.TokensUsed != 48 || stored.CompletionReason != domain.PeerDialogueCompletionImplicit || stored.InitiatorAgentID != initiatorID || stored.PeerAgentID != peerID {
 		t.Fatalf("completed dialogue=%#v", stored)
 	}
 	requests := backend.snapshot()
-	if len(requests) != 1 || len(requests[0].Tools) != 0 || len(requests[0].Messages) != 3 || requests[0].MaxOutputTokens != peerDialogueMaxOutputTokens {
+	if len(requests) != 2 || len(requests[0].Tools) != 0 || len(requests[0].Messages) != 3 || requests[0].MaxOutputTokens != peerDialogueMaxOutputTokens {
 		t.Fatalf("peer model requests=%#v", requests)
 	}
 	joinedSystem := requests[0].Messages[0].Content
@@ -51,7 +51,7 @@ func TestPeerDialogueToolRunsCapturedPeerInBackgroundWithoutToolsOrPrivateLeak(t
 		t.Fatalf("peer message crossed trust boundary: %#v", requests[0].Messages)
 	}
 	messages, err := bridge.repositories.PeerDialogueMessages.ListByDialogue(context.Background(), stored.ID, initiatorID)
-	if err != nil || len(messages) != 2 || messages[0].SenderAgentID != initiatorID || messages[1].SenderAgentID != peerID {
+	if err != nil || len(messages) != 3 || messages[0].SenderAgentID != initiatorID || messages[1].SenderAgentID != peerID || messages[2].SenderAgentID != initiatorID {
 		t.Fatalf("stored messages=%#v err=%v", messages, err)
 	}
 	if conversations, err := bridge.repositories.Conversations.ListByAgent(context.Background(), peerID); err != nil || len(conversations) != 0 {
@@ -102,7 +102,7 @@ func TestPeerDialogueToolRunsCapturedPeerInBackgroundWithoutToolsOrPrivateLeak(t
 		}
 	}
 
-	if _, err := tool.Execute(context.Background(), call); err != nil || len(backend.snapshot()) != 1 {
+	if _, err := tool.Execute(context.Background(), call); err != nil || len(backend.snapshot()) != 2 {
 		t.Fatalf("idempotent peer dialogue repeated provider: err=%v requests=%d", err, len(backend.snapshot()))
 	}
 	second := call
@@ -111,7 +111,7 @@ func TestPeerDialogueToolRunsCapturedPeerInBackgroundWithoutToolsOrPrivateLeak(t
 		t.Fatalf("cooldown error=%v", err)
 	}
 	views, err := bridge.ListPeerDialogues(PeerDialogueListInput{Limit: 10})
-	if err != nil || len(views) != 1 || len(views[0].Messages) != 2 || views[0].PeerName != "Мира" {
+	if err != nil || len(views) != 1 || len(views[0].Messages) != 3 || views[0].PeerName != "Мира" || views[0].CompletionReason != "implicit" {
 		t.Fatalf("dialogue views=%#v err=%v", views, err)
 	}
 	responseView := views[0].Messages[1]
@@ -144,7 +144,7 @@ func TestPeerDialogueToolResolvesUniquePeerNameToCanonicalID(t *testing.T) {
 	}
 	dialogueID := domain.ID(result.Metadata["dialogue_id"].(string))
 	stored := waitForPeerDialogue(t, bridge, dialogueID, domain.PeerDialogueCompleted)
-	if stored.PeerAgentID != peerID || stored.TokensUsed != 1_500 {
+	if stored.PeerAgentID != peerID || stored.TokensUsed != 3_000 || stored.TurnCount != 2 {
 		t.Fatalf("peer resolved to %q, want %q", stored.PeerAgentID, peerID)
 	}
 	wantHash := peerDialogueRequestHash(peerDialogueToolInput{PeerAgentID: peerID.String(), Purpose: "Проверить адресацию", Message: "Ответь коротко"})
@@ -172,7 +172,7 @@ func TestPeerDialogueRetriesOneTransientProviderFailure(t *testing.T) {
 	}
 	dialogueID := domain.ID(result.Metadata["dialogue_id"].(string))
 	stored := waitForPeerDialogue(t, bridge, dialogueID, domain.PeerDialogueCompleted)
-	if stored.TurnCount != 1 || stored.TokensUsed != 11 || len(backend.snapshot()) != 2 {
+	if stored.TurnCount != 2 || stored.TokensUsed != 22 || len(backend.snapshot()) != 3 {
 		t.Fatalf("retried dialogue=%#v requests=%d", stored, len(backend.snapshot()))
 	}
 	runs, err := bridge.repositories.Runs.ListByAgent(context.Background(), peerID)
@@ -205,6 +205,46 @@ func TestPeerDialogueDoesNotRetryAuthenticationFailure(t *testing.T) {
 	views, err := bridge.ListPeerDialogues(PeerDialogueListInput{Limit: 10})
 	if err != nil || len(views) != 1 || views[0].FailureKind != string(domain.RunFailureAuthentication) || views[0].Retryable {
 		t.Fatalf("failure view = %#v err=%v", views, err)
+	}
+}
+
+func TestPeerDialogueContinuesUntilHardTurnLimit(t *testing.T) {
+	bridge, initiatorID, peerID, parent := newPeerDialogueTestBridge(t)
+	backend := &delegationBackendStub{events: []agent.ModelEvent{
+		{Type: agent.ModelEventTextDelta, Delta: `{"message":"Нужно обсудить ещё один аспект.","outcome":"continue"}`},
+		{Type: agent.ModelEventCompleted, Usage: agent.Usage{TotalTokens: 10}},
+	}}
+	tool := peerDialogueAgentTool{bridge: bridge, backend: backend, model: "test-model", initiatorAgentID: initiatorID, triggerRunID: parent.ID}
+	result, err := tool.Execute(context.Background(), agent.ToolCall{
+		ID: "peer-call-max-turns", Name: peerDialogueToolID,
+		Arguments: json.RawMessage(`{"peer_agent_id":"` + string(peerID) + `","purpose":"Исчерпать диапазон ходов","message":"Продолжай, пока остаются вопросы"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := waitForPeerDialogue(t, bridge, domain.ID(result.Metadata["dialogue_id"].(string)), domain.PeerDialogueCompleted)
+	if stored.TurnCount != defaultPeerDialogueBudget.MaxTurns || stored.CompletionReason != domain.PeerDialogueCompletionMaxTurns || len(backend.snapshot()) != defaultPeerDialogueBudget.MaxTurns {
+		t.Fatalf("hard-limited dialogue=%#v requests=%d", stored, len(backend.snapshot()))
+	}
+}
+
+func TestPeerDialogueStopsAtAggregateTokenLimit(t *testing.T) {
+	bridge, initiatorID, peerID, parent := newPeerDialogueTestBridge(t)
+	backend := &delegationBackendStub{events: []agent.ModelEvent{
+		{Type: agent.ModelEventTextDelta, Delta: `{"message":"Продолжим обсуждение.","outcome":"continue"}`},
+		{Type: agent.ModelEventCompleted, Usage: agent.Usage{TotalTokens: 4_000}},
+	}}
+	tool := peerDialogueAgentTool{bridge: bridge, backend: backend, model: "test-model", initiatorAgentID: initiatorID, triggerRunID: parent.ID}
+	result, err := tool.Execute(context.Background(), agent.ToolCall{
+		ID: "peer-call-max-tokens", Name: peerDialogueToolID,
+		Arguments: json.RawMessage(`{"peer_agent_id":"` + string(peerID) + `","purpose":"Проверить общий token budget","message":"Обсуди вопрос подробно"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := waitForPeerDialogue(t, bridge, domain.ID(result.Metadata["dialogue_id"].(string)), domain.PeerDialogueCompleted)
+	if stored.TurnCount != defaultPeerDialogueBudget.MinTurns || stored.TokensUsed != defaultPeerDialogueBudget.MaxTokens || stored.CompletionReason != domain.PeerDialogueCompletionMaxTokens {
+		t.Fatalf("token-limited dialogue=%#v", stored)
 	}
 }
 

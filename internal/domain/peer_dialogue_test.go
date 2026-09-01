@@ -16,6 +16,9 @@ func TestPeerDialogueLifecycleAndBudget(t *testing.T) {
 	if dialogue.PairKey != AgentPairKey("agent-b", "agent-a") {
 		t.Fatal("pair key is not symmetric")
 	}
+	if dialogue.Budget.MinTurns != 1 {
+		t.Fatalf("legacy omitted minimum = %d, want 1", dialogue.Budget.MinTurns)
+	}
 	if err := dialogue.Transition(PeerDialogueRunning, now.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
@@ -33,6 +36,78 @@ func TestPeerDialogueLifecycleAndBudget(t *testing.T) {
 	}
 	if err := dialogue.Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPeerDialogueBudgetHasBoundedSemanticMinimum(t *testing.T) {
+	valid := PeerDialogueBudget{MinTurns: 2, MaxTurns: 8, MaxTokens: 16_000, MaxDurationSeconds: 300, CooldownSeconds: 24 * 60 * 60}
+	if !valid.Valid() {
+		t.Fatal("maximum bounded peer budget should be valid")
+	}
+	for _, invalid := range []PeerDialogueBudget{
+		{MinTurns: 0, MaxTurns: 4, MaxTokens: 100, MaxDurationSeconds: 10},
+		{MinTurns: 3, MaxTurns: 2, MaxTokens: 100, MaxDurationSeconds: 10},
+		{MinTurns: 1, MaxTurns: 9, MaxTokens: 100, MaxDurationSeconds: 10},
+	} {
+		if invalid.Valid() {
+			t.Fatalf("invalid peer budget accepted: %#v", invalid)
+		}
+	}
+}
+
+func TestPeerDialogueCompleteRequiresMinimumAndPersistsReason(t *testing.T) {
+	now := time.Date(2026, 8, 29, 18, 0, 0, 0, time.UTC)
+	dialogue, err := NewPeerDialogue("dialogue-semantic", "agent-a", "agent-b", "run-root", "Обсудить план", "call-semantic", "sha256:semantic", PeerDialogueBudget{
+		MinTurns: 2, MaxTurns: 4, MaxTokens: 2400, MaxDurationSeconds: 90, CooldownSeconds: 300,
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.Transition(PeerDialogueRunning, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.RecordTurn(100, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.Complete(PeerDialogueCompletionSemantic, now.Add(3*time.Second)); !errors.Is(err, ErrNotPermitted) {
+		t.Fatalf("semantic completion before minimum error = %v", err)
+	}
+	if dialogue.Status != PeerDialogueRunning || dialogue.CompletionReason != "" {
+		t.Fatalf("failed semantic completion mutated dialogue: %#v", dialogue)
+	}
+	if err := dialogue.RecordTurn(100, now.Add(4*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.Complete(PeerDialogueCompletionSemantic, now.Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if dialogue.Status != PeerDialogueCompleted || dialogue.CompletionReason != PeerDialogueCompletionSemantic || dialogue.FinishedAt.IsZero() {
+		t.Fatalf("semantic completion = %#v", dialogue)
+	}
+	if err := dialogue.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPeerDialogueTransitionKeepsLegacyImplicitCompletion(t *testing.T) {
+	now := time.Now().UTC()
+	dialogue, err := NewPeerDialogue("dialogue-implicit", "agent-a", "agent-b", "run-root", "purpose", "key", "hash", PeerDialogueBudget{
+		MinTurns: 1, MaxTurns: 1, MaxTokens: 1000, MaxDurationSeconds: 30, CooldownSeconds: 0,
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.Transition(PeerDialogueRunning, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.RecordTurn(1, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.Transition(PeerDialogueCompleted, now.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if dialogue.CompletionReason != PeerDialogueCompletionImplicit {
+		t.Fatalf("legacy transition reason = %q", dialogue.CompletionReason)
 	}
 }
 

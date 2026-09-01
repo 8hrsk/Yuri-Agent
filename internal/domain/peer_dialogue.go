@@ -12,7 +12,7 @@ import (
 const (
 	PeerDialoguePurposeMaxRunes = 256
 	PeerDialogueMessageMaxBytes = 16 * 1024
-	PeerDialogueMaxTurns        = 4
+	PeerDialogueMaxTurns        = 8
 )
 
 type PeerDialogueTriggerKind string
@@ -52,7 +52,31 @@ func (s PeerDialogueStatus) Terminal() bool {
 	return s == PeerDialogueCompleted || s == PeerDialogueFailed || s == PeerDialogueCancelled || s == PeerDialogueExpired
 }
 
+// PeerDialogueCompletionReason records why a completed exchange stopped. It
+// is deliberately separate from status: status says that the aggregate is
+// terminal, while this field preserves whether the peer model reached a
+// semantic conclusion or a hard resource boundary.
+type PeerDialogueCompletionReason string
+
+const (
+	PeerDialogueCompletionSemantic  PeerDialogueCompletionReason = "semantic"
+	PeerDialogueCompletionMaxTurns  PeerDialogueCompletionReason = "max_turns"
+	PeerDialogueCompletionMaxTokens PeerDialogueCompletionReason = "max_tokens"
+	PeerDialogueCompletionImplicit  PeerDialogueCompletionReason = "implicit"
+)
+
+func (reason PeerDialogueCompletionReason) Valid() bool {
+	switch reason {
+	case "", PeerDialogueCompletionSemantic, PeerDialogueCompletionMaxTurns,
+		PeerDialogueCompletionMaxTokens, PeerDialogueCompletionImplicit:
+		return true
+	default:
+		return false
+	}
+}
+
 type PeerDialogueBudget struct {
+	MinTurns           int   `json:"min_turns"`
 	MaxTurns           int   `json:"max_turns"`
 	MaxTokens          int64 `json:"max_tokens"`
 	MaxDurationSeconds int   `json:"max_duration_seconds"`
@@ -60,39 +84,46 @@ type PeerDialogueBudget struct {
 }
 
 func (b PeerDialogueBudget) Valid() bool {
-	return b.MaxTurns >= 1 && b.MaxTurns <= PeerDialogueMaxTurns &&
+	return b.MinTurns >= 1 && b.MinTurns <= b.MaxTurns && b.MaxTurns <= PeerDialogueMaxTurns &&
 		b.MaxTokens >= 1 && b.MaxTokens <= 16_000 &&
 		b.MaxDurationSeconds >= 5 && b.MaxDurationSeconds <= 300 &&
 		b.CooldownSeconds >= 0 && b.CooldownSeconds <= 24*60*60
 }
 
 type PeerDialogue struct {
-	ID               ID                      `json:"id"`
-	InitiatorAgentID ID                      `json:"initiator_agent_id"`
-	PeerAgentID      ID                      `json:"peer_agent_id"`
-	TriggerRunID     ID                      `json:"trigger_run_id"`
-	TriggerKind      PeerDialogueTriggerKind `json:"trigger_kind"`
-	TriggerReason    string                  `json:"trigger_reason"`
-	PairKey          string                  `json:"pair_key"`
-	Purpose          string                  `json:"purpose"`
-	Status           PeerDialogueStatus      `json:"status"`
-	Budget           PeerDialogueBudget      `json:"budget"`
-	TurnCount        int                     `json:"turn_count"`
-	TokensUsed       int64                   `json:"tokens_used"`
-	IdempotencyKey   string                  `json:"idempotency_key"`
-	RequestHash      string                  `json:"request_hash"`
-	Failure          string                  `json:"failure,omitempty"`
-	FailureInfo      RunFailureInfo          `json:"failure_info,omitempty"`
-	Version          uint64                  `json:"version"`
-	CreatedAt        time.Time               `json:"created_at"`
-	UpdatedAt        time.Time               `json:"updated_at"`
-	StartedAt        time.Time               `json:"started_at,omitempty"`
-	FinishedAt       time.Time               `json:"finished_at,omitempty"`
-	ExpiresAt        time.Time               `json:"expires_at"`
+	ID               ID                           `json:"id"`
+	InitiatorAgentID ID                           `json:"initiator_agent_id"`
+	PeerAgentID      ID                           `json:"peer_agent_id"`
+	TriggerRunID     ID                           `json:"trigger_run_id"`
+	TriggerKind      PeerDialogueTriggerKind      `json:"trigger_kind"`
+	TriggerReason    string                       `json:"trigger_reason"`
+	PairKey          string                       `json:"pair_key"`
+	Purpose          string                       `json:"purpose"`
+	Status           PeerDialogueStatus           `json:"status"`
+	Budget           PeerDialogueBudget           `json:"budget"`
+	CompletionReason PeerDialogueCompletionReason `json:"completion_reason,omitempty"`
+	TurnCount        int                          `json:"turn_count"`
+	TokensUsed       int64                        `json:"tokens_used"`
+	IdempotencyKey   string                       `json:"idempotency_key"`
+	RequestHash      string                       `json:"request_hash"`
+	Failure          string                       `json:"failure,omitempty"`
+	FailureInfo      RunFailureInfo               `json:"failure_info,omitempty"`
+	Version          uint64                       `json:"version"`
+	CreatedAt        time.Time                    `json:"created_at"`
+	UpdatedAt        time.Time                    `json:"updated_at"`
+	StartedAt        time.Time                    `json:"started_at,omitempty"`
+	FinishedAt       time.Time                    `json:"finished_at,omitempty"`
+	ExpiresAt        time.Time                    `json:"expires_at"`
 }
 
 func NewPeerDialogue(id, initiatorAgentID, peerAgentID, triggerRunID ID, purpose, idempotencyKey, requestHash string, budget PeerDialogueBudget, now time.Time) (PeerDialogue, error) {
 	now = now.UTC()
+	// MinTurns was added after the first peer-dialogue slice. Treat an omitted
+	// value from an old caller as the old one-turn minimum, but reject explicit
+	// negative values through the regular budget validator.
+	if budget.MinTurns == 0 {
+		budget.MinTurns = 1
+	}
 	dialogue := PeerDialogue{
 		ID: id, InitiatorAgentID: initiatorAgentID, PeerAgentID: peerAgentID, TriggerRunID: triggerRunID,
 		TriggerKind: PeerDialogueTriggerAgentTool, TriggerReason: "Агент явно запросил консультацию peer через tool.",
@@ -121,6 +152,12 @@ func (d PeerDialogue) Validate() error {
 	}
 	if !d.Status.Valid() || !d.Budget.Valid() || d.Version == 0 || d.TurnCount < 0 || d.TurnCount > d.Budget.MaxTurns || d.TokensUsed < 0 || d.TokensUsed > d.Budget.MaxTokens {
 		return fmt.Errorf("%w: invalid dialogue lifecycle or budget", ErrInvalidArgument)
+	}
+	if !d.CompletionReason.Valid() || (d.Status != PeerDialogueCompleted && d.CompletionReason != "") {
+		return fmt.Errorf("%w: invalid peer dialogue completion metadata", ErrInvalidArgument)
+	}
+	if d.CompletionReason == PeerDialogueCompletionSemantic && d.TurnCount < d.Budget.MinTurns {
+		return fmt.Errorf("%w: semantic completion requires the minimum number of turns", ErrInvalidArgument)
 	}
 	if strings.TrimSpace(d.IdempotencyKey) == "" || len(d.IdempotencyKey) > 256 || strings.TrimSpace(d.RequestHash) == "" || len(d.RequestHash) > 256 {
 		return fmt.Errorf("%w: dialogue idempotency metadata is invalid", ErrInvalidArgument)
@@ -179,6 +216,14 @@ func (d *PeerDialogue) Transition(next PeerDialogueStatus, now time.Time) error 
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, d.Status, next)
 	}
 	d.Status = next
+	if next != PeerDialogueCompleted {
+		d.CompletionReason = ""
+	} else if d.CompletionReason == "" {
+		// Keep the old Transition API source-compatible. New runtime code should
+		// call Complete with an explicit reason; implicit is the honest fallback
+		// for legacy callers that only know the terminal status.
+		d.CompletionReason = PeerDialogueCompletionImplicit
+	}
 	d.UpdatedAt = now.UTC()
 	d.Version++
 	if next == PeerDialogueRunning && d.StartedAt.IsZero() {
@@ -187,6 +232,36 @@ func (d *PeerDialogue) Transition(next PeerDialogueStatus, now time.Time) error 
 	if next.Terminal() {
 		d.FinishedAt = d.UpdatedAt
 	}
+	return nil
+}
+
+// Complete moves a running exchange to completed and records the semantic
+// stopping reason. A semantic conclusion is not allowed before MinTurns; hard
+// boundaries are intentionally accepted even if the last provider attempt
+// consumed less than the nominal budget (for example, a response would not
+// fit in the remaining token allowance).
+func (d *PeerDialogue) Complete(reason PeerDialogueCompletionReason, now time.Time) error {
+	if d == nil || now.IsZero() {
+		return fmt.Errorf("%w: dialogue and timestamp are required", ErrInvalidArgument)
+	}
+	reason = PeerDialogueCompletionReason(strings.TrimSpace(string(reason)))
+	if reason == "" || !reason.Valid() {
+		return fmt.Errorf("%w: completion reason is required and must be recognized", ErrInvalidArgument)
+	}
+	if d.TurnCount == 0 {
+		return fmt.Errorf("%w: completed dialogue requires at least one generated turn", ErrInvalidArgument)
+	}
+	if reason == PeerDialogueCompletionSemantic && d.TurnCount < d.Budget.MinTurns {
+		return fmt.Errorf("%w: semantic completion requires the minimum number of turns", ErrNotPermitted)
+	}
+	if !d.CanTransition(PeerDialogueCompleted) {
+		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, d.Status, PeerDialogueCompleted)
+	}
+	d.Status = PeerDialogueCompleted
+	d.CompletionReason = reason
+	d.UpdatedAt = now.UTC()
+	d.Version++
+	d.FinishedAt = d.UpdatedAt
 	return nil
 }
 

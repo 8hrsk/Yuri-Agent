@@ -409,3 +409,85 @@ func TestPeerDialogueSaveIsOptimisticAndRecoveryClosesInterruptedRows(t *testing
 		t.Fatal(err)
 	}
 }
+
+func TestPeerDialoguePersistsSemanticCompletionAndExpandedBounds(t *testing.T) {
+	fixture := newPeerDialogueFixture(t, "agent-a", "agent-b")
+	dialogue, initial := fixture.newDialogue(t, "dialogue-semantic-storage", "agent-a", "agent-b", fixture.runs["agent-a"].ID, "semantic-storage", fixture.now)
+	dialogue.Budget = domain.PeerDialogueBudget{
+		MinTurns: 2, MaxTurns: 8, MaxTokens: 16_000, MaxDurationSeconds: 300, CooldownSeconds: 0,
+	}
+	dialogue.ExpiresAt = fixture.now.Add(5 * time.Minute)
+	if err := fixture.repos.CreatePeerDialogueWithMessage(fixture.ctx, dialogue, initial); err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.Transition(domain.PeerDialogueRunning, fixture.now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.repos.PeerDialogues.Save(fixture.ctx, dialogue); err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.RecordTurn(200, fixture.now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.repos.PeerDialogues.Save(fixture.ctx, dialogue); err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.RecordTurn(200, fixture.now.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.repos.PeerDialogues.Save(fixture.ctx, dialogue); err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.Complete(domain.PeerDialogueCompletionSemantic, fixture.now.Add(4*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.repos.PeerDialogues.Save(fixture.ctx, dialogue); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := fixture.repos.PeerDialogues.Get(fixture.ctx, dialogue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Budget.MinTurns != 2 || loaded.Budget.MaxTurns != 8 || loaded.CompletionReason != domain.PeerDialogueCompletionSemantic {
+		t.Fatalf("loaded semantic completion = %#v", loaded)
+	}
+
+	mutated := loaded
+	mutated.Version++
+	mutated.UpdatedAt = fixture.now.Add(5 * time.Second)
+	mutated.CompletionReason = domain.PeerDialogueCompletionMaxTokens
+	if err := fixture.repos.PeerDialogues.Save(fixture.ctx, mutated); err == nil || !strings.Contains(strings.ToLower(err.Error()), "completion reason") {
+		t.Fatalf("completion reason mutation error = %v", err)
+	}
+}
+
+func TestPeerDialogueSchemaDefaultsLegacyMinimum(t *testing.T) {
+	fixture := newPeerDialogueFixture(t, "agent-a", "agent-b")
+	var minTurns, maxTurns int
+	if err := fixture.database.QueryRowContext(fixture.ctx, `
+		SELECT min_turns, max_turns FROM peer_dialogues
+		WHERE id = ''`).Scan(&minTurns, &maxTurns); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("empty dialogue probe error = %v", err)
+	}
+	// The migration keeps a default for direct legacy-shaped inserts. This is
+	// important for timestamp/backfill tooling that intentionally writes the
+	// pre-MinTurns column set before rerunning an older migration.
+	dialogue, initial := fixture.newDialogue(t, "dialogue-schema-default", "agent-a", "agent-b", fixture.runs["agent-a"].ID, "schema-default", fixture.now)
+	if _, err := fixture.database.ExecContext(fixture.ctx, `
+		INSERT INTO peer_dialogues(
+			id, initiator_agent_id, peer_agent_id, trigger_run_id, pair_key, purpose, status,
+			max_turns, max_tokens, max_duration_seconds, cooldown_seconds, turn_count, tokens_used,
+			idempotency_key, request_hash, failure, version, created_at, updated_at, expires_at
+		) VALUES (?, ?, ?, ?, ?, ?, 'queued', 8, 4000, 60, 0, 0, 0, ?, ?, '', 1, ?, ?, ?)`,
+		dialogue.ID, dialogue.InitiatorAgentID, dialogue.PeerAgentID, dialogue.TriggerRunID, dialogue.PairKey, dialogue.Purpose,
+		dialogue.IdempotencyKey, dialogue.RequestHash, formatTime(dialogue.CreatedAt), formatTime(dialogue.UpdatedAt), formatTime(dialogue.ExpiresAt)); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.database.QueryRowContext(fixture.ctx, `SELECT min_turns, max_turns FROM peer_dialogues WHERE id = ?`, dialogue.ID).Scan(&minTurns, &maxTurns); err != nil {
+		t.Fatal(err)
+	}
+	if minTurns != 1 || maxTurns != 8 {
+		t.Fatalf("legacy-shaped insert budget = %d/%d, want 1/8", minTurns, maxTurns)
+	}
+	_ = initial
+}

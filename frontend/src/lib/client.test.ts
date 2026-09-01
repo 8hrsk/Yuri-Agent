@@ -1490,8 +1490,12 @@ describe('Yuri client contract', () => {
       initiatorName: 'Юри',
       peerName: 'Мира',
       status: 'completed',
-      maxTurns: 1,
-      maxTokens: 1200,
+      minTurns: 2,
+      maxTurns: 4,
+      maxTokens: 8000,
+      maxDurationSeconds: 90,
+      cooldownSeconds: 300,
+      completionReason: 'semantic',
     })
     expect(dialogues[0]?.messages[1]).toMatchObject({ senderName: 'Мира', recipientName: 'Юри' })
 
@@ -1548,7 +1552,8 @@ describe('Yuri client contract', () => {
         initiatorAgentId: 'agent-yuri', initiatorName: 'Юри',
         peerAgentId: 'agent-mira', peerName: 'Мира', purpose: 'Сверить план.', status: 'running',
         triggerKind: 'autonomous', triggerReason: 'Нужна независимая проверка плана.',
-        turnCount: 0, maxTurns: 1, tokensUsed: 0, maxTokens: 1200,
+        turnCount: 0, minTurns: 1, maxTurns: 1, tokensUsed: 0, maxTokens: 1200,
+        maxDurationSeconds: 0, cooldownSeconds: 0,
         createdAt: '2026-08-29T09:00:00.000Z', finishedAt: undefined, failure: undefined,
         messages: [{
           id: 'message-1', sequence: 0, senderAgentId: 'agent-yuri', senderName: 'Юри',
