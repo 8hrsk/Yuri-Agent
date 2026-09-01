@@ -133,3 +133,28 @@ export interface ProviderTestResult {
   errorCode?: string
   alternative?: string
 }
+
+export interface RunUsageStatsInput {
+  from?: string
+  to?: string
+  agentId?: string
+}
+
+export interface RunUsageStatsGroup {
+  agentId: string
+  agentName?: string
+  providerId?: string
+  model?: string
+  runCount: number
+  statusCounts: Record<string, number>
+  failureKinds: Record<string, number>
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+}
+
+export interface RunUsageStats {
+  from: string
+  to: string
+  groups: RunUsageStatsGroup[]
+}

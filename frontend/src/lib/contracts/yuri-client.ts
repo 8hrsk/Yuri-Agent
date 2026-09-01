@@ -35,6 +35,8 @@ import type {
   ProviderOption,
   ProviderSnapshot,
   ProviderTestResult,
+  RunUsageStats,
+  RunUsageStatsInput,
   UsageLimits,
   WebSearchSettings,
 } from './providers'
@@ -75,6 +77,7 @@ export interface YuriClient {
   connectOpenAIProvider(settings: ProviderSettings, apiKey?: string): Promise<OpenAIModel[]>
   getOpenAIModels(providerId: string, sort?: OpenAIModelSort): Promise<OpenAIModel[]>
   setOpenAIModelFavorite(providerId: string, model: string, favorite: boolean): Promise<void>
+  getRunUsageStats(input?: RunUsageStatsInput): Promise<RunUsageStats>
   getWebSearchSettings(): Promise<WebSearchSettings>
   saveWebSearchSettings(settings: WebSearchSettings): Promise<void>
   testWebSearchSettings(settings: WebSearchSettings): Promise<ProviderTestResult>

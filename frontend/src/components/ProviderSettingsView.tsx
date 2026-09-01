@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
 import { openRouterSettings } from '../lib/client/settings'
-import type { CodexAccount, CodexModel, OpenAIModel, OpenAIModelSort, ProviderSettings, UsageLimits, WebSearchSettings } from '../lib/contracts'
+import type { CodexAccount, CodexModel, OpenAIModel, OpenAIModelSort, ProviderSettings, RunUsageStats, UsageLimits, WebSearchSettings } from '../lib/contracts'
 import { EncryptedBackupCard } from './EncryptedBackupCard'
 import { Icon } from './Icon'
 import { OpenAIModelPicker } from './OpenAIModelPicker'
+import { ProviderUsageStats, type UsageWindowDays } from './ProviderUsageStats'
 
 type ProviderSettingsViewProps = {
   onBackToChat: () => void
@@ -61,6 +62,11 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
   const [codex, setCodex] = useState<CodexAccount>({ connected: false })
   const [codexModels, setCodexModels] = useState<CodexModel[]>([])
   const [limits, setLimits] = useState<UsageLimits>()
+  const [usageStats, setUsageStats] = useState<RunUsageStats>()
+  const [usageWindowDays, setUsageWindowDays] = useState<UsageWindowDays>(30)
+  const [usageLoading, setUsageLoading] = useState(true)
+  const [usageError, setUsageError] = useState<string>()
+  const [usageRefreshToken, setUsageRefreshToken] = useState(0)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -89,6 +95,24 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
     })
     return () => { mounted = false }
   }, [client])
+
+  useEffect(() => {
+    let mounted = true
+    const to = new Date()
+    const from = new Date(to.getTime() - usageWindowDays * 24 * 60 * 60 * 1000)
+    setUsageLoading(true)
+    void client.getRunUsageStats({ from: from.toISOString(), to: to.toISOString() }).then((next) => {
+      if (!mounted) return
+      setUsageStats(next)
+      setUsageError(undefined)
+    }).catch((cause) => {
+      if (!mounted) return
+      setUsageError(cause instanceof Error ? cause.message : 'Не удалось загрузить статистику использования.')
+    }).finally(() => {
+      if (mounted) setUsageLoading(false)
+    })
+    return () => { mounted = false }
+  }, [client, usageRefreshToken, usageWindowDays])
 
   const updateSettings = <K extends keyof ProviderSettings>(key: K, value: ProviderSettings[K]) => {
     setSettings((current) => {
@@ -285,6 +309,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
       </div>
 
       {loading ? <div className="settings-loading" role="status">Загружаю конфигурацию…</div> : (
+        <>
         <div className="settings-grid">
           <section aria-labelledby="provider-form-title" className="settings-card">
             <div className="settings-card__heading">
@@ -361,6 +386,8 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
             <div className="settings-note settings-note--muted"><span className="settings-note__icon"><Icon name="spark" width={17} height={17} /></span><div><strong>OpenAI-compatible</strong><p>Подходит для OpenAI, локальных прокси и других endpoint с Chat Completions/Responses-style API.</p></div></div>
           </aside>
         </div>
+        <ProviderUsageStats error={usageError} loading={usageLoading} onDaysChange={setUsageWindowDays} onRefresh={() => setUsageRefreshToken((current) => current + 1)} stats={usageStats} windowDays={usageWindowDays} />
+        </>
       )}
       {!loading && <EncryptedBackupCard client={client} />}
       {feedback && <div className={`settings-feedback settings-feedback--${feedback.kind}`} role="status"><Icon name={feedback.kind === 'success' ? 'check' : 'warning'} width={15} height={15} /> {feedback.text}</div>}

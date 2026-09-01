@@ -54,6 +54,8 @@ import type {
   ProviderOption,
   ProviderSnapshot,
   ProviderTestResult,
+  RunUsageStats,
+  RunUsageStatsInput,
   RunResult,
   Schedule,
   ScheduleInput,
@@ -421,6 +423,41 @@ class MockYuriClient implements YuriClient {
     if (favorite) favorites.add(model)
     else favorites.delete(model)
     this.provider = { ...this.provider, openAI: { ...settings, favoriteModels: [...favorites] } }
+  }
+
+  async getRunUsageStats(input: RunUsageStatsInput = {}): Promise<RunUsageStats> {
+    const to = input.to ?? nowIso()
+    const from = input.from ?? new Date(Date.parse(to) - 30 * 24 * 60 * 60 * 1000).toISOString()
+    return {
+      from,
+      to,
+      groups: [
+        {
+          agentId: 'agent-emily',
+          agentName: 'Emily',
+          providerId: 'openrouter',
+          model: 'openrouter/free',
+          runCount: 12,
+          statusCounts: { completed: 10, failed: 2 },
+          failureKinds: { provider: 1, rate_limit: 1 },
+          inputTokens: 18_240,
+          outputTokens: 7_680,
+          totalTokens: 25_920,
+        },
+        {
+          agentId: 'agent-yuri',
+          agentName: 'Yuri',
+          providerId: 'codex',
+          model: 'gpt-5.6-sol',
+          runCount: 7,
+          statusCounts: { completed: 7 },
+          failureKinds: {},
+          inputTokens: 12_400,
+          outputTokens: 5_920,
+          totalTokens: 18_320,
+        },
+      ],
+    }
   }
 
   async getWebSearchSettings(): Promise<WebSearchSettings> {

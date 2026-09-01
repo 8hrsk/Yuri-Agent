@@ -145,6 +145,9 @@ export type {
   OnboardingState,
   OnboardingResult,
   ProviderTestResult,
+  RunUsageStatsInput,
+  RunUsageStatsGroup,
+  RunUsageStats,
   WebSearchSettings,
 } from './contracts/providers'
 export type {

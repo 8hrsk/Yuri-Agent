@@ -51,6 +51,8 @@ import type {
   ProviderOption,
   ProviderSnapshot,
   ProviderTestResult,
+  RunUsageStats,
+  RunUsageStatsInput,
   RunResult,
   Schedule,
   ScheduleInput,
@@ -68,6 +70,7 @@ import { normalizeActivityList, normalizePeerDialogueList, normalizePeerRelation
 import { normalizeChatHistoryPage, normalizeConversation, normalizeConversationList } from './normalize-conversation'
 import { normalizeArchiveResponse, normalizeMemory, normalizeMemoryList } from './normalize-memory'
 import { normalizePlugin, normalizePluginInspection, normalizePluginList } from './normalize-plugins'
+import { normalizeRunUsageStats } from './normalize-usage'
 import {
   normalizeJobRun,
   normalizeJobRunList,
@@ -484,6 +487,11 @@ class WailsYuriClient implements YuriClient {
 
   async setOpenAIModelFavorite(providerId: string, model: string, favorite: boolean): Promise<void> {
     await callBridge(['SetProviderModelFavorite'], [{ providerId, model, favorite }])
+  }
+
+  async getRunUsageStats(input: RunUsageStatsInput = {}): Promise<RunUsageStats> {
+    const value = await callBridge<unknown>(['GetRunUsageStats'], [input])
+    return normalizeRunUsageStats(value, input)
   }
 
   async getWebSearchSettings(): Promise<WebSearchSettings> {
