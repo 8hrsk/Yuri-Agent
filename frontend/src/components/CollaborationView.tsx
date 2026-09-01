@@ -4,6 +4,12 @@ import { createYuriClient } from '../lib/client'
 import type { AgentProfile, ManualPeerDialogueInput, PeerDialogue, PeerDialogueBudgetRecommendation, PeerDialogueCompletionReason, PeerDialogueStatus, PeerRelationship, PeerRelationshipDetail, PeerRelationshipVersion } from '../lib/contracts'
 import { modelRouteLabel } from '../lib/agents'
 import {
+  buildPeerBudgetCalibration,
+  peerBudgetCalibrationStatusLabel,
+  peerBudgetRecommendationVerdict,
+  peerBudgetUtilization,
+} from '../lib/peer-budget-calibration'
+import {
   inferenceFailureGuidance,
   inferenceFailureRecoveryActions,
   inferenceRecoveryActionLabels,
@@ -71,67 +77,11 @@ function limitLabel(value: number): string {
   return value > 0 ? value.toLocaleString('ru-RU') : '—'
 }
 
-function utilization(used: number, limit: number): number {
-  return limit > 0 ? Math.max(0, used / limit) : 0
-}
-
-function recommendationVerdict(dialogue: PeerDialogue): string {
-  if (!dialogue.finishedAt) return 'Фактический расход ещё собирается.'
-  if (dialogue.completionReason === 'max_turns' || dialogue.completionReason === 'max_tokens' || dialogue.completionReason === 'max_duration') {
-    return 'Рекомендация оказалась тесной: диалог упёрся в жёсткий лимит.'
-  }
-  const recommendation = dialogue.recommendation
-  if (!recommendation) return ''
-  const peak = Math.max(
-    utilization(dialogue.turnCount, recommendation.maxTurns),
-    utilization(dialogue.tokensUsed, recommendation.maxTokens),
-    utilization(dialogue.durationUsedSeconds, recommendation.maxDurationSeconds),
-  )
-  return peak <= 0.5
-    ? 'Запас рекомендации оказался высоким; этот маршрут можно калибровать вниз.'
-    : 'Рекомендация попала в рабочий диапазон.'
-}
-
 const recommendationBasisLabels = {
   purpose_only: 'цель без истории',
   pair_history: 'история этой пары',
   similar_history: 'похожие диалоги',
 } as const
-
-function historicalAgentRoute(dialogue: PeerDialogue, agentId: string, providerId?: string, model?: string): string {
-  const historical = [...dialogue.messages].reverse().find((message) => message.senderAgentId === agentId && (message.providerId || message.model))
-  return modelRouteLabel(historical?.providerId ?? providerId, historical?.model ?? model)
-}
-
-type RecommendationCalibration = {
-  route: string
-  samples: number
-  hardStops: number
-  turnUtilization: number
-  tokenUtilization: number
-  durationUtilization: number
-}
-
-function buildRecommendationCalibration(dialogues: PeerDialogue[]): RecommendationCalibration[] {
-  const groups = new Map<string, RecommendationCalibration>()
-  for (const dialogue of dialogues) {
-    if (dialogue.status !== 'completed' || dialogue.budgetOrigin !== 'owner_recommendation' || !dialogue.recommendation) continue
-    const route = `${historicalAgentRoute(dialogue, dialogue.initiatorAgentId, dialogue.initiatorProviderId, dialogue.initiatorModel)} ↔ ${historicalAgentRoute(dialogue, dialogue.peerAgentId, dialogue.peerProviderId, dialogue.peerModel)}`
-    const current = groups.get(route) ?? { route, samples: 0, hardStops: 0, turnUtilization: 0, tokenUtilization: 0, durationUtilization: 0 }
-    current.samples += 1
-    current.turnUtilization += utilization(dialogue.turnCount, dialogue.recommendation.maxTurns)
-    current.tokenUtilization += utilization(dialogue.tokensUsed, dialogue.recommendation.maxTokens)
-    current.durationUtilization += utilization(dialogue.durationUsedSeconds, dialogue.recommendation.maxDurationSeconds)
-    if (dialogue.completionReason === 'max_turns' || dialogue.completionReason === 'max_tokens' || dialogue.completionReason === 'max_duration') current.hardStops += 1
-    groups.set(route, current)
-  }
-  return [...groups.values()].map((group) => ({
-    ...group,
-    turnUtilization: group.turnUtilization / group.samples,
-    tokenUtilization: group.tokenUtilization / group.samples,
-    durationUtilization: group.durationUtilization / group.samples,
-  })).sort((a, b) => b.samples - a.samples || a.route.localeCompare(b.route))
-}
 
 function peerBudgetDefaults(agent?: AgentProfile): Pick<ManualPeerDialogueInput, 'maxTurns' | 'maxTokens' | 'maxDurationSeconds'> {
   if (agent?.executionBudget === 'efficient') return { maxTurns: 2, maxTokens: 4_000, maxDurationSeconds: 45 }
@@ -258,11 +208,11 @@ function PeerDialogueCard({ dialogue, busy, onCancel, onOpenAgentPersonality, on
     </div>
 
     {dialogue.budgetOrigin === 'owner_recommendation' && dialogue.recommendation && <section className="collaboration-card__recommendation-result" aria-label="Рекомендация и фактический расход">
-      <header><div><small>RECOMMENDATION → ACTUAL</small><strong>{recommendationVerdict(dialogue)}</strong></div><span>{recommendationBasisLabels[dialogue.recommendation.basis]} · {dialogue.recommendation.sampleCount} прим.</span></header>
+      <header><div><small>RECOMMENDATION → ACTUAL</small><strong>{peerBudgetRecommendationVerdict(dialogue)}</strong></div><span>{recommendationBasisLabels[dialogue.recommendation.basis]} · {dialogue.recommendation.sampleCount} прим.</span></header>
       <div className="collaboration-card__recommendation-metrics">
-        <span><small>Ходы</small><strong>{dialogue.turnCount} / {dialogue.recommendation.maxTurns}</strong><i><b style={{ width: percent(utilization(dialogue.turnCount, dialogue.recommendation.maxTurns)) }} /></i></span>
-        <span><small>Токены</small><strong>{dialogue.tokensUsed.toLocaleString('ru-RU')} / {dialogue.recommendation.maxTokens.toLocaleString('ru-RU')}</strong><i><b style={{ width: percent(utilization(dialogue.tokensUsed, dialogue.recommendation.maxTokens)) }} /></i></span>
-        <span><small>Время</small><strong>{durationLabel(dialogue.durationUsedSeconds)} / {durationLabel(dialogue.recommendation.maxDurationSeconds)}</strong><i><b style={{ width: percent(utilization(dialogue.durationUsedSeconds, dialogue.recommendation.maxDurationSeconds)) }} /></i></span>
+        <span><small>Ходы</small><strong>{dialogue.turnCount} / {dialogue.recommendation.maxTurns}</strong><i><b style={{ width: percent(peerBudgetUtilization(dialogue.turnCount, dialogue.recommendation.maxTurns)) }} /></i></span>
+        <span><small>Токены</small><strong>{dialogue.tokensUsed.toLocaleString('ru-RU')} / {dialogue.recommendation.maxTokens.toLocaleString('ru-RU')}</strong><i><b style={{ width: percent(peerBudgetUtilization(dialogue.tokensUsed, dialogue.recommendation.maxTokens)) }} /></i></span>
+        <span><small>Время</small><strong>{durationLabel(dialogue.durationUsedSeconds)} / {durationLabel(dialogue.recommendation.maxDurationSeconds)}</strong><i><b style={{ width: percent(peerBudgetUtilization(dialogue.durationUsedSeconds, dialogue.recommendation.maxDurationSeconds)) }} /></i></span>
       </div>
     </section>}
 
@@ -360,7 +310,7 @@ export function CollaborationView({ activeAgentId, onOpenAgentPersonality, onOpe
   }, [activeAgentId, dialogues])
 
   const runningCount = visibleDialogues.filter((dialogue) => dialogue.status === 'queued' || dialogue.status === 'running' || dialogue.status === 'cancelling').length
-  const recommendationCalibration = useMemo(() => buildRecommendationCalibration(visibleDialogues), [visibleDialogues])
+  const recommendationCalibration = useMemo(() => buildPeerBudgetCalibration(visibleDialogues), [visibleDialogues])
 
   const markBusy = (id: string, value: boolean) => setBusyIds((current) => {
     const next = new Set(current)
@@ -503,6 +453,7 @@ export function CollaborationView({ activeAgentId, onOpenAgentPersonality, onOpe
       <div className="peer-budget-calibration__heading"><div><span className="section-heading__overline">RECOMMENDATION CALIBRATION</span><h2 id="peer-budget-calibration-title">Рекомендации по маршрутам</h2></div><small>Только завершённые запуски с применённой рекомендацией</small></div>
       <div className="peer-budget-calibration__grid">{recommendationCalibration.map((group) => <article key={group.route}>
         <header><strong>{group.route}</strong><span>{group.samples} {group.samples === 1 ? 'пример' : 'примеров'}</span></header>
+        <p className={`peer-budget-calibration__status peer-budget-calibration__status--${group.status}`}>{peerBudgetCalibrationStatusLabel(group)}</p>
         <div><span><small>Ходы</small><strong>{percent(group.turnUtilization)}</strong></span><span><small>Токены</small><strong>{percent(group.tokenUtilization)}</strong></span><span><small>Время</small><strong>{percent(group.durationUtilization)}</strong></span><span><small>Жёсткие стопы</small><strong>{group.hardStops} / {group.samples}</strong></span></div>
       </article>)}</div>
     </section>}

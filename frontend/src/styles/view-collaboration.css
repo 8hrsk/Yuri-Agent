@@ -249,6 +249,28 @@
   font-size: 7px;
 }
 
+.peer-budget-calibration__status {
+  margin: 8px 0 0;
+  color: #9e94b5;
+  font-size: 8px;
+}
+
+.peer-budget-calibration__status--collecting {
+  color: #9b91ad;
+}
+
+.peer-budget-calibration__status--balanced {
+  color: var(--mint);
+}
+
+.peer-budget-calibration__status--roomy {
+  color: #c4ad77;
+}
+
+.peer-budget-calibration__status--tight {
+  color: var(--rose);
+}
+
 .peer-budget-calibration article > div {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

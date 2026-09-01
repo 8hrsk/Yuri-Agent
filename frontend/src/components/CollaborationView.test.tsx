@@ -249,6 +249,7 @@ describe('Collaboration peer relationships', () => {
     expect(calibration).not.toBeNull()
     expect(calibration).toHaveTextContent('codex · gpt-5.6 ↔ openrouter · openrouter/free')
     expect(calibration).toHaveTextContent('1 пример')
+    expect(calibration).toHaveTextContent('Собираем выборку: 1 из 5')
     expect(calibration).toHaveTextContent('Ходы67%')
     expect(calibration).toHaveTextContent('Токены43%')
     expect(calibration).toHaveTextContent('Время64%')
