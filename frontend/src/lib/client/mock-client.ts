@@ -40,6 +40,7 @@ import type {
   PeerDialogue,
   PeerDialogueListOptions,
   ManualPeerDialogueInput,
+  PeerDialogueBudgetRecommendation,
   PeerDialogueStart,
   PeerRelationship,
   PeerRelationshipDetail,
@@ -911,6 +912,37 @@ class MockYuriClient implements YuriClient {
       }
     })
     return dialogues.slice(0, limit).map(clonePeerDialogue)
+  }
+
+  async recommendPeerDialogueBudget(peerAgentId: string, purpose: string): Promise<PeerDialogueBudgetRecommendation> {
+    const initiator = this.activeAgentId ? this.agents.get(this.activeAgentId) : undefined
+    const peer = this.agents.get(peerAgentId)
+    if (!initiator || !peer || initiator.id === peer.id || !purpose.trim()) throw new Error('Выберите peer и укажите цель.')
+    const ceiling = initiator.executionBudget === 'efficient'
+      ? { minTurns: 1, maxTurns: 2, maxTokens: 4_000, maxDurationSeconds: 45 }
+      : initiator.executionBudget === 'extended'
+        ? { minTurns: 2, maxTurns: 6, maxTokens: 12_000, maxDurationSeconds: 180 }
+        : { minTurns: 2, maxTurns: 4, maxTokens: 8_000, maxDurationSeconds: 90 }
+    const length = [...purpose.trim()].length
+    const targetTurns = Math.min(ceiling.maxTurns, length > 140 ? ceiling.maxTurns : ceiling.minTurns + (length > 55 ? 1 : 0))
+    const pairHistory = this.peerDialogues.filter((dialogue) => dialogue.status === 'completed' &&
+      [dialogue.initiatorAgentId, dialogue.peerAgentId].includes(initiator.id) &&
+      [dialogue.initiatorAgentId, dialogue.peerAgentId].includes(peer.id)).slice(0, 8)
+    const observedTurns = pairHistory.reduce((largest, dialogue) => Math.max(largest, dialogue.turnCount), 0)
+    const observedTokens = pairHistory.reduce((largest, dialogue) => Math.max(largest, dialogue.tokensUsed), 0)
+    const maxTurns = Math.min(ceiling.maxTurns, Math.max(targetTurns, observedTurns))
+    const recommended = {
+      minTurns: Math.min(ceiling.minTurns, maxTurns), maxTurns,
+      maxTokens: Math.min(ceiling.maxTokens, Math.max(maxTurns * 2_000 + 1_000, observedTokens > 0 ? Math.round(observedTokens * 1.25 + 500) : 0)),
+      maxDurationSeconds: Math.min(ceiling.maxDurationSeconds, maxTurns * 20 + 10),
+    }
+    return {
+      recommended, ceiling, basis: pairHistory.length > 0 ? 'pair_history' : 'purpose_only', sampleCount: pairHistory.length,
+      confidence: pairHistory.length >= 3 ? 'high' : pairHistory.length > 0 ? 'medium' : 'low',
+      rationale: pairHistory.length > 0
+        ? `Учтены последние завершённые диалоги этой пары: ${pairHistory.length}.`
+        : 'Завершённой истории этой пары пока недостаточно; оценка построена по длине и структуре цели.',
+    }
   }
 
   async startPeerDialogue(input: ManualPeerDialogueInput): Promise<PeerDialogueStart> {

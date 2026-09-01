@@ -82,6 +82,25 @@ export interface PeerDialogueStart {
   maxDurationSeconds: number
 }
 
+export interface PeerDialogueBudget {
+  minTurns: number
+  maxTurns: number
+  maxTokens: number
+  maxDurationSeconds: number
+}
+
+export type PeerDialogueRecommendationBasis = 'purpose_only' | 'pair_history' | 'similar_history'
+export type PeerDialogueRecommendationConfidence = 'low' | 'medium' | 'high'
+
+export interface PeerDialogueBudgetRecommendation {
+  recommended: PeerDialogueBudget
+  ceiling: PeerDialogueBudget
+  basis: PeerDialogueRecommendationBasis
+  sampleCount: number
+  confidence: PeerDialogueRecommendationConfidence
+  rationale: string
+}
+
 /** The active agent's directional, subjective relationship to one peer. */
 export interface PeerRelationship {
   observerAgentId: string

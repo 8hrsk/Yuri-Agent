@@ -16,6 +16,7 @@ import type {
   PeerDialogue,
   PeerDialogueListOptions,
   ManualPeerDialogueInput,
+  PeerDialogueBudgetRecommendation,
   PeerDialogueStart,
   PeerRelationship,
   PeerRelationshipDetail,
@@ -137,6 +138,7 @@ export interface YuriClient {
   deleteSchedule(scheduleId: string): Promise<void>
   listJobRuns(options?: JobRunListOptions): Promise<JobRun[]>
   listPeerDialogues(options?: PeerDialogueListOptions): Promise<PeerDialogue[]>
+  recommendPeerDialogueBudget(peerAgentId: string, purpose: string): Promise<PeerDialogueBudgetRecommendation>
   startPeerDialogue(input: ManualPeerDialogueInput): Promise<PeerDialogueStart>
   cancelPeerDialogue(dialogueId: string): Promise<void>
   listPeerRelationships(options?: PeerRelationshipListOptions): Promise<PeerRelationship[]>

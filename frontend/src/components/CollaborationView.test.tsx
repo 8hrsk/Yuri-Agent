@@ -36,6 +36,41 @@ let clientStub: YuriClient
 vi.mock('../lib/client', () => ({ createYuriClient: () => clientStub }))
 
 describe('Collaboration peer relationships', () => {
+  it('applies a read-only adaptive budget recommendation before launch', async () => {
+    const recommendPeerDialogueBudget = vi.fn(async () => ({
+      recommended: { minTurns: 2, maxTurns: 3, maxTokens: 6500, maxDurationSeconds: 70 },
+      ceiling: { minTurns: 2, maxTurns: 4, maxTokens: 8000, maxDurationSeconds: 90 },
+      basis: 'similar_history' as const, sampleCount: 3, confidence: 'high' as const,
+      rationale: 'Учтены похожие завершённые диалоги этой пары: 3.',
+    }))
+    clientStub = {
+      mode: 'mock',
+      listAgents: async () => [
+        { id: 'agent-yuri', name: 'Юри', gender: 'female', preferences: '', backstory: '', traits: {}, active: true, executionBudget: 'balanced', createdAt: '2026-08-30T09:00:00Z', updatedAt: '2026-08-30T09:00:00Z' },
+        { id: 'agent-mira', name: 'Мира', gender: 'female', preferences: '', backstory: '', traits: {}, active: false, executionBudget: 'efficient', createdAt: '2026-08-30T09:00:00Z', updatedAt: '2026-08-30T09:00:00Z' },
+      ],
+      listPeerDialogues: async () => [],
+      listPeerRelationships: async () => [],
+      recommendPeerDialogueBudget,
+    } as unknown as YuriClient
+    const user = userEvent.setup()
+    render(<CollaborationView activeAgentId="agent-yuri" />)
+
+    await user.type(await screen.findByRole('textbox', { name: 'Цель' }), 'Проверить архитектуру')
+    await user.click(screen.getByRole('button', { name: 'Подобрать лимит' }))
+
+    await waitFor(() => expect(recommendPeerDialogueBudget).toHaveBeenCalledWith('agent-mira', 'Проверить архитектуру'))
+    expect(screen.getByRole('spinbutton', { name: 'Макс. ходов' })).toHaveValue(3)
+    expect(screen.getByRole('spinbutton', { name: 'Макс. токенов' })).toHaveValue(6500)
+    expect(screen.getByRole('spinbutton', { name: 'Макс. время, сек.' })).toHaveValue(70)
+    expect(screen.getByText(/Уверенность: высокая · примеров: 3/)).toBeInTheDocument()
+    expect(screen.getByText(/Жёсткий потолок: ходы 4 · токены 8 000 · время 1 мин 30 с/)).toBeInTheDocument()
+
+    await user.clear(screen.getByRole('spinbutton', { name: 'Макс. токенов' }))
+    await user.type(screen.getByRole('spinbutton', { name: 'Макс. токенов' }), '6000')
+    expect(screen.queryByText('Рекомендация применена')).not.toBeInTheDocument()
+  })
+
   it('starts an owner-initiated exchange with an explicit narrowing budget', async () => {
     const startPeerDialogue = vi.fn(async () => ({ id: 'manual-1', minTurns: 1, maxTurns: 1, maxTokens: 2000, maxDurationSeconds: 30 }))
     clientStub = {

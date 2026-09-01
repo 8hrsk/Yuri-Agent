@@ -39,6 +39,7 @@ import type {
   PeerDialogue,
   PeerDialogueListOptions,
   ManualPeerDialogueInput,
+  PeerDialogueBudgetRecommendation,
   PeerDialogueStart,
   PeerRelationship,
   PeerRelationshipDetail,
@@ -781,6 +782,37 @@ class WailsYuriClient implements YuriClient {
 
   async listPeerDialogues(options: PeerDialogueListOptions = {}): Promise<PeerDialogue[]> {
     return normalizePeerDialogueList(await callBridge<unknown>(['ListPeerDialogues'], [options]))
+  }
+
+  async recommendPeerDialogueBudget(peerAgentId: string, purpose: string): Promise<PeerDialogueBudgetRecommendation> {
+    const raw = await callBridge<unknown>(['RecommendPeerDialogueBudget'], [{ peerAgentId, purpose }])
+    if (!raw || typeof raw !== 'object') throw new Error('Backend не вернул рекомендацию бюджета.')
+    const value = raw as Record<string, unknown>
+    const normalizeBudget = (rawBudget: unknown) => {
+      if (!rawBudget || typeof rawBudget !== 'object') throw new Error('Backend вернул неполный бюджет рекомендации.')
+      const budget = rawBudget as Record<string, unknown>
+      return {
+        minTurns: Math.max(1, Math.round(Number(budget.minTurns ?? 1))),
+        maxTurns: Math.max(1, Math.round(Number(budget.maxTurns ?? 1))),
+        maxTokens: Math.max(1, Math.round(Number(budget.maxTokens ?? 1))),
+        maxDurationSeconds: Math.max(5, Math.round(Number(budget.maxDurationSeconds ?? 5))),
+      }
+    }
+    const basis = value.basis === 'similar_history' || value.basis === 'pair_history' ? value.basis : 'purpose_only'
+    const confidence = value.confidence === 'high' || value.confidence === 'medium' ? value.confidence : 'low'
+    const ceiling = normalizeBudget(value.ceiling)
+    const rawRecommended = normalizeBudget(value.recommended)
+    const recommended = {
+      minTurns: Math.min(rawRecommended.minTurns, rawRecommended.maxTurns, ceiling.minTurns),
+      maxTurns: Math.min(rawRecommended.maxTurns, ceiling.maxTurns),
+      maxTokens: Math.min(rawRecommended.maxTokens, ceiling.maxTokens),
+      maxDurationSeconds: Math.min(rawRecommended.maxDurationSeconds, ceiling.maxDurationSeconds),
+    }
+    return {
+      recommended, ceiling, basis, confidence,
+      sampleCount: Math.max(0, Math.round(Number(value.sampleCount ?? 0))),
+      rationale: String(value.rationale ?? ''),
+    }
   }
 
   async startPeerDialogue(input: ManualPeerDialogueInput): Promise<PeerDialogueStart> {

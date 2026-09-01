@@ -139,8 +139,45 @@
   background: rgba(16, 14, 30, 0.35);
 }
 
-.peer-dialogue-composer > .button {
-  justify-self: start;
+.peer-dialogue-composer__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.peer-dialogue-recommendation {
+  display: grid;
+  gap: 8px;
+  padding: 13px;
+  border: 1px solid rgba(var(--mint-rgb), 0.2);
+  border-radius: 11px;
+  background: rgba(var(--mint-rgb), 0.035);
+}
+
+.peer-dialogue-recommendation > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.peer-dialogue-recommendation strong {
+  color: var(--mint);
+  font-size: 10px;
+}
+
+.peer-dialogue-recommendation span,
+.peer-dialogue-recommendation small {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+
+.peer-dialogue-recommendation p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 9px;
+  line-height: 1.55;
 }
 
 .peer-relationship-list {
@@ -1051,7 +1088,13 @@
     justify-self: start;
   }
 
-  .peer-dialogue-composer > .button {
+  .peer-dialogue-composer__actions,
+  .peer-dialogue-recommendation > div {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .peer-dialogue-composer__actions .button {
     width: 100%;
   }
 }

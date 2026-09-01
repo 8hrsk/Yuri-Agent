@@ -1554,6 +1554,14 @@ describe('Yuri client contract', () => {
         calls.push({ name: 'StartPeerDialogue', args: [input] })
         return { id: 'peer-manual', minTurns: 1, maxTurns: 2, maxTokens: 2000, maxDurationSeconds: 30 }
       },
+      RecommendPeerDialogueBudget: (input: unknown) => {
+        calls.push({ name: 'RecommendPeerDialogueBudget', args: [input] })
+        return {
+          recommended: { minTurns: 2, maxTurns: 99, maxTokens: 99_000, maxDurationSeconds: 999 },
+          ceiling: { minTurns: 2, maxTurns: 4, maxTokens: 8_000, maxDurationSeconds: 90 },
+          basis: 'similar_history', sampleCount: 3, confidence: 'high', rationale: 'История учтена.',
+        }
+      },
       CancelPeerDialogue: (input: unknown) => { calls.push({ name: 'CancelPeerDialogue', args: [input] }) },
     }
     const previousWindow = (globalThis as { window?: unknown }).window
@@ -1578,10 +1586,16 @@ describe('Yuri client contract', () => {
       await expect(client.startPeerDialogue({ peerAgentId: 'agent-mira', purpose: 'Проверить', message: 'Привет', maxTurns: 2, maxTokens: 2000, maxDurationSeconds: 30 })).resolves.toEqual({
         id: 'peer-manual', minTurns: 1, maxTurns: 2, maxTokens: 2000, maxDurationSeconds: 30,
       })
+      await expect(client.recommendPeerDialogueBudget('agent-mira', 'Проверить')).resolves.toEqual({
+        recommended: { minTurns: 2, maxTurns: 4, maxTokens: 8_000, maxDurationSeconds: 90 },
+        ceiling: { minTurns: 2, maxTurns: 4, maxTokens: 8_000, maxDurationSeconds: 90 },
+        basis: 'similar_history', sampleCount: 3, confidence: 'high', rationale: 'История учтена.',
+      })
       await client.cancelPeerDialogue('peer-1')
       expect(calls).toEqual([
         { name: 'ListPeerDialogues', args: [{ limit: 17 }] },
         { name: 'StartPeerDialogue', args: [{ peerAgentId: 'agent-mira', purpose: 'Проверить', message: 'Привет', maxTurns: 2, maxTokens: 2000, maxDurationSeconds: 30 }] },
+        { name: 'RecommendPeerDialogueBudget', args: [{ peerAgentId: 'agent-mira', purpose: 'Проверить' }] },
         { name: 'CancelPeerDialogue', args: [{ id: 'peer-1' }] },
       ])
     } finally {

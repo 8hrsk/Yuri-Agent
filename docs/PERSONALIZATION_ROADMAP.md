@@ -396,7 +396,7 @@ P2 не начинается до готовности compiler contract. P3–P
 
 ### Другой последующий scope
 
-- динамические лимиты внутренних диалогов — реализованы два среза: per-agent `efficient|balanced|extended` управляет foreground, background, peer и subagent limits, известное context window модели только сужает budget, а Chat trace показывает фактические hard limits и usage; Collaboration позволяет владельцу вручную открыть peer exchange с верхними границами ходов, токенов и времени, которые backend пересекает с preset/model limits. Эффективный budget, semantic/hard-limit outcome и transcript остаются durable и видимыми владельцу. В backlog остаются адаптивные рекомендации лимита по цели и наблюдаемой стоимости без автономного повышения hard limits;
+- динамические лимиты внутренних диалогов — реализованы три среза: per-agent `efficient|balanced|extended` управляет foreground, background, peer и subagent limits; Collaboration позволяет владельцу вручную открыть peer exchange с сужающим override; read-only recommender предлагает лимит по структуре цели и наблюдаемым aggregate-метрикам выбранной пары без model call или скрытой мутации draft. Известное context window модели всегда только сужает budget, UI показывает рекомендацию и hard ceiling, а эффективный budget, semantic/hard-limit outcome и transcript остаются durable. В backlog остаются калибровка эвристики на dogfood-истории разных provider/model и объяснимое сравнение «рекомендация против факта» без автономного повышения hard limits;
 - Live2D/VRM и сложная мимика;
 - распознавание эмоций пользователя по голосу или камере;
 - публичный каталог готовых character profiles;

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
-import type { AgentProfile, ManualPeerDialogueInput, PeerDialogue, PeerDialogueCompletionReason, PeerDialogueStatus, PeerRelationship, PeerRelationshipDetail, PeerRelationshipVersion } from '../lib/contracts'
+import type { AgentProfile, ManualPeerDialogueInput, PeerDialogue, PeerDialogueBudgetRecommendation, PeerDialogueCompletionReason, PeerDialogueStatus, PeerRelationship, PeerRelationshipDetail, PeerRelationshipVersion } from '../lib/contracts'
 import { modelRouteLabel } from '../lib/agents'
 import {
   inferenceFailureGuidance,
@@ -241,6 +241,8 @@ export function CollaborationView({ activeAgentId, onOpenAgentPersonality, onOpe
   const [feedback, setFeedback] = useState<Feedback>()
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set())
   const [starting, setStarting] = useState(false)
+  const [recommending, setRecommending] = useState(false)
+  const [recommendation, setRecommendation] = useState<PeerDialogueBudgetRecommendation>()
   const [manualDraft, setManualDraft] = useState<ManualPeerDialogueInput>({ peerAgentId: '', purpose: '', message: '', maxTurns: 4, maxTokens: 8_000, maxDurationSeconds: 90 })
 
   const load = useCallback(async () => {
@@ -273,6 +275,7 @@ export function CollaborationView({ activeAgentId, onOpenAgentPersonality, onOpe
   useEffect(() => {
     if (!activeAgent) return
     const defaults = peerBudgetDefaults(activeAgent)
+    setRecommendation(undefined)
     setManualDraft((current) => ({
       ...current,
       peerAgentId: peerAgents.some((peer) => peer.id === current.peerAgentId) ? current.peerAgentId : peerAgents[0]?.id ?? '',
@@ -324,6 +327,30 @@ export function CollaborationView({ activeAgentId, onOpenAgentPersonality, onOpe
       setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось запустить внутренний диалог.' })
     } finally {
       setStarting(false)
+    }
+  }
+
+  const recommendManualBudget = async () => {
+    if (!manualDraft.peerAgentId || !manualDraft.purpose.trim()) {
+      setFeedback({ kind: 'error', text: 'Выберите peer и укажите цель, чтобы рассчитать лимит.' })
+      return
+    }
+    setRecommending(true)
+    setFeedback(undefined)
+    try {
+      const next = await client.recommendPeerDialogueBudget(manualDraft.peerAgentId, manualDraft.purpose.trim())
+      setRecommendation(next)
+      setManualDraft((current) => ({
+        ...current,
+        maxTurns: next.recommended.maxTurns,
+        maxTokens: next.recommended.maxTokens,
+        maxDurationSeconds: next.recommended.maxDurationSeconds,
+      }))
+    } catch (cause) {
+      setRecommendation(undefined)
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось рассчитать рекомендуемый лимит.' })
+    } finally {
+      setRecommending(false)
     }
   }
 
@@ -379,16 +406,20 @@ export function CollaborationView({ activeAgentId, onOpenAgentPersonality, onOpe
       <div className="peer-dialogue-composer__heading"><div><span className="section-heading__overline">OWNER-INITIATED EXCHANGE</span><h2 id="peer-dialogue-composer-title">Начать внутренний диалог</h2></div><small>{activeAgent.name} · {activeAgent.executionBudget ?? 'balanced'}</small></div>
       <p>Выбранные значения — потолок только этого exchange. Backend пересечёт их с preset инициатора и известными лимитами модели; расширить ресурсы через эту форму нельзя.</p>
       <div className="peer-dialogue-composer__main">
-        <label><span>Peer</span><select disabled={starting || peerAgents.length === 0} onChange={(event) => setManualDraft((current) => ({ ...current, peerAgentId: event.target.value }))} value={manualDraft.peerAgentId}><option value="">Выберите агента</option>{peerAgents.map((peer) => <option key={peer.id} value={peer.id}>{peer.name} · {modelRouteLabel(peer.providerId, peer.model)}</option>)}</select></label>
-        <label><span>Цель</span><input disabled={starting} maxLength={256} onChange={(event) => setManualDraft((current) => ({ ...current, purpose: event.target.value }))} placeholder="Например: обсудить план реализации" value={manualDraft.purpose} /></label>
+        <label><span>Peer</span><select disabled={starting || recommending || peerAgents.length === 0} onChange={(event) => { setRecommendation(undefined); setManualDraft((current) => ({ ...current, peerAgentId: event.target.value })) }} value={manualDraft.peerAgentId}><option value="">Выберите агента</option>{peerAgents.map((peer) => <option key={peer.id} value={peer.id}>{peer.name} · {modelRouteLabel(peer.providerId, peer.model)}</option>)}</select></label>
+        <label><span>Цель</span><input disabled={starting || recommending} maxLength={256} onChange={(event) => { setRecommendation(undefined); setManualDraft((current) => ({ ...current, purpose: event.target.value })) }} placeholder="Например: обсудить план реализации" value={manualDraft.purpose} /></label>
       </div>
       <label><span>Первое сообщение</span><textarea disabled={starting} maxLength={4000} onChange={(event) => setManualDraft((current) => ({ ...current, message: event.target.value }))} placeholder="Что активный агент хочет передать peer…" rows={3} value={manualDraft.message} /></label>
       <div className="peer-dialogue-composer__budget" aria-label="Лимиты ручного peer-диалога">
-        <label><span>Макс. ходов</span><input disabled={starting} max={peerBudgetDefaults(activeAgent).maxTurns} min={1} onChange={(event) => setManualDraft((current) => ({ ...current, maxTurns: Number(event.target.value) }))} type="number" value={manualDraft.maxTurns} /></label>
-        <label><span>Макс. токенов</span><input disabled={starting} max={peerBudgetDefaults(activeAgent).maxTokens} min={1} onChange={(event) => setManualDraft((current) => ({ ...current, maxTokens: Number(event.target.value) }))} step={500} type="number" value={manualDraft.maxTokens} /></label>
-        <label><span>Макс. время, сек.</span><input disabled={starting} max={peerBudgetDefaults(activeAgent).maxDurationSeconds} min={5} onChange={(event) => setManualDraft((current) => ({ ...current, maxDurationSeconds: Number(event.target.value) }))} step={5} type="number" value={manualDraft.maxDurationSeconds} /></label>
+        <label><span>Макс. ходов</span><input disabled={starting || recommending} max={peerBudgetDefaults(activeAgent).maxTurns} min={1} onChange={(event) => { setRecommendation(undefined); setManualDraft((current) => ({ ...current, maxTurns: Number(event.target.value) })) }} type="number" value={manualDraft.maxTurns} /></label>
+        <label><span>Макс. токенов</span><input disabled={starting || recommending} max={peerBudgetDefaults(activeAgent).maxTokens} min={1} onChange={(event) => { setRecommendation(undefined); setManualDraft((current) => ({ ...current, maxTokens: Number(event.target.value) })) }} step={500} type="number" value={manualDraft.maxTokens} /></label>
+        <label><span>Макс. время, сек.</span><input disabled={starting || recommending} max={peerBudgetDefaults(activeAgent).maxDurationSeconds} min={5} onChange={(event) => { setRecommendation(undefined); setManualDraft((current) => ({ ...current, maxDurationSeconds: Number(event.target.value) })) }} step={5} type="number" value={manualDraft.maxDurationSeconds} /></label>
       </div>
-      <button className="button button--accent" disabled={starting || peerAgents.length === 0 || !manualDraft.peerAgentId || !manualDraft.purpose.trim() || !manualDraft.message.trim()} onClick={() => void startManualDialogue()} type="button"><Icon name="spark" width={14} height={14} /> {starting ? 'Запускаю…' : 'Начать bounded-диалог'}</button>
+      {recommendation && <div className="peer-dialogue-recommendation" role="status"><div><strong>Рекомендация применена</strong><span>Уверенность: {recommendation.confidence === 'high' ? 'высокая' : recommendation.confidence === 'medium' ? 'средняя' : 'предварительная'} · примеров: {recommendation.sampleCount}</span></div><p>{recommendation.rationale}</p><small>Жёсткий потолок: ходы {recommendation.ceiling.maxTurns} · токены {recommendation.ceiling.maxTokens.toLocaleString('ru-RU')} · время {durationLabel(recommendation.ceiling.maxDurationSeconds)}</small></div>}
+      <div className="peer-dialogue-composer__actions">
+        <button className="button button--quiet" disabled={starting || recommending || !manualDraft.peerAgentId || !manualDraft.purpose.trim()} onClick={() => void recommendManualBudget()} type="button"><Icon name="spark" width={14} height={14} /> {recommending ? 'Рассчитываю…' : 'Подобрать лимит'}</button>
+        <button className="button button--accent" disabled={starting || recommending || peerAgents.length === 0 || !manualDraft.peerAgentId || !manualDraft.purpose.trim() || !manualDraft.message.trim()} onClick={() => void startManualDialogue()} type="button"><Icon name="relationship" width={14} height={14} /> {starting ? 'Запускаю…' : 'Начать bounded-диалог'}</button>
+      </div>
       {peerAgents.length === 0 && <small>Создайте второго именованного агента, чтобы открыть peer channel.</small>}
     </section>}
 
