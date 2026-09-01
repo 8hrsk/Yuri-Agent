@@ -222,6 +222,9 @@ function chatEventKey(event: ChatEvent): string {
     case 'run.completed':
       parts.push(event.status, event.error ?? '')
       break
+    case 'run.fallback':
+      parts.push(event.fromProviderId ?? '', event.fromModel ?? '', event.toProviderId ?? '', event.toModel ?? '', event.reason)
+      break
     case 'trace.step':
       parts.push(event.step.id, event.step.status)
       break
@@ -346,6 +349,12 @@ class WailsYuriClient implements YuriClient {
   async updateActiveAgentModelRoute(providerId: string, model: string): Promise<AgentProfile> {
     const result = normalizeAgentProfile(await callBridge<unknown>(['UpdateActiveAgentModelRoute'], [{ providerId, model }]))
     if (!result) throw new Error('Backend не подтвердил модель агента.')
+    return result
+  }
+
+  async updateActiveAgentFallbackRoute(enabled: boolean, providerId: string, model: string): Promise<AgentProfile> {
+    const result = normalizeAgentProfile(await callBridge<unknown>(['UpdateActiveAgentFallbackRoute'], [{ enabled, providerId, model }]))
+    if (!result) throw new Error('Backend не подтвердил резервный маршрут агента.')
     return result
   }
 

@@ -1,4 +1,4 @@
-import type { ApprovalRequest, RunFailureKind, RunStatus, RunTraceStep, ToolCall } from './chat'
+import type { ApprovalRequest, RunFailureKind, RunFallback, RunStatus, RunTraceStep, ToolCall } from './chat'
 
 interface ChatEventMeta {
   /** Optional on the Wails event bus; useful when several runs are active. */
@@ -29,6 +29,8 @@ export type ChatEvent =
   | ({ type: 'tool.updated'; runId: string; toolCall: ToolCall } & ChatEventMeta)
   | ({ type: 'run.status'; runId: string; status: RunStatus; label: string } & ChatEventMeta)
   | ({ type: 'run.completed'; runId: string; status: 'complete' | 'cancelled' | 'error'; error?: string } & ChatEventMeta)
+  /** A safe, provider-neutral hand-off between configured inference routes. */
+  | ({ type: 'run.fallback'; runId: string } & RunFallback & ChatEventMeta)
   /** Future backends may send a lifecycle-only trace step in one envelope. */
   | ({ type: 'trace.step'; runId: string; step: RunTraceStep } & ChatEventMeta)
 

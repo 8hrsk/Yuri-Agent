@@ -17,6 +17,8 @@ export type {
   ApprovalTraceStatus,
   ApprovalTraceStep,
   CompletionTraceStep,
+  RunFallback,
+  FallbackTraceStep,
   RunTraceStep,
   RunFailureKind,
   RunTrace,

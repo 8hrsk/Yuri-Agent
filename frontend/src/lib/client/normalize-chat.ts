@@ -1,5 +1,5 @@
 import type { ChatEvent, ChatTool, RunFailureKind } from '../contracts'
-import { normalizeApproval, normalizeRunFailureKind, normalizeRunTraceStep, normalizeToolCall } from '../chat-trace'
+import { normalizeApproval, normalizeRunFailureKind, normalizeRunFallback, normalizeRunTraceStep, normalizeToolCall } from '../chat-trace'
 import { normalizeStringList } from './normalize-plugins'
 import { normalizeBoolean, nowIso, optionalNumber, optionalString } from './primitives'
 import type { UnknownRecord } from './primitives'
@@ -14,7 +14,8 @@ function normalizeChatEvent(value: unknown): ChatEvent | undefined {
       : rawType === 'tool_start' || rawType === 'tool_started' ? 'tool.started'
         : rawType === 'tool_update' || rawType === 'tool_updated' ? 'tool.updated'
           : rawType === 'tool_complete' || rawType === 'tool_completed' || rawType === 'tool_result' || rawType === 'tool_finished' ? 'tool.updated'
-      : rawType === 'approval_waiting' || rawType === 'approval_required' ? 'approval.required'
+              : rawType === 'approval_waiting' || rawType === 'approval_required' ? 'approval.required'
+          : rawType === 'run.fallback' || rawType === 'run_fallback' || rawType === 'fallback' ? 'run.fallback'
           : rawType === 'run_step' || rawType === 'trace_step' ? 'trace.step'
             : rawType === 'status' ? 'run.status'
               : rawType === 'thinking' || rawType === 'thinking_started' ? 'run.status'
@@ -80,6 +81,10 @@ function normalizeChatEvent(value: unknown): ChatEvent | undefined {
           ? 'error'
           : 'complete'
       return { type, ...base, status, error: nested.error ? String(nested.error) : undefined }
+    }
+    case 'run.fallback': {
+      const fallback = normalizeRunFallback(nested)
+      return fallback ? { type, ...base, ...fallback } : undefined
     }
     case 'trace.step': {
       const step = normalizeRunTraceStep(nested.step, 0, runId, createdAt ?? timestamp ?? nowIso())

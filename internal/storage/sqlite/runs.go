@@ -27,6 +27,7 @@ func (r *RunRepository) Create(ctx context.Context, run domain.AgentRun) error {
 	if err := contextErr(ctx); err != nil {
 		return err
 	}
+	run = withInitialInference(run)
 	if err := validateRun(run); err != nil {
 		return err
 	}
@@ -46,14 +47,16 @@ func (r *RunRepository) Create(ctx context.Context, run domain.AgentRun) error {
 		INSERT INTO agent_runs(
 			id, agent_id, kind, conversation_id, parent_run_id, state,
 			max_steps, max_tokens, max_tool_calls, max_tool_output_bytes, max_duration_seconds,
-			provider_id, model, input_tokens, output_tokens, total_tokens,
+			provider_id, model, initial_provider_id, initial_model, input_tokens, output_tokens, total_tokens,
+			inference_route_switches,
 			failure, failure_kind, failure_retryable, failure_retry_after_seconds,
 			version, created_at, updated_at, started_at, finished_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(run.ID), string(run.AgentID), string(run.Kind), nullableID(run.ConversationID), nullableID(run.ParentRunID),
 		string(run.State), run.Budget.MaxSteps, run.Budget.MaxTokens, run.Budget.MaxToolCalls, run.Budget.MaxToolOutputBytes,
 		run.Budget.MaxDurationSeconds, strings.TrimSpace(run.Inference.ProviderID), strings.TrimSpace(run.Inference.Model),
-		run.Usage.InputTokens, run.Usage.OutputTokens, run.Usage.TotalTokens,
+		strings.TrimSpace(run.InitialInference.ProviderID), strings.TrimSpace(run.InitialInference.Model),
+		run.Usage.InputTokens, run.Usage.OutputTokens, run.Usage.TotalTokens, run.InferenceRouteSwitches,
 		nullableStringValue(run.Failure), string(run.FailureInfo.Kind), run.FailureInfo.Retryable, run.FailureInfo.RetryAfterSeconds,
 		run.Version, createdAt, updatedAt,
 		nullableTimeValue(run.StartedAt), nullableTimeValue(run.FinishedAt))
@@ -61,6 +64,7 @@ func (r *RunRepository) Create(ctx context.Context, run domain.AgentRun) error {
 }
 
 func insertRunTx(ctx context.Context, tx *sql.Tx, run domain.AgentRun) error {
+	run = withInitialInference(run)
 	createdAt, err := timeValue(run.CreatedAt)
 	if err != nil {
 		return err
@@ -73,14 +77,16 @@ func insertRunTx(ctx context.Context, tx *sql.Tx, run domain.AgentRun) error {
 		INSERT INTO agent_runs(
 			id, agent_id, kind, conversation_id, parent_run_id, state,
 			max_steps, max_tokens, max_tool_calls, max_tool_output_bytes, max_duration_seconds,
-			provider_id, model, input_tokens, output_tokens, total_tokens,
+			provider_id, model, initial_provider_id, initial_model, input_tokens, output_tokens, total_tokens,
+			inference_route_switches,
 			failure, failure_kind, failure_retryable, failure_retry_after_seconds,
 			version, created_at, updated_at, started_at, finished_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(run.ID), string(run.AgentID), string(run.Kind), nullableID(run.ConversationID), nullableID(run.ParentRunID),
 		string(run.State), run.Budget.MaxSteps, run.Budget.MaxTokens, run.Budget.MaxToolCalls, run.Budget.MaxToolOutputBytes,
 		run.Budget.MaxDurationSeconds, strings.TrimSpace(run.Inference.ProviderID), strings.TrimSpace(run.Inference.Model),
-		run.Usage.InputTokens, run.Usage.OutputTokens, run.Usage.TotalTokens,
+		strings.TrimSpace(run.InitialInference.ProviderID), strings.TrimSpace(run.InitialInference.Model),
+		run.Usage.InputTokens, run.Usage.OutputTokens, run.Usage.TotalTokens, run.InferenceRouteSwitches,
 		nullableStringValue(run.Failure), string(run.FailureInfo.Kind), run.FailureInfo.Retryable, run.FailureInfo.RetryAfterSeconds,
 		run.Version, createdAt, updatedAt,
 		nullableTimeValue(run.StartedAt), nullableTimeValue(run.FinishedAt))
@@ -104,7 +110,8 @@ func (r *RunRepository) Get(ctx context.Context, id domain.ID) (domain.AgentRun,
 // scanner and one round-trip per query.
 const runColumns = `id, agent_id, kind, conversation_id, parent_run_id, state,
 	       max_steps, max_tokens, max_tool_calls, max_tool_output_bytes, max_duration_seconds,
-	       provider_id, model, input_tokens, output_tokens, total_tokens,
+	       provider_id, model, initial_provider_id, initial_model, input_tokens, output_tokens, total_tokens,
+	       inference_route_switches,
 	       failure, failure_kind, failure_retryable, failure_retry_after_seconds,
 	       version, created_at, updated_at, started_at, finished_at`
 
@@ -126,7 +133,8 @@ func scanRun(row rowScanner) (domain.AgentRun, error) {
 	err := row.Scan(
 		&idValue, &agentID, &kind, &nullableString{Value: &conversationID}, &nullableString{Value: &parentID}, &state,
 		&run.Budget.MaxSteps, &run.Budget.MaxTokens, &run.Budget.MaxToolCalls, &run.Budget.MaxToolOutputBytes, &run.Budget.MaxDurationSeconds,
-		&run.Inference.ProviderID, &run.Inference.Model, &run.Usage.InputTokens, &run.Usage.OutputTokens, &run.Usage.TotalTokens,
+		&run.Inference.ProviderID, &run.Inference.Model, &run.InitialInference.ProviderID, &run.InitialInference.Model,
+		&run.Usage.InputTokens, &run.Usage.OutputTokens, &run.Usage.TotalTokens, &run.InferenceRouteSwitches,
 		&nullableString{Value: &failure}, &run.FailureInfo.Kind, &run.FailureInfo.Retryable, &run.FailureInfo.RetryAfterSeconds,
 		&run.Version, &createdAt, &updatedAt, &startedAt, &finishedAt)
 	if err != nil {
@@ -163,6 +171,7 @@ func (r *RunRepository) Save(ctx context.Context, run domain.AgentRun) error {
 	if err := contextErr(ctx); err != nil {
 		return err
 	}
+	run = withInitialInference(run)
 	if err := validateRun(run); err != nil {
 		return err
 	}
@@ -181,14 +190,16 @@ func (r *RunRepository) Save(ctx context.Context, run domain.AgentRun) error {
 		UPDATE agent_runs SET
 			agent_id = ?, kind = ?, conversation_id = ?, parent_run_id = ?, state = ?,
 			max_steps = ?, max_tokens = ?, max_tool_calls = ?, max_tool_output_bytes = ?, max_duration_seconds = ?,
-			provider_id = ?, model = ?, input_tokens = ?, output_tokens = ?, total_tokens = ?,
+			provider_id = ?, model = ?, initial_provider_id = ?, initial_model = ?, input_tokens = ?, output_tokens = ?, total_tokens = ?,
+			inference_route_switches = ?,
 			failure = ?, failure_kind = ?, failure_retryable = ?, failure_retry_after_seconds = ?,
 			version = ?, updated_at = ?, started_at = ?, finished_at = ?
 		WHERE id = ? AND version = ?`,
 		string(run.AgentID), string(run.Kind), nullableID(run.ConversationID), nullableID(run.ParentRunID), string(run.State),
 		run.Budget.MaxSteps, run.Budget.MaxTokens, run.Budget.MaxToolCalls, run.Budget.MaxToolOutputBytes, run.Budget.MaxDurationSeconds,
 		strings.TrimSpace(run.Inference.ProviderID), strings.TrimSpace(run.Inference.Model),
-		run.Usage.InputTokens, run.Usage.OutputTokens, run.Usage.TotalTokens,
+		strings.TrimSpace(run.InitialInference.ProviderID), strings.TrimSpace(run.InitialInference.Model),
+		run.Usage.InputTokens, run.Usage.OutputTokens, run.Usage.TotalTokens, run.InferenceRouteSwitches,
 		nullableStringValue(run.Failure), string(run.FailureInfo.Kind), run.FailureInfo.Retryable, run.FailureInfo.RetryAfterSeconds,
 		run.Version, updatedAt, nullableTimeValue(run.StartedAt), nullableTimeValue(run.FinishedAt),
 		string(run.ID), run.Version-1)
@@ -271,7 +282,7 @@ func (r *RunRepository) list(ctx context.Context, predicate string, args []any, 
 }
 
 func validateRun(run domain.AgentRun) error {
-	if run.ID.Empty() || !run.Kind.Valid() || !run.State.Valid() || !run.Budget.Valid() || !run.Inference.Valid() || !run.Usage.Valid() || !run.FailureInfo.Valid() {
+	if run.ID.Empty() || !run.Kind.Valid() || !run.State.Valid() || !run.Budget.Valid() || !run.Inference.Valid() || !run.InitialInference.Valid() || run.InferenceRouteSwitches > 1 || !run.Usage.Valid() || !run.FailureInfo.Valid() {
 		return fmt.Errorf("%w: invalid run", domain.ErrInvalidArgument)
 	}
 	if run.State != domain.RunStateFailed && run.FailureInfo.Kind != "" {
@@ -287,6 +298,16 @@ func validateRun(run domain.AgentRun) error {
 		return err
 	}
 	return nil
+}
+
+func withInitialInference(run domain.AgentRun) domain.AgentRun {
+	if strings.TrimSpace(run.InitialInference.ProviderID) == "" && strings.TrimSpace(run.InitialInference.Model) == "" {
+		run.InitialInference = domain.RunInferenceRoute{
+			ProviderID: strings.TrimSpace(run.Inference.ProviderID),
+			Model:      strings.TrimSpace(run.Inference.Model),
+		}
+	}
+	return run
 }
 
 // resolveOwnership fills the agent for legacy NewRun callers from the

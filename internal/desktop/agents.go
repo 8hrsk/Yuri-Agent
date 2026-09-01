@@ -15,18 +15,21 @@ import (
 )
 
 type AgentProfileView struct {
-	ID          string             `json:"id"`
-	Name        string             `json:"name"`
-	Age         int                `json:"age,omitempty"`
-	Gender      string             `json:"gender"`
-	Preferences string             `json:"preferences,omitempty"`
-	Backstory   string             `json:"backstory,omitempty"`
-	ProviderID  string             `json:"providerId,omitempty"`
-	Model       string             `json:"model,omitempty"`
-	Traits      map[string]float64 `json:"traits,omitempty"`
-	Active      bool               `json:"active"`
-	CreatedAt   string             `json:"createdAt"`
-	UpdatedAt   string             `json:"updatedAt"`
+	ID                 string             `json:"id"`
+	Name               string             `json:"name"`
+	Age                int                `json:"age,omitempty"`
+	Gender             string             `json:"gender"`
+	Preferences        string             `json:"preferences,omitempty"`
+	Backstory          string             `json:"backstory,omitempty"`
+	ProviderID         string             `json:"providerId,omitempty"`
+	Model              string             `json:"model,omitempty"`
+	FallbackEnabled    bool               `json:"fallbackEnabled,omitempty"`
+	FallbackProviderID string             `json:"fallbackProviderId,omitempty"`
+	FallbackModel      string             `json:"fallbackModel,omitempty"`
+	Traits             map[string]float64 `json:"traits,omitempty"`
+	Active             bool               `json:"active"`
+	CreatedAt          string             `json:"createdAt"`
+	UpdatedAt          string             `json:"updatedAt"`
 }
 
 // PersonalizationProfileView exposes the owner-authored baseline for the
@@ -51,15 +54,18 @@ type PersonalizationProfileView struct {
 }
 
 type CreateAgentInput struct {
-	Name            string                           `json:"name"`
-	Age             int                              `json:"age,omitempty"`
-	Gender          string                           `json:"gender"`
-	Preferences     string                           `json:"preferences,omitempty"`
-	Backstory       string                           `json:"backstory,omitempty"`
-	ProviderID      string                           `json:"providerId,omitempty"`
-	Model           string                           `json:"model,omitempty"`
-	Traits          map[string]float64               `json:"traits,omitempty"`
-	Personalization *CreateAgentPersonalizationInput `json:"personalization,omitempty"`
+	Name               string                           `json:"name"`
+	Age                int                              `json:"age,omitempty"`
+	Gender             string                           `json:"gender"`
+	Preferences        string                           `json:"preferences,omitempty"`
+	Backstory          string                           `json:"backstory,omitempty"`
+	ProviderID         string                           `json:"providerId,omitempty"`
+	Model              string                           `json:"model,omitempty"`
+	FallbackEnabled    bool                             `json:"fallbackEnabled,omitempty"`
+	FallbackProviderID string                           `json:"fallbackProviderId,omitempty"`
+	FallbackModel      string                           `json:"fallbackModel,omitempty"`
+	Traits             map[string]float64               `json:"traits,omitempty"`
+	Personalization    *CreateAgentPersonalizationInput `json:"personalization,omitempty"`
 }
 
 type UpdateAgentPersonalizationInput struct {
@@ -230,6 +236,15 @@ type UpdateAgentModelRouteInput struct {
 	Model      string `json:"model,omitempty"`
 }
 
+// UpdateAgentFallbackRouteInput controls the explicit per-agent fallback.
+// Disabled routes may remain configured for later use, but a partial route is
+// never accepted and enabling always requires both provider and model.
+type UpdateAgentFallbackRouteInput struct {
+	Enabled    bool   `json:"enabled"`
+	ProviderID string `json:"providerId,omitempty"`
+	Model      string `json:"model,omitempty"`
+}
+
 const maxAgentRosterContextEntries = 32
 
 func (b *Bridge) ListAgents() ([]AgentProfileView, error) {
@@ -354,6 +369,11 @@ func (b *Bridge) CreateAgent(input CreateAgentInput) (AgentProfileView, error) {
 	if err := b.validateAgentModelRoute(state.Profile.ProviderID, state.Profile.Model); err != nil {
 		return AgentProfileView{}, err
 	}
+	if state.Profile.FallbackEnabled || state.Profile.FallbackProviderID != "" || state.Profile.FallbackModel != "" {
+		if err := b.validateAgentModelRoute(state.Profile.FallbackProviderID, state.Profile.FallbackModel); err != nil {
+			return AgentProfileView{}, fmt.Errorf("fallback model route for agent %s: %w", state.Profile.Name, err)
+		}
+	}
 	if err := b.repositories.CreateAgentWithPersonalizationDefaults(ctx, state.Profile, state.Persona, state.Relationship, state.Affect, state.Personalization); err != nil {
 		return AgentProfileView{}, fmt.Errorf("initialize agent personality: %w", err)
 	}
@@ -390,6 +410,9 @@ func buildAgentCreationState(id domain.ID, input CreateAgentInput, now time.Time
 	}
 	profile.ProviderID = strings.TrimSpace(input.ProviderID)
 	profile.Model = strings.TrimSpace(input.Model)
+	profile.FallbackEnabled = input.FallbackEnabled
+	profile.FallbackProviderID = strings.TrimSpace(input.FallbackProviderID)
+	profile.FallbackModel = strings.TrimSpace(input.FallbackModel)
 	if err := profile.Validate(); err != nil {
 		return agentCreationState{}, err
 	}
@@ -453,6 +476,32 @@ func (b *Bridge) SetActiveAgent(input SelectAgentInput) (AgentProfileView, error
 		return AgentProfileView{}, err
 	}
 	persona, _ := b.repositories.Persona.Get(ctx, id)
+	return agentProfileView(profile, true, persona.Traits), nil
+}
+
+// UpdateActiveAgentFallbackRoute persists the owner's explicit fallback
+// choice. It only changes profile configuration; runtime selection is a
+// separate orchestration decision that must happen before visible output or a
+// tool side effect and must record an inference.fallback audit event.
+func (b *Bridge) UpdateActiveAgentFallbackRoute(input UpdateAgentFallbackRouteInput) (AgentProfileView, error) {
+	providerID := strings.TrimSpace(input.ProviderID)
+	model := strings.TrimSpace(input.Model)
+	if providerID != "" || model != "" {
+		if err := b.validateAgentModelRoute(providerID, model); err != nil {
+			return AgentProfileView{}, err
+		}
+	}
+	if input.Enabled && (providerID == "" || model == "") {
+		return AgentProfileView{}, fmt.Errorf("%w: enabled fallback requires a provider and model", domain.ErrInvalidArgument)
+	}
+	ctx, cancel := b.context()
+	defer cancel()
+	agentID := b.personaProfileID()
+	profile, err := b.repositories.Agents.UpdateFallbackRoute(ctx, agentID, input.Enabled, providerID, model, time.Now().UTC())
+	if err != nil {
+		return AgentProfileView{}, err
+	}
+	persona, _ := b.repositories.Persona.Get(ctx, agentID)
 	return agentProfileView(profile, true, persona.Traits), nil
 }
 
@@ -539,6 +588,7 @@ func agentProfileView(profile domain.AgentProfile, active bool, traits map[strin
 	return AgentProfileView{
 		ID: string(profile.ID), Name: profile.Name, Age: profile.Age, Gender: profile.Gender,
 		Preferences: profile.Preferences, Backstory: profile.Backstory, ProviderID: profile.ProviderID, Model: profile.Model,
+		FallbackEnabled: profile.FallbackEnabled, FallbackProviderID: profile.FallbackProviderID, FallbackModel: profile.FallbackModel,
 		Traits: copyFloatMap(traits), Active: active,
 		CreatedAt: profile.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: profile.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}

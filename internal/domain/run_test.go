@@ -136,6 +136,42 @@ func TestRunInferenceRouteAndUsageValidation(t *testing.T) {
 	}
 }
 
+func TestAgentRunSwitchInferenceRouteIsExplicitAndOneShot(t *testing.T) {
+	now := time.Date(2026, 9, 1, 15, 0, 0, 0, time.UTC)
+	run, err := NewRunForAgent("agent-fallback", "run-fallback", RunKindInteractive, "conversation-fallback", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Inference = RunInferenceRoute{ProviderID: "primary", Model: "model-a"}
+	if err := run.SwitchInferenceRoute(RunInferenceRoute{ProviderID: "fallback", Model: "model-b"}, now.Add(time.Second)); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("created run switch error = %v, want invalid transition", err)
+	}
+	if err := run.Transition(RunStateQueued, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Transition(RunStateRunning, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	version := run.Version
+	if err := run.SwitchInferenceRoute(RunInferenceRoute{ProviderID: "fallback", Model: "model-b"}, now.Add(3*time.Second)); err != nil {
+		t.Fatalf("running run switch: %v", err)
+	}
+	if run.Inference.ProviderID != "fallback" || run.Inference.Model != "model-b" || run.InferenceRouteSwitches != 1 || run.Version != version+1 {
+		t.Fatalf("switched run = %#v", run)
+	}
+	for name, route := range map[string]RunInferenceRoute{
+		"second switch": {ProviderID: "third", Model: "model-c"},
+		"same route":    {ProviderID: "fallback", Model: "model-b"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := run
+			if err := candidate.SwitchInferenceRoute(route, now.Add(4*time.Second)); err == nil {
+				t.Fatalf("second route switch accepted: %#v", route)
+			}
+		})
+	}
+}
+
 func TestRunFailureInfoIsTypedBoundedAndStoredByFailureTransition(t *testing.T) {
 	valid := RunFailureInfo{Kind: RunFailureRateLimit, Retryable: true, RetryAfterSeconds: 45}
 	if !valid.Valid() {

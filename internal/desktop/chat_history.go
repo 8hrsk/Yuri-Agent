@@ -377,6 +377,20 @@ func runTraceView(run domain.AgentRun, calls []storage.ToolCall) RunTraceView {
 	if !run.FinishedAt.IsZero() {
 		view.FinishedAt = run.FinishedAt.UTC().Format(time.RFC3339Nano)
 	}
+	if run.InferenceRouteSwitches > 0 && run.InitialInference != run.Inference {
+		fallbackAt := run.StartedAt
+		if fallbackAt.IsZero() {
+			fallbackAt = run.CreatedAt
+		}
+		view.Fallback = &RunFallbackView{
+			FromProviderID: run.InitialInference.ProviderID,
+			FromModel:      run.InitialInference.Model,
+			ToProviderID:   run.Inference.ProviderID,
+			ToModel:        run.Inference.Model,
+			Reason:         "Основной маршрут завершился provider-ошибкой",
+			CreatedAt:      fallbackAt.UTC().Format(time.RFC3339Nano),
+		}
+	}
 	for _, call := range calls {
 		view.ToolCalls = append(view.ToolCalls, storedToolCallView(call))
 	}

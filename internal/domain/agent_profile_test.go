@@ -53,3 +53,43 @@ func TestAgentProfileRejectsInvalidIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentProfileFallbackRouteIsExplicitAndComplete(t *testing.T) {
+	now := time.Now().UTC()
+	profile, err := NewAgentProfile("agent-fallback", "Эми", 21, "female", "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if route, enabled, routeErr := profile.FallbackRoute(); routeErr != nil || enabled || route != (RunInferenceRoute{}) {
+		t.Fatalf("default fallback = %#v, %v, %v", route, enabled, routeErr)
+	}
+
+	profile.FallbackProviderID = "openrouter"
+	profile.FallbackModel = "vendor/free"
+	if err := profile.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, enabled, err := profile.FallbackRoute(); err != nil || enabled {
+		t.Fatalf("configured disabled fallback = enabled %t, error %v", enabled, err)
+	}
+
+	profile.FallbackEnabled = true
+	route, enabled, err := profile.FallbackRoute()
+	if err != nil || !enabled || route.ProviderID != "openrouter" || route.Model != "vendor/free" {
+		t.Fatalf("enabled fallback = %#v, %t, %v", route, enabled, err)
+	}
+
+	for name, mutate := range map[string]func(*AgentProfile){
+		"partial provider": func(value *AgentProfile) { value.FallbackModel = "" },
+		"partial model":    func(value *AgentProfile) { value.FallbackProviderID = ""; value.FallbackModel = "vendor/free" },
+		"enabled empty":    func(value *AgentProfile) { value.FallbackProviderID = ""; value.FallbackModel = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := profile
+			mutate(&candidate)
+			if err := candidate.Validate(); err == nil {
+				t.Fatalf("Validate() accepted invalid fallback %#v", candidate)
+			}
+		})
+	}
+}

@@ -159,7 +159,15 @@ function IdentityStep({ value, update, lockedCoreIdentity = false }: { value: Ag
 function ProviderStep({ value, onChange }: { value: AgentProfileInput; onChange: (value: AgentProfileInput) => void }) {
   return <section aria-labelledby="agent-step-provider" className="agent-wizard__panel">
     <div className="agent-wizard__heading"><span>02 · MODEL</span><h3 id="agent-step-provider">Какой моделью думает агент?</h3><p>Каждый именованный агент может иметь собственный provider и model. Обезличенные субагенты наследуют маршрут вызвавшего их агента.</p></div>
-    <AgentModelRouteEditor model={value.model} onChange={(providerId, model) => onChange({ ...value, providerId, model })} providerId={value.providerId} />
+    <AgentModelRouteEditor
+      fallbackEnabled={value.fallbackEnabled}
+      fallbackModel={value.fallbackModel}
+      fallbackProviderId={value.fallbackProviderId}
+      model={value.model}
+      onChange={(providerId, model) => onChange({ ...value, providerId, model })}
+      onFallbackChange={(fallbackEnabled, fallbackProviderId, fallbackModel) => onChange({ ...value, fallbackEnabled, fallbackProviderId, fallbackModel })}
+      providerId={value.providerId}
+    />
   </section>
 }
 

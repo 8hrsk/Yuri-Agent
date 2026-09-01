@@ -5,8 +5,10 @@ import type {
   ChatEvent,
   ChatMessage,
   CompletionTraceStep,
+  FallbackTraceStep,
   RunStatus,
   RunFailureKind,
+  RunFallback,
   RunTrace,
   RunTraceStatus,
   RunTraceStep,
@@ -45,6 +47,9 @@ const approvalStatusLabels: Record<ApprovalTraceStatus, string> = {
   denied: 'Отклонено',
   expired: 'Истёк срок решения',
 }
+
+export const routeFallbackLabel = 'Переключение маршрута'
+const routeFallbackDefaultReason = 'Выбран резервный маршрут'
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -171,6 +176,26 @@ export function normalizeApproval(value: unknown): ApprovalRequest | undefined {
     path: optionalString(value, 'path'),
     permissionRoot: optionalString(value, 'permissionRoot', 'permission_root'),
     canRemember: value.canRemember === true || value.can_remember === true,
+  }
+}
+
+/**
+ * Keep fallback events deliberately narrow. In particular, do not spread the
+ * event or retain an upstream error object: provider responses can contain
+ * credentials, request headers, or other data that has no place in a chat
+ * trace. Route ids/models and the already provider-neutral reason are the
+ * complete public contract.
+ */
+export function normalizeRunFallback(value: unknown): RunFallback | undefined {
+  if (!isRecord(value)) return undefined
+  const nested = isRecord(value.fallback) ? value.fallback : undefined
+  const read = (...keys: string[]): string | undefined => optionalString(nested ?? {}, ...keys) ?? optionalString(value, ...keys)
+  return {
+    fromProviderId: read('fromProviderId', 'from_provider_id'),
+    fromModel: read('fromModel', 'from_model'),
+    toProviderId: read('toProviderId', 'to_provider_id'),
+    toModel: read('toModel', 'to_model'),
+    reason: read('reason', 'fallbackReason', 'fallback_reason') ?? routeFallbackDefaultReason,
   }
 }
 
@@ -359,6 +384,22 @@ function completionStep(runId: string, status: CompletionTraceStep['status'], at
   }
 }
 
+function fallbackStep(runId: string, fallback: RunFallback, at: string, sequence: number): FallbackTraceStep {
+  return {
+    id: `${runId}:fallback:${sequence}`,
+    kind: 'fallback',
+    status: 'completed',
+    label: routeFallbackLabel,
+    fromProviderId: fallback.fromProviderId,
+    fromModel: fallback.fromModel,
+    toProviderId: fallback.toProviderId,
+    toModel: fallback.toModel,
+    reason: fallback.reason,
+    createdAt: at,
+    finishedAt: at,
+  }
+}
+
 function applyToolUpdate(trace: RunTrace, toolCall: ToolCall, at: string): RunTrace {
   let next = completeThinking(trace, at)
   const previousToolStep = next.steps.find((step): step is ToolTraceStep => step.kind === 'tool' && step.toolCall.id === toolCall.id)
@@ -445,6 +486,21 @@ export function reduceRunTrace(trace: RunTrace, event: ChatEvent, at = eventTime
         status: 'waiting_approval',
         steps: upsertStep(next.steps, approvalStep(trace.runId, event.approval, at)),
       })
+    case 'run.fallback': {
+      next = completeThinking(next, at)
+      const fallback = fallbackStep(
+        trace.runId,
+        event,
+        at,
+        next.steps.filter((step): step is FallbackTraceStep => step.kind === 'fallback').length + 1,
+      )
+      return withUpdatedTrace(next, at, {
+        // A hand-off is an operational marker, not a terminal state. Keep a
+        // waiting/failed state intact if a late event is being replayed.
+        status: next.status === 'queued' ? 'running' : next.status,
+        steps: upsertStep(next.steps, fallback),
+      })
+    }
     case 'assistant.completed':
       return completeThinking(next, at)
     case 'run.completed':
@@ -540,6 +596,21 @@ export function splitRunTraceForTimeline(trace: RunTrace): RunTrace[] {
       steps: [normalizeStep(initialThinking)],
     })
   }
+  const fallbackSteps = trace.steps.filter((step): step is FallbackTraceStep => step.kind === 'fallback')
+  for (const fallback of fallbackSteps) {
+    fragments.push({
+      ...trace,
+      id: `${trace.id}:fallback:${fallback.id}`,
+      startedAt: fallback.createdAt,
+      updatedAt: fallback.finishedAt ?? trace.updatedAt,
+      finishedAt: fallback.finishedAt,
+      // The hand-off itself is a completed marker; the enclosing run may
+      // continue on the new route and is represented by later fragments.
+      status: 'complete',
+      toolCalls: undefined,
+      steps: [fallback],
+    })
+  }
   const toolSteps = trace.steps.filter((step): step is ToolTraceStep => step.kind === 'tool')
   for (const tool of toolSteps) {
     const approvals = trace.steps.filter((step): step is ApprovalTraceStep => step.kind === 'approval' && step.approval.toolCallId === tool.toolCall.id)
@@ -628,6 +699,19 @@ export function normalizeRunTraceStep(value: unknown, index: number, runId: stri
           : 'waiting'
     return { id, kind: 'approval', status, approval, createdAt, finishedAt }
   }
+  if (kindValue === 'fallback' || kindValue === 'run_fallback' || kindValue === 'run.fallback' || kindValue === 'route_fallback') {
+    const fallback = normalizeRunFallback(value)
+    if (!fallback) return undefined
+    return {
+      id,
+      kind: 'fallback',
+      status: 'completed',
+      label: routeFallbackLabel,
+      ...fallback,
+      createdAt,
+      finishedAt: finishedAt ?? createdAt,
+    }
+  }
   if (kindValue === 'completion' || kindValue === 'completed' || kindValue === 'run_completed' || kindValue === 'run.completed' || kindValue === 'error') {
     const rawStatus = String(value.status ?? (kindValue === 'error' ? 'error' : 'complete')).toLowerCase()
     const status: CompletionTraceStep['status'] = rawStatus === 'cancelled' || rawStatus === 'canceled' ? 'cancelled' : rawStatus === 'error' || kindValue === 'error' ? 'error' : 'complete'
@@ -670,6 +754,13 @@ export function normalizeRunTrace(value: unknown, fallbackIndex = 0): RunTrace |
             ? 'completed'
             : 'running'
     steps = [thinkingStep(runId, startedAt, terminalStatus === 'running' ? 'Обрабатывает запрос…' : 'Обработал запрос', terminalStatus)]
+    const persistedFallback = normalizeRunFallback(value.fallback)
+    if (persistedFallback) {
+      const fallbackAt = isRecord(value.fallback)
+        ? optionalString(value.fallback, 'createdAt', 'created_at', 'timestamp') ?? startedAt
+        : startedAt
+      steps.push(fallbackStep(runId, persistedFallback, fallbackAt, 1))
+    }
     for (const toolCall of toolCalls) steps.push(toolStep(runId, toolCall, toolCall.startedAt ?? startedAt))
     if (status === 'complete' || status === 'cancelled' || status === 'error') {
       steps.push(completionStep(runId, status, finishedAt ?? startedAt, failure))
@@ -693,6 +784,9 @@ export function normalizeRunTrace(value: unknown, fallbackIndex = 0): RunTrace |
     retryable: optionalBoolean(value, 'retryable', 'failureRetryable', 'failure_retryable'),
     retryAfterSeconds: nonNegativeInteger(value, 'retryAfterSeconds', 'retry_after_seconds', 'failureRetryAfterSeconds', 'failure_retry_after_seconds'),
     failure,
+    fallback: isRecord(value.fallback)
+      ? { ...normalizeRunFallback(value.fallback)!, createdAt: optionalString(value.fallback, 'createdAt', 'created_at', 'timestamp') }
+      : undefined,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     steps: sortSteps(steps),
   }

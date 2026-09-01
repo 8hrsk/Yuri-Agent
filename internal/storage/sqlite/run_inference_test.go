@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -67,6 +68,58 @@ func TestRunInferenceAttributionIsImmutableAndUsageIsMonotonic(t *testing.T) {
 	increasedUsage.Usage = domain.RunUsage{InputTokens: 130, OutputTokens: 70, TotalTokens: 200}
 	if err := repositories.Runs.Save(ctx, increasedUsage); err != nil {
 		t.Fatalf("increase usage: %v", err)
+	}
+}
+
+func TestRunInferenceFallbackSwitchIsGuardedAndDurable(t *testing.T) {
+	database, ctx := testDatabase(t)
+	repositories, err := NewRepositories(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 1, 14, 0, 0, 0, time.UTC)
+	conversation := Conversation{ID: "conversation-fallback-switch", AgentID: "owner", Title: "Fallback", CreatedAt: now, UpdatedAt: now}
+	if err := repositories.Conversations.Create(ctx, conversation); err != nil {
+		t.Fatal(err)
+	}
+	run, err := domain.NewRunForAgent("owner", "run-fallback-switch", domain.RunKindInteractive, conversation.ID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Inference = domain.RunInferenceRoute{ProviderID: "primary", Model: "model-a"}
+	if err := repositories.Runs.Create(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Transition(domain.RunStateQueued, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repositories.Runs.Save(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Transition(domain.RunStateRunning, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repositories.Runs.Save(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE agent_runs SET inference_route_switches = 1 WHERE id = ?`, string(run.ID)); err == nil {
+		t.Fatal("SQLite accepted a fallback counter without a route switch")
+	}
+	if err := run.SwitchInferenceRoute(domain.RunInferenceRoute{ProviderID: "fallback", Model: "model-b"}, now.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repositories.Runs.Save(ctx, run); err != nil {
+		t.Fatalf("guarded route switch save: %v", err)
+	}
+	stored, err := repositories.Runs.Get(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Inference != (domain.RunInferenceRoute{ProviderID: "fallback", Model: "model-b"}) || stored.InferenceRouteSwitches != 1 {
+		t.Fatalf("stored fallback attribution = %#v switches=%d", stored.Inference, stored.InferenceRouteSwitches)
+	}
+	if err := stored.SwitchInferenceRoute(domain.RunInferenceRoute{ProviderID: "third", Model: "model-c"}, now.Add(4*time.Second)); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("second route switch error = %v, want conflict", err)
 	}
 }
 

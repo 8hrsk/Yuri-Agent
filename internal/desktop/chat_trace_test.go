@@ -114,6 +114,39 @@ func TestRunTraceViewRestoresRedactedToolHistory(t *testing.T) {
 	}
 }
 
+func TestRunTraceViewRestoresInferenceFallback(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	run, err := domain.NewRunForAgent("owner", "run-fallback-trace", domain.RunKindInteractive, "conversation", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Inference = domain.RunInferenceRoute{ProviderID: "primary", Model: "primary-model"}
+	if err := run.Transition(domain.RunStateQueued, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Transition(domain.RunStateRunning, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.SwitchInferenceRoute(domain.RunInferenceRoute{ProviderID: "fallback", Model: "fallback-model"}, now.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Transition(domain.RunStateCompleted, now.Add(4*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	trace := runTraceView(run, nil)
+	if trace.Fallback == nil {
+		t.Fatal("fallback trace metadata is missing")
+	}
+	if trace.Fallback.FromProviderID != "primary" || trace.Fallback.FromModel != "primary-model" ||
+		trace.Fallback.ToProviderID != "fallback" || trace.Fallback.ToModel != "fallback-model" {
+		t.Fatalf("fallback trace = %#v", trace.Fallback)
+	}
+	if trace.Fallback.Reason == "" || trace.Fallback.CreatedAt == "" {
+		t.Fatalf("fallback safe metadata = %#v", trace.Fallback)
+	}
+}
+
 func TestListChatToolsAlwaysOffersBuiltInReadTools(t *testing.T) {
 	bridge := &Bridge{config: config.Config{}}
 	withoutRoots, err := bridge.ListChatTools()

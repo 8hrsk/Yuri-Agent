@@ -1240,6 +1240,19 @@
 .trace-step--complete,
 .trace-step--completed { border-color: rgba(var(--mint-rgb), 0.11); }
 
+.trace-step--fallback {
+  border-color: rgba(var(--accent-rgb), 0.2);
+}
+
+.trace-step--fallback .trace-step__icon {
+  color: var(--accent-light);
+  background: rgba(var(--accent-rgb), 0.11);
+}
+
+.trace-step__copy .trace-step__route {
+  color: rgba(var(--accent-rgb), 0.78);
+}
+
 .trace-step--denied,
 .trace-step--error,
 .trace-step--failed,

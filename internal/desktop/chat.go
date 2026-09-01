@@ -48,23 +48,35 @@ type ConversationView struct {
 // intentionally contains lifecycle events and redacted tool data, never
 // provider reasoning or hidden chain-of-thought.
 type RunTraceView struct {
-	ID                string         `json:"id"`
-	Kind              string         `json:"kind"`
-	ParentRunID       string         `json:"parentRunId,omitempty"`
-	Status            string         `json:"status"`
-	CreatedAt         string         `json:"createdAt"`
-	StartedAt         string         `json:"startedAt,omitempty"`
-	FinishedAt        string         `json:"finishedAt,omitempty"`
-	Failure           string         `json:"failure,omitempty"`
-	ProviderID        string         `json:"providerId,omitempty"`
-	Model             string         `json:"model,omitempty"`
-	InputTokens       int64          `json:"inputTokens,omitempty"`
-	OutputTokens      int64          `json:"outputTokens,omitempty"`
-	TotalTokens       int64          `json:"totalTokens,omitempty"`
-	FailureKind       string         `json:"failureKind,omitempty"`
-	Retryable         bool           `json:"retryable,omitempty"`
-	RetryAfterSeconds int64          `json:"retryAfterSeconds,omitempty"`
-	ToolCalls         []ToolCallView `json:"toolCalls"`
+	ID                string           `json:"id"`
+	Kind              string           `json:"kind"`
+	ParentRunID       string           `json:"parentRunId,omitempty"`
+	Status            string           `json:"status"`
+	CreatedAt         string           `json:"createdAt"`
+	StartedAt         string           `json:"startedAt,omitempty"`
+	FinishedAt        string           `json:"finishedAt,omitempty"`
+	Failure           string           `json:"failure,omitempty"`
+	ProviderID        string           `json:"providerId,omitempty"`
+	Model             string           `json:"model,omitempty"`
+	InputTokens       int64            `json:"inputTokens,omitempty"`
+	OutputTokens      int64            `json:"outputTokens,omitempty"`
+	TotalTokens       int64            `json:"totalTokens,omitempty"`
+	FailureKind       string           `json:"failureKind,omitempty"`
+	Retryable         bool             `json:"retryable,omitempty"`
+	RetryAfterSeconds int64            `json:"retryAfterSeconds,omitempty"`
+	Fallback          *RunFallbackView `json:"fallback,omitempty"`
+	ToolCalls         []ToolCallView   `json:"toolCalls"`
+}
+
+// RunFallbackView contains only non-secret route provenance. Provider errors
+// remain in the redacted audit record and are never restored into chat history.
+type RunFallbackView struct {
+	FromProviderID string `json:"fromProviderId,omitempty"`
+	FromModel      string `json:"fromModel,omitempty"`
+	ToProviderID   string `json:"toProviderId,omitempty"`
+	ToModel        string `json:"toModel,omitempty"`
+	Reason         string `json:"reason"`
+	CreatedAt      string `json:"createdAt"`
 }
 
 type ChatToolDescriptorView struct {
@@ -124,6 +136,11 @@ type ChatEvent struct {
 	Status            string        `json:"status,omitempty"`
 	Label             string        `json:"label,omitempty"`
 	Error             string        `json:"error,omitempty"`
+	FromProviderID    string        `json:"fromProviderId,omitempty"`
+	FromModel         string        `json:"fromModel,omitempty"`
+	ToProviderID      string        `json:"toProviderId,omitempty"`
+	ToModel           string        `json:"toModel,omitempty"`
+	Reason            string        `json:"reason,omitempty"`
 	ToolCall          *ToolCallView `json:"toolCall,omitempty"`
 	Approval          *ApprovalView `json:"approval,omitempty"`
 }

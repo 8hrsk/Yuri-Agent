@@ -121,14 +121,11 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if err != nil {
 		return ChatRunResult{}, err
 	}
-	profileRoute, err := b.repositories.Agents.Get(runContext, agentID)
+	routePlan, err := b.resolveInferenceRoutePlan(runContext, agentID)
 	if err != nil {
 		return ChatRunResult{}, err
 	}
-	run.Inference, err = b.resolveInferenceRoute(profileRoute.ProviderID, profileRoute.Model)
-	if err != nil {
-		return ChatRunResult{}, fmt.Errorf("model route for agent %s: %w", profileRoute.Name, err)
-	}
+	run.Inference = routePlan.Primary
 	run.Budget = domain.RunBudget{MaxSteps: 8, MaxTokens: 32_000, MaxToolCalls: 32, MaxToolOutputBytes: 256 * 1024, MaxDurationSeconds: 600}
 	if requestedBudget.MaxSteps > 0 {
 		run.Budget.MaxSteps = requestedBudget.MaxSteps
@@ -191,42 +188,24 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	// The approval handler runs inside runtime.Run on this goroutine and needs
 	// this run to record waiting_approval while it blocks on the owner.
 	runContext = withApprovalRunState(runContext, &run)
-	backend, model, err := b.chatBackendForRoute(runContext, run.Inference.ProviderID, run.Inference.Model)
-	if err != nil {
-		return b.failChatRun(runContext, &run, emitter, err), nil
-	}
-	registry, err := b.chatTools(now)
-	if err != nil {
-		return b.failChatRun(runContext, &run, emitter, err), nil
-	}
-	if runKind != domain.RunKindSubagent {
-		if err := registry.Register(delegationAgentTool{
-			bridge: b, backend: backend, model: model,
-			principalAgentID: agentID, parentRunID: runID, conversationID: conversationID, parentTools: registry,
-		}); err != nil {
-			return b.failChatRun(runContext, &run, emitter, err), nil
+	execution, err := b.newChatExecution(runContext, run.Inference, runKind, agentID, runID, conversationID)
+	runStartedEmitted := false
+	if err != nil && routePlan.FallbackEnabled && inferenceFallbackEligible(err) {
+		if startErr := emitter.Sink(runContext, agent.Event{Type: agent.EventRunStarted, RunID: runID}); startErr != nil {
+			return b.failChatRun(runContext, &run, emitter, startErr), nil
 		}
-		if err := registry.Register(peerDialogueAgentTool{
-			bridge: b, initiatorAgentID: agentID, triggerRunID: runID,
-		}); err != nil {
-			return b.failChatRun(runContext, &run, emitter, err), nil
+		runStartedEmitted = true
+		if switchErr := b.switchChatRunToFallback(runContext, &run, emitter, agentID, routePlan.Fallback, err); switchErr != nil {
+			return b.failChatRun(runContext, &run, emitter, switchErr), nil
 		}
+		execution, err = b.newChatExecution(runContext, run.Inference, runKind, agentID, runID, conversationID)
 	}
-	runtime, err := agent.NewRuntime(backend, registry)
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
-	if runKind == domain.RunKindBackground {
-		runtime.Authorizer = backgroundToolAuthorizer{bridge: b}
-	} else {
-		runtime.Authorizer = desktopToolAuthorizer{bridge: b}
-	}
-	runtime.Approvals = desktopApprovalHandler{bridge: b}
-	emitter.tools = registry
-	memoryEngine, err := b.newMemoryEngine(backend, model, agentID)
-	if err != nil {
-		return b.failChatRun(runContext, &run, emitter, err), nil
-	}
+	backend, model := execution.backend, execution.model
+	runtime, memoryEngine := execution.runtime, execution.memory
+	emitter.tools = execution.tools
 
 	transcript, err := b.repositories.Messages.ListByConversation(runContext, conversationID)
 	if err != nil {
@@ -295,12 +274,48 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
 
+	modelRequest := agent.ModelRequest{Model: model, Messages: snapshot.Messages, ToolChoice: toolChoice}
+	attemptSink := newPreOutputAttemptSink(emitter.Sink)
+	runtimeSink := agent.EventSink(attemptSink.Sink)
+	if runStartedEmitted {
+		runtimeSink = skipRunStartedSink(emitter.Sink)
+	}
 	result, runErr := runtime.Run(runContext, agent.RunRequest{
 		RunID: runID, ConversationID: conversationID, Budget: run.Budget,
-		ModelRequest: agent.ModelRequest{Model: model, Messages: snapshot.Messages, ToolChoice: toolChoice},
-		Sink:         emitter.Sink,
+		ModelRequest: modelRequest, Sink: runtimeSink,
 	})
+	if runErr != nil && !runStartedEmitted && routePlan.FallbackEnabled && !attemptSink.Committed() && inferenceFallbackEligible(runErr) {
+		if flushErr := attemptSink.FlushStarted(runContext); flushErr != nil {
+			runErr = flushErr
+		} else if switchErr := b.switchChatRunToFallback(runContext, &run, emitter, agentID, routePlan.Fallback, runErr); switchErr != nil {
+			runErr = switchErr
+		} else {
+			fallbackExecution, fallbackErr := b.newChatExecution(runContext, run.Inference, runKind, agentID, runID, conversationID)
+			if fallbackErr != nil {
+				runErr = fallbackErr
+			} else {
+				execution = fallbackExecution
+				backend, model = execution.backend, execution.model
+				runtime, memoryEngine = execution.runtime, execution.memory
+				emitter.tools = execution.tools
+				modelRequest.Model = model
+				result, runErr = runtime.Run(runContext, agent.RunRequest{
+					RunID: runID, ConversationID: conversationID, Budget: run.Budget,
+					ModelRequest: modelRequest, Sink: skipRunStartedSink(emitter.Sink),
+				})
+			}
+		}
+	} else if runErr != nil && !runStartedEmitted {
+		if flushErr := attemptSink.FlushStarted(runContext); flushErr != nil {
+			runErr = flushErr
+		}
+	}
 	run.Usage = runUsage(result.Usage)
+	// The provisional primary failure event is intentionally suppressed while
+	// fallback eligibility is decided, so copy the final attempt usage here as
+	// well. This keeps terminal renderer provenance aligned with durable usage
+	// even when no fallback is configured and failChatRun owns the last event.
+	emitter.usage = run.Usage
 	if runErr != nil {
 		return b.failChatRun(runContext, &run, emitter, runErr), nil
 	}

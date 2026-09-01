@@ -288,6 +288,8 @@ class MockYuriClient implements YuriClient {
       id: makeId('agent'), name: input.name.trim(), age: input.age, gender: input.gender.trim(),
       preferences: input.preferences.trim(), backstory: input.backstory.trim(), traits: { ...input.traits }, active: true,
       providerId: input.providerId.trim(), model: input.model.trim(),
+      fallbackEnabled: input.fallbackEnabled,
+      fallbackProviderId: input.fallbackProviderId.trim(), fallbackModel: input.fallbackModel.trim(),
       createdAt: now, updatedAt: now,
     }
     this.agents.set(agent.id, agent)
@@ -331,6 +333,22 @@ class MockYuriClient implements YuriClient {
     const agent = this.agents.get(this.activeAgentId)
     if (!agent) throw new Error('Агент не найден.')
     const next = { ...agent, providerId: providerId.trim(), model: model.trim(), updatedAt: nowIso() }
+    this.agents.set(next.id, next)
+    return { ...next, traits: { ...next.traits }, active: true }
+  }
+
+  async updateActiveAgentFallbackRoute(enabled: boolean, providerId: string, model: string): Promise<AgentProfile> {
+    if (!this.activeAgentId) throw new Error('Активный агент не выбран.')
+    const agent = this.agents.get(this.activeAgentId)
+    if (!agent) throw new Error('Агент не найден.')
+    if (enabled && (!providerId.trim() || !model.trim())) throw new Error('Для включения fallback выберите provider и модель.')
+    const next = {
+      ...agent,
+      fallbackEnabled: enabled,
+      fallbackProviderId: providerId.trim(),
+      fallbackModel: model.trim(),
+      updatedAt: nowIso(),
+    }
     this.agents.set(next.id, next)
     return { ...next, traits: { ...next.traits }, active: true }
   }

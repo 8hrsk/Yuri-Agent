@@ -122,6 +122,10 @@ export interface AgentProfile {
   backstory: string
   providerId?: string
   model?: string
+  /** Explicit owner-controlled fallback used only before visible output/side effects. */
+  fallbackEnabled?: boolean
+  fallbackProviderId?: string
+  fallbackModel?: string
   traits: Record<string, number>
   active: boolean
   createdAt: string
@@ -139,6 +143,10 @@ export interface AgentProfileInput {
   providerId: string
   /** Empty means use the selected provider's configured default model. */
   model: string
+  /** Fallback is opt-in and is evaluated only before visible output/side effects. */
+  fallbackEnabled: boolean
+  fallbackProviderId: string
+  fallbackModel: string
   traits: Record<string, number>
   personalization: AgentPersonalizationInput
   /** UI-only draft metadata. Unknown fields are ignored by the Go bridge. */

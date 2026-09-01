@@ -112,7 +112,14 @@
   font-size: 12px;
 }
 
-.agent-route-panel > .button {
+.agent-route-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.agent-route-panel__actions .button {
   justify-self: end;
 }
 

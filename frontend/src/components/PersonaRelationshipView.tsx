@@ -36,7 +36,7 @@ type PersonaRelationshipViewProps = {
 }
 
 type Feedback = { kind: 'success' | 'error'; text: string }
-type BusyAction = 'loading' | 'evolution' | 'policy' | 'pin' | 'rollback' | 'reset' | 'seed' | 'route' | undefined
+type BusyAction = 'loading' | 'evolution' | 'policy' | 'pin' | 'rollback' | 'reset' | 'seed' | 'route' | 'fallback' | undefined
 
 function ownerSeedDraft(agent: AgentProfile, seed: AgentPersonalizationProfile): AgentProfileInput {
   return {
@@ -47,6 +47,9 @@ function ownerSeedDraft(agent: AgentProfile, seed: AgentPersonalizationProfile):
     backstory: seed.structuredBackstory.narrative,
     providerId: agent.providerId ?? '',
     model: agent.model ?? '',
+    fallbackEnabled: agent.fallbackEnabled ?? false,
+    fallbackProviderId: agent.fallbackProviderId ?? '',
+    fallbackModel: agent.fallbackModel ?? '',
     traits: { ...seed.temperament },
     personalization: clonePersonalization(seed),
     creationMode: 'advanced',
@@ -235,6 +238,7 @@ export function PersonaRelationshipView({ section, onActiveAgentChange, onSelect
   const [seedReason, setSeedReason] = useState('')
   const [evolutionPolicy, setEvolutionPolicy] = useState<AgentEvolutionPolicy>()
   const [modelRoute, setModelRoute] = useState({ providerId: '', model: '' })
+  const [fallbackRoute, setFallbackRoute] = useState({ enabled: false, providerId: '', model: '' })
 
   const load = useCallback(async () => {
     setBusy('loading')
@@ -247,7 +251,10 @@ export function PersonaRelationshipView({ section, onActiveAgentChange, onSelect
       ])
       setSnapshot(normalizePersonalitySnapshot(nextSnapshot))
       setActiveAgent(agent)
-      if (agent) setModelRoute({ providerId: agent.providerId ?? '', model: agent.model ?? '' })
+      if (agent) {
+        setModelRoute({ providerId: agent.providerId ?? '', model: agent.model ?? '' })
+        setFallbackRoute({ enabled: agent.fallbackEnabled ?? false, providerId: agent.fallbackProviderId ?? '', model: agent.fallbackModel ?? '' })
+      }
       setOwnerSeed(seed)
       if (seed) setEvolutionPolicy({ ...seed.evolutionPolicy, lockedFields: [...seed.evolutionPolicy.lockedFields], traitBounds: { ...seed.evolutionPolicy.traitBounds } })
       if (agent && seed) setSeedDraft((current) => current ?? ownerSeedDraft(agent, seed))
@@ -388,6 +395,22 @@ export function PersonaRelationshipView({ section, onActiveAgentChange, onSelect
     }
   }
 
+  const saveFallbackRoute = async () => {
+    setBusy('fallback')
+    setFeedback(undefined)
+    try {
+      const next = await client.updateActiveAgentFallbackRoute(fallbackRoute.enabled, fallbackRoute.providerId, fallbackRoute.model)
+      setActiveAgent(next)
+      onActiveAgentChange?.(next)
+      setFallbackRoute({ enabled: next.fallbackEnabled ?? false, providerId: next.fallbackProviderId ?? '', model: next.fallbackModel ?? '' })
+      setFeedback({ kind: 'success', text: `${next.name}: резервный маршрут ${next.fallbackEnabled ? 'включён' : 'выключен'}.` })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось сохранить резервный маршрут агента.' })
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const saveEvolutionPolicy = async () => {
     if (!ownerSeed || !activeAgent || !evolutionPolicy) return
     setBusy('policy')
@@ -448,8 +471,11 @@ export function PersonaRelationshipView({ section, onActiveAgentChange, onSelect
 
     {!relationship && activeAgent && <section className="agent-route-panel" aria-labelledby="agent-route-title">
       <div><span className="section-heading__overline">PER-AGENT MODEL ROUTING</span><h2 id="agent-route-title">Модель {activeAgent.name}</h2><p>Этот маршрут используется в обычном чате, фоновых run и когда агент отвечает другому агенту.</p></div>
-      <AgentModelRouteEditor disabled={busy !== undefined} model={modelRoute.model} onChange={(providerId, model) => setModelRoute({ providerId, model })} providerId={modelRoute.providerId} />
-      <button className="button button--accent" disabled={busy !== undefined || (modelRoute.providerId === (activeAgent.providerId ?? '') && modelRoute.model === (activeAgent.model ?? ''))} onClick={() => void saveModelRoute()} type="button"><Icon name="check" width={14} height={14} /> {busy === 'route' ? 'Сохраняю…' : 'Сохранить модель агента'}</button>
+      <AgentModelRouteEditor disabled={busy !== undefined} fallbackEnabled={fallbackRoute.enabled} fallbackModel={fallbackRoute.model} fallbackProviderId={fallbackRoute.providerId} model={modelRoute.model} onChange={(providerId, model) => setModelRoute({ providerId, model })} onFallbackChange={(enabled, providerId, model) => setFallbackRoute({ enabled, providerId, model })} providerId={modelRoute.providerId} />
+      <div className="agent-route-panel__actions">
+        <button className="button button--accent" disabled={busy !== undefined || (modelRoute.providerId === (activeAgent.providerId ?? '') && modelRoute.model === (activeAgent.model ?? ''))} onClick={() => void saveModelRoute()} type="button"><Icon name="check" width={14} height={14} /> {busy === 'route' ? 'Сохраняю…' : 'Сохранить модель агента · основной маршрут'}</button>
+        <button className="button button--quiet" disabled={busy !== undefined || (fallbackRoute.enabled === (activeAgent.fallbackEnabled ?? false) && fallbackRoute.providerId === (activeAgent.fallbackProviderId ?? '') && fallbackRoute.model === (activeAgent.fallbackModel ?? ''))} onClick={() => void saveFallbackRoute()} type="button"><Icon name="check" width={14} height={14} /> {busy === 'fallback' ? 'Сохраняю…' : 'Сохранить резервный маршрут'}</button>
+      </div>
     </section>}
 
     {!relationship && ownerSeed && <section className="owner-seed-summary" aria-labelledby="owner-seed-title">

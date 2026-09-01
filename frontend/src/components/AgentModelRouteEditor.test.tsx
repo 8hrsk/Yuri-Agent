@@ -29,26 +29,54 @@ describe('AgentModelRouteEditor', () => {
     }
     resetYuriClientForTests()
 
-    const { rerender } = render(<AgentModelRouteEditor model="" onChange={onChange} providerId="" />)
+    const onFallbackChange = vi.fn()
+    const { rerender } = render(<AgentModelRouteEditor fallbackEnabled={false} fallbackModel="" fallbackProviderId="" model="" onChange={onChange} onFallbackChange={onFallbackChange} providerId="" />)
     const provider = await screen.findByRole('combobox', { name: 'Provider' })
-    expect(screen.getByRole('option', { name: /OpenRouter/ })).toBeInTheDocument()
+    expect(screen.getAllByRole('option', { name: /OpenRouter/ })).toHaveLength(2)
 
     fireEvent.change(provider, { target: { value: 'codex' } })
     expect(onChange).toHaveBeenCalledWith('codex', '')
-    rerender(<AgentModelRouteEditor model="" onChange={onChange} providerId="codex" />)
+    rerender(<AgentModelRouteEditor fallbackEnabled={false} fallbackModel="" fallbackProviderId="" model="" onChange={onChange} onFallbackChange={onFallbackChange} providerId="codex" />)
 
     await waitFor(() => expect(screen.getByRole('option', { name: /GPT-5.6/ })).toBeInTheDocument())
     fireEvent.change(screen.getByRole('combobox', { name: 'Codex model' }), { target: { value: 'gpt-5.6' } })
     expect(onChange).toHaveBeenLastCalledWith('codex', 'gpt-5.6')
   })
 
-  it('keeps an explicit installation-wide fallback', async () => {
+  it('keeps the installation-wide primary provider distinct from the fallback route', async () => {
     ;(window as typeof window & { go?: unknown }).go = { main: { Bridge: { ListConversations: () => [], ListProviders: () => [] } } }
     resetYuriClientForTests()
-    render(<AgentModelRouteEditor model="" onChange={vi.fn()} providerId="" />)
+    render(<AgentModelRouteEditor fallbackEnabled={false} fallbackModel="" fallbackProviderId="" model="" onChange={vi.fn()} onFallbackChange={vi.fn()} providerId="" />)
 
-    expect(await screen.findByRole('option', { name: /fallback/ })).toHaveValue('')
+    expect(await screen.findByRole('option', { name: /Активный provider приложения/ })).toHaveValue('')
+    expect(screen.queryByRole('option', { name: /Активный provider приложения.*fallback/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Резервный provider и модель' })).toBeInTheDocument()
     expect(screen.getByText(/наследует глобальную настройку/)).toBeInTheDocument()
+  })
+
+  it('exposes the fallback switch and keeps its provider/model changes separate', async () => {
+    const onFallbackChange = vi.fn()
+    ;(window as typeof window & { go?: unknown }).go = {
+      main: {
+        Bridge: {
+          ListConversations: () => [],
+          ListProviders: () => [
+            { id: 'openrouter', kind: 'openai-compatible', displayName: 'OpenRouter', model: 'openrouter/free', enabled: true, hasSecret: true },
+          ],
+        },
+      },
+    }
+    resetYuriClientForTests()
+
+    render(<AgentModelRouteEditor fallbackEnabled={false} fallbackModel="" fallbackProviderId="" model="" onChange={vi.fn()} onFallbackChange={onFallbackChange} providerId="" />)
+
+    const provider = await screen.findByRole('combobox', { name: 'Fallback provider' })
+    fireEvent.change(provider, { target: { value: 'openrouter' } })
+    expect(onFallbackChange).toHaveBeenCalledWith(false, 'openrouter', 'openrouter/free')
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Включить резервный маршрут' }))
+    expect(onFallbackChange).toHaveBeenLastCalledWith(true, '', '')
+    expect(screen.getByText(/только до первого видимого токена или tool side effect/)).toBeInTheDocument()
   })
 
   it('warns when the selected catalog model does not support tools', async () => {
@@ -67,7 +95,7 @@ describe('AgentModelRouteEditor', () => {
     }
     resetYuriClientForTests()
 
-    render(<AgentModelRouteEditor model="vendor/text-only" onChange={vi.fn()} providerId="openrouter" />)
+    render(<AgentModelRouteEditor fallbackEnabled={false} fallbackModel="" fallbackProviderId="" model="vendor/text-only" onChange={vi.fn()} onFallbackChange={vi.fn()} providerId="openrouter" />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/нет поддержки tools/)
     expect(screen.getByText(/обязательные вызовы инструментов будут остановлены/)).toBeInTheDocument()

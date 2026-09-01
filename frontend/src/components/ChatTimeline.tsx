@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 
-import { approvalStatusLabel, runStatusLabel, toolStatusLabel, type ChatTimelineEntry } from '../lib/chat-trace'
+import { approvalStatusLabel, routeFallbackLabel, runStatusLabel, toolStatusLabel, type ChatTimelineEntry } from '../lib/chat-trace'
 import type { ChatAttachment, ChatAttachmentContent, ChatMessage, RunTrace, RunTraceStep, ToolCall } from '../lib/contracts'
 import { formatClock } from '../lib/datetime'
 import {
@@ -69,12 +69,22 @@ function traceStatusCopy(trace: RunTrace): string {
 }
 
 function traceToolCopy(trace: RunTrace): string {
-  const labels = trace.steps
+  const labels = [
+    ...trace.steps
+      .filter((step): step is Extract<RunTraceStep, { kind: 'fallback' }> => step.kind === 'fallback')
+      .map((step) => step.label),
+    ...trace.steps
     .filter((step): step is Extract<RunTraceStep, { kind: 'tool' }> => step.kind === 'tool')
     .map((step) => step.toolCall.label || step.toolCall.name)
-    .filter((label, index, all) => all.indexOf(label) === index)
+  ].filter((label, index, all) => all.indexOf(label) === index)
   if (labels.length === 0) return 'Обработка запроса'
   return labels.join(' · ')
+}
+
+function fallbackRouteCopy(step: Extract<RunTraceStep, { kind: 'fallback' }>): string {
+  const from = [step.fromProviderId, step.fromModel].filter(Boolean).join(' · ') || 'текущий маршрут'
+  const to = [step.toProviderId, step.toModel].filter(Boolean).join(' · ') || 'резервный маршрут'
+  return `${from} → ${to}`
 }
 
 function traceStepLabel(step: RunTraceStep): string {
@@ -84,6 +94,7 @@ function traceStepLabel(step: RunTraceStep): string {
     case 'tool': return `${step.toolCall.label} · ${toolStatusLabel(step.status)}`
     case 'approval': return `Подтверждение · ${approvalStatusLabel(step.status)}`
     case 'completion': return step.label
+    case 'fallback': return step.label || routeFallbackLabel
   }
 }
 
@@ -95,6 +106,8 @@ export const TraceStepCard = memo(function TraceStepCard({ step }: { step: RunTr
     ? 'spark'
     : step.kind === 'approval'
       ? 'shield'
+      : step.kind === 'fallback'
+        ? 'refresh'
       : step.kind === 'completion' && step.status === 'error'
         ? 'warning'
         : step.kind === 'completion' && step.status === 'complete'
@@ -106,6 +119,10 @@ export const TraceStepCard = memo(function TraceStepCard({ step }: { step: RunTr
       <span className="trace-step__copy">
         <strong>{traceStepLabel(step)}</strong>
         {step.kind === 'approval' && <small>{step.approval.scope || step.approval.explanation}</small>}
+        {step.kind === 'fallback' && <>
+          <small className="trace-step__route">{fallbackRouteCopy(step)}</small>
+          <small>{step.reason}</small>
+        </>}
         {step.kind === 'completion' && step.error && <small>{step.error}</small>}
       </span>
     </div>

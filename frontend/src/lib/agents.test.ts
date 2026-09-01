@@ -10,6 +10,7 @@ import {
   loadAgentDraft,
   normalizeAgentPersonalizationProfile,
   normalizeAgentProfile,
+  normalizeAgentProfileInput,
   saveAgentDraft,
   validateAgentDraft,
 } from './agents'
@@ -35,6 +36,24 @@ describe('agent profile contracts', () => {
 
     expect(profile?.backstory).toHaveLength(AGENT_BACKSTORY_MAX_LENGTH)
     expect(profile?.backstory).toBe('Ю'.repeat(AGENT_BACKSTORY_MAX_LENGTH))
+  })
+
+  it('normalizes the opt-in fallback route from both wire naming conventions', () => {
+    const input = normalizeAgentProfileInput({
+      ...defaultAgentDraft,
+      name: 'Emily',
+      fallback_enabled: true,
+      fallback_provider_id: ' openrouter ',
+      fallback_model: ' openrouter/free ',
+      personalization: defaultAgentDraft.personalization,
+    })
+    expect(input).toMatchObject({ fallbackEnabled: true, fallbackProviderId: 'openrouter', fallbackModel: 'openrouter/free' })
+
+    const profile = normalizeAgentProfile({
+      id: 'agent-emily', name: 'Emily', gender: 'female', fallbackEnabled: true,
+      fallback_provider_id: 'openrouter', fallback_model: 'openrouter/free',
+    })
+    expect(profile).toMatchObject({ fallbackEnabled: true, fallbackProviderId: 'openrouter', fallbackModel: 'openrouter/free' })
   })
 
   it('keeps the complete starter trait vocabulary in the draft', () => {

@@ -64,6 +64,7 @@ export interface YuriClient {
   previewAgentPersonality(input: AgentProfileInput, scenario: PersonalityPreviewScenario): Promise<PersonalityPreview | undefined>
   setActiveAgent(agentId: string): Promise<AgentProfile>
   updateActiveAgentModelRoute(providerId: string, model: string): Promise<AgentProfile>
+  updateActiveAgentFallbackRoute(enabled: boolean, providerId: string, model: string): Promise<AgentProfile>
   sendMessage(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult>
   cancelRun(runId: string): Promise<void>
   approve(approvalId: string, decision: ApprovalDecision): Promise<void>

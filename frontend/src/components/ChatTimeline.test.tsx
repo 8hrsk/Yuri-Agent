@@ -73,6 +73,29 @@ describe('a collapsed execution trace renders nothing (H-18/M-40)', () => {
     expect(document.querySelector('.run-trace__body')).toBeNull()
   })
 
+  it('makes a route fallback explicit while keeping the trace collapsed by default', async () => {
+    const user = userEvent.setup()
+    const { toolCall } = spyingToolCall()
+    const trace: RunTrace = {
+      ...traceWith(toolCall),
+      steps: [{
+        id: 'fallback-1', kind: 'fallback', status: 'completed', label: 'Переключение маршрута',
+        fromProviderId: 'primary', fromModel: 'model/main',
+        toProviderId: 'backup', toModel: 'model/reserve',
+        reason: 'Основной маршрут временно недоступен',
+        createdAt: '2026-08-29T10:00:01.000Z', finishedAt: '2026-08-29T10:00:01.000Z',
+      }],
+    }
+    render(<ExecutionTrace trace={trace} />)
+
+    expect(screen.getByText('Переключение маршрута')).toBeInTheDocument()
+    expect(document.querySelector('.run-trace__body')).toBeNull()
+
+    await user.click(screen.getByText('Переключение маршрута'))
+    expect(screen.getByText('primary · model/main → backup · model/reserve')).toBeInTheDocument()
+    expect(screen.getByText('Основной маршрут временно недоступен')).toBeInTheDocument()
+  })
+
   it('shows an actionable typed failure without silently changing the route', () => {
     const { toolCall } = spyingToolCall()
     render(<ExecutionTrace trace={{

@@ -105,12 +105,34 @@ export interface CompletionTraceStep extends RunTraceStepBase {
   error?: string
 }
 
+/** Safe route metadata carried by a provider hand-off event. */
+export interface RunFallback {
+  fromProviderId?: string
+  fromModel?: string
+  toProviderId?: string
+  toModel?: string
+  reason: string
+}
+
+/**
+ * A provider/model hand-off recorded before visible output or side effects.
+ * Only route identifiers and the provider-neutral reason are retained; this
+ * contract deliberately has no room for upstream errors, credentials, or
+ * request payloads.
+ */
+export interface FallbackTraceStep extends RunTraceStepBase, RunFallback {
+  kind: 'fallback'
+  status: 'completed'
+  label: string
+}
+
 export type RunTraceStep =
   | ThinkingTraceStep
   | StatusTraceStep
   | ToolTraceStep
   | ApprovalTraceStep
   | CompletionTraceStep
+  | FallbackTraceStep
 
 /**
  * A persisted/live execution timeline. Only operational lifecycle, tool
@@ -136,6 +158,7 @@ export interface RunTrace {
   retryable?: boolean
   retryAfterSeconds?: number
   failure?: string
+  fallback?: RunFallback & { createdAt?: string }
   toolCalls?: ToolCall[]
   steps: RunTraceStep[]
 }

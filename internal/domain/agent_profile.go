@@ -23,16 +23,22 @@ const (
 // fields, while reflection may only evolve the bounded mutable persona that
 // shares this profile ID.
 type AgentProfile struct {
-	ID          ID        `json:"id"`
-	Name        string    `json:"name"`
-	Age         int       `json:"age"`
-	Gender      string    `json:"gender"`
-	Preferences string    `json:"preferences,omitempty"`
-	Backstory   string    `json:"backstory,omitempty"`
-	ProviderID  string    `json:"provider_id,omitempty"`
-	Model       string    `json:"model,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          ID     `json:"id"`
+	Name        string `json:"name"`
+	Age         int    `json:"age"`
+	Gender      string `json:"gender"`
+	Preferences string `json:"preferences,omitempty"`
+	Backstory   string `json:"backstory,omitempty"`
+	ProviderID  string `json:"provider_id,omitempty"`
+	Model       string `json:"model,omitempty"`
+	// FallbackEnabled is an explicit owner-controlled opt-in. A configured
+	// fallback is never selected implicitly; the orchestration layer must make
+	// a visible, audited switch before using it.
+	FallbackEnabled    bool      `json:"fallback_enabled,omitempty"`
+	FallbackProviderID string    `json:"fallback_provider_id,omitempty"`
+	FallbackModel      string    `json:"fallback_model,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 func NewAgentProfile(id ID, name string, age int, gender, preferences string, now time.Time) (AgentProfile, error) {
@@ -89,8 +95,37 @@ func (p AgentProfile) Validate() error {
 	if providerID == "" && model != "" {
 		return fmt.Errorf("%w: agent model requires an explicit provider", ErrInvalidArgument)
 	}
+	fallbackProviderID := strings.TrimSpace(p.FallbackProviderID)
+	fallbackModel := strings.TrimSpace(p.FallbackModel)
+	if (fallbackProviderID == "") != (fallbackModel == "") {
+		return fmt.Errorf("%w: fallback provider and model must be configured together", ErrInvalidArgument)
+	}
+	if fallbackProviderID != "" && (utf8.RuneCountInString(fallbackProviderID) > AgentProviderIDMaxRunes || strings.ContainsRune(fallbackProviderID, '\x00')) {
+		return fmt.Errorf("%w: fallback provider id exceeds %d characters", ErrInvalidArgument, AgentProviderIDMaxRunes)
+	}
+	if fallbackModel != "" && (utf8.RuneCountInString(fallbackModel) > AgentModelMaxRunes || strings.ContainsRune(fallbackModel, '\x00')) {
+		return fmt.Errorf("%w: fallback model exceeds %d characters", ErrInvalidArgument, AgentModelMaxRunes)
+	}
+	if p.FallbackEnabled && fallbackProviderID == "" {
+		return fmt.Errorf("%w: enabled fallback requires a provider and model", ErrInvalidArgument)
+	}
 	if p.CreatedAt.IsZero() || p.UpdatedAt.IsZero() || p.UpdatedAt.Before(p.CreatedAt) {
 		return fmt.Errorf("%w: invalid agent profile timestamps", ErrInvalidArgument)
 	}
 	return nil
+}
+
+// FallbackRoute returns the configured fallback only when the owner has
+// explicitly enabled it. Returning a separate boolean keeps the disabled
+// state distinct from a malformed route and prevents callers from silently
+// treating a configured-but-disabled fallback as active.
+func (p AgentProfile) FallbackRoute() (RunInferenceRoute, bool, error) {
+	if !p.FallbackEnabled {
+		return RunInferenceRoute{}, false, nil
+	}
+	route := RunInferenceRoute{ProviderID: strings.TrimSpace(p.FallbackProviderID), Model: strings.TrimSpace(p.FallbackModel)}
+	if route.ProviderID == "" || route.Model == "" || !route.Valid() {
+		return RunInferenceRoute{}, false, fmt.Errorf("%w: enabled fallback route is incomplete", ErrInvalidArgument)
+	}
+	return route, true, nil
 }

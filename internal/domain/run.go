@@ -172,14 +172,63 @@ type AgentRun struct {
 	State          RunState          `json:"state"`
 	Budget         RunBudget         `json:"budget"`
 	Inference      RunInferenceRoute `json:"inference,omitempty"`
-	Usage          RunUsage          `json:"usage,omitempty"`
-	FailureInfo    RunFailureInfo    `json:"failure_info,omitempty"`
-	CreatedAt      time.Time         `json:"created_at"`
-	UpdatedAt      time.Time         `json:"updated_at"`
-	StartedAt      time.Time         `json:"started_at,omitempty"`
-	FinishedAt     time.Time         `json:"finished_at,omitempty"`
-	Failure        string            `json:"failure,omitempty"`
-	Version        uint64            `json:"version"`
+	// InitialInference preserves the primary route when an explicitly enabled
+	// fallback replaces Inference. It lets durable history reconstruct the
+	// visible hand-off without reading provider payloads or mutable settings.
+	InitialInference RunInferenceRoute `json:"initial_inference,omitempty"`
+	// InferenceRouteSwitches counts explicit, owner-configured fallback
+	// switches made before a run produced visible output or a side effect.
+	// The storage trigger permits at most one guarded switch while running;
+	// ordinary saves cannot mutate an attributed route.
+	InferenceRouteSwitches uint8          `json:"inference_route_switches,omitempty"`
+	Usage                  RunUsage       `json:"usage,omitempty"`
+	FailureInfo            RunFailureInfo `json:"failure_info,omitempty"`
+	CreatedAt              time.Time      `json:"created_at"`
+	UpdatedAt              time.Time      `json:"updated_at"`
+	StartedAt              time.Time      `json:"started_at,omitempty"`
+	FinishedAt             time.Time      `json:"finished_at,omitempty"`
+	Failure                string         `json:"failure,omitempty"`
+	Version                uint64         `json:"version"`
+}
+
+// SwitchInferenceRoute performs the one guarded route change allowed for an
+// in-flight run. It deliberately does not change lifecycle state: the caller
+// remains responsible for recording the provider failure and final outcome.
+// Persistence adapters enforce the same invariant in SQLite so this method is
+// not a substitute for optimistic concurrency.
+func (r *AgentRun) SwitchInferenceRoute(route RunInferenceRoute, now time.Time) error {
+	if r == nil {
+		return fmt.Errorf("%w: nil run", ErrInvalidArgument)
+	}
+	if r.State != RunStateRunning {
+		return fmt.Errorf("%w: inference route switch requires a running run", ErrInvalidTransition)
+	}
+	if !route.Valid() || strings.TrimSpace(route.ProviderID) == "" || strings.TrimSpace(route.Model) == "" {
+		return fmt.Errorf("%w: invalid fallback inference route", ErrInvalidArgument)
+	}
+	if r.InferenceRouteSwitches >= 1 {
+		return fmt.Errorf("%w: inference route may switch only once", ErrConflict)
+	}
+	if r.Usage != (RunUsage{}) || r.Failure != "" || r.FailureInfo != (RunFailureInfo{}) {
+		return fmt.Errorf("%w: inference route cannot switch after usage or failure", ErrInvalidTransition)
+	}
+	if strings.TrimSpace(r.InitialInference.ProviderID) == "" {
+		r.InitialInference = RunInferenceRoute{
+			ProviderID: strings.TrimSpace(r.Inference.ProviderID),
+			Model:      strings.TrimSpace(r.Inference.Model),
+		}
+	}
+	if strings.TrimSpace(r.Inference.ProviderID) == strings.TrimSpace(route.ProviderID) && strings.TrimSpace(r.Inference.Model) == strings.TrimSpace(route.Model) {
+		return fmt.Errorf("%w: fallback inference route must differ from current route", ErrInvalidArgument)
+	}
+	if now.IsZero() {
+		return fmt.Errorf("%w: inference route switch timestamp is required", ErrInvalidArgument)
+	}
+	r.Inference = RunInferenceRoute{ProviderID: strings.TrimSpace(route.ProviderID), Model: strings.TrimSpace(route.Model)}
+	r.InferenceRouteSwitches++
+	r.UpdatedAt = now.UTC()
+	r.Version++
+	return nil
 }
 
 // ValidateShape enforces the bounded execution hierarchy used by the

@@ -89,6 +89,34 @@ describe('chat execution trace', () => {
     expect(JSON.stringify(trace)).not.toContain('must never be rendered')
   })
 
+  it('restores an explicit provider fallback from compact persisted history', () => {
+    const trace = normalizeRunTrace({
+      id: 'run-history-fallback',
+      status: 'completed',
+      startedAt: '2026-09-01T09:00:00Z',
+      finishedAt: '2026-09-01T09:00:03Z',
+      providerId: 'fallback-provider',
+      model: 'fallback-model',
+      fallback: {
+        fromProviderId: 'primary-provider',
+        fromModel: 'primary-model',
+        toProviderId: 'fallback-provider',
+        toModel: 'fallback-model',
+        reason: 'Основной маршрут завершился provider-ошибкой',
+        createdAt: '2026-09-01T09:00:01Z',
+        upstreamError: 'secret provider body',
+      },
+    })
+
+    expect(trace?.steps.map((step) => step.kind)).toEqual(['thinking', 'fallback', 'completion'])
+    expect(trace?.steps.find((step) => step.kind === 'fallback')).toMatchObject({
+      fromProviderId: 'primary-provider',
+      toProviderId: 'fallback-provider',
+      reason: 'Основной маршрут завершился provider-ошибкой',
+    })
+    expect(JSON.stringify(trace)).not.toContain('secret provider body')
+  })
+
   it('sorts historical traces chronologically while preserving equal-time order', () => {
     const makeTrace = (id: string, startedAt: string): RunTrace => ({ id, runId: id, status: 'complete', startedAt, steps: [] })
     const sorted = sortRunTraces([
@@ -157,6 +185,62 @@ describe('chat execution trace', () => {
       retryable: false, retryAfterSeconds: 0, createdAt: '2026-09-01T09:00:00Z',
     })
     expect(persisted).toMatchObject({ status: 'error', failureKind: 'quota_exhausted', retryable: false })
+  })
+
+  it('records a route fallback as a visible, secret-free trace step', () => {
+    let traces = aggregateChatEvent([], {
+      type: 'run.started', runId: 'run-fallback', providerId: 'primary', model: 'model/main',
+      createdAt: '2026-09-01T10:00:00Z',
+    })
+    traces = aggregateChatEvent(traces, {
+      type: 'run.fallback', runId: 'run-fallback',
+      fromProviderId: 'primary', fromModel: 'model/main',
+      toProviderId: 'backup', toModel: 'model/reserve',
+      reason: 'Основной маршрут временно недоступен',
+      // An untrusted bridge payload must not be copied into the public trace.
+      ...( { apiKey: 'sk-test-secret', credentials: { token: 'secret' } } as Record<string, unknown>),
+      createdAt: '2026-09-01T10:00:01Z',
+    } as ChatEvent)
+
+    const trace = traces[0]!
+    expect(trace.steps.map((step) => step.kind)).toEqual(['thinking', 'fallback'])
+    expect(trace.steps.find((step) => step.kind === 'fallback')).toMatchObject({
+      kind: 'fallback', status: 'completed', label: 'Переключение маршрута',
+      fromProviderId: 'primary', fromModel: 'model/main',
+      toProviderId: 'backup', toModel: 'model/reserve',
+      reason: 'Основной маршрут временно недоступен',
+    })
+    expect(JSON.stringify(trace)).not.toContain('sk-test-secret')
+    expect(JSON.stringify(trace)).not.toContain('credentials')
+
+    const fallbackFragment = splitRunTraceForTimeline(trace).find((fragment) => fragment.steps[0]?.kind === 'fallback')
+    expect(fallbackFragment).toMatchObject({
+      id: 'trace:run-fallback:fallback:run-fallback:fallback:1',
+      steps: [{ kind: 'fallback', label: 'Переключение маршрута' }],
+    })
+  })
+
+  it('normalizes persisted fallback steps without retaining unknown payload fields', () => {
+    const trace = normalizeRunTrace({
+      id: 'trace-persisted-fallback', runId: 'run-persisted-fallback', status: 'completed',
+      startedAt: '2026-09-01T09:00:00Z',
+      steps: [{
+        type: 'run.fallback', createdAt: '2026-09-01T09:00:01Z',
+        from_provider_id: 'primary', from_model: 'model/main',
+        to_provider_id: 'backup', to_model: 'model/reserve',
+        reason: 'Резервный маршрут выбран', apiKey: 'sk-persisted-secret',
+      }],
+    })
+
+    expect(trace?.steps).toEqual([{
+      id: 'run-persisted-fallback:step:0', kind: 'fallback', status: 'completed',
+      label: 'Переключение маршрута',
+      fromProviderId: 'primary', fromModel: 'model/main',
+      toProviderId: 'backup', toModel: 'model/reserve',
+      reason: 'Резервный маршрут выбран',
+      createdAt: '2026-09-01T09:00:01Z', finishedAt: '2026-09-01T09:00:01Z',
+    }])
+    expect(JSON.stringify(trace)).not.toContain('sk-persisted-secret')
   })
 
   it('splits a run into one thinking block and one block per tool call', () => {
