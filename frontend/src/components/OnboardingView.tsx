@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
+import { openRouterSettings } from '../lib/client/settings'
 import { clearAgentDraft, loadAgentDraft, newAgentDraft } from '../lib/agents'
 import { isOnboardingComplete, onboardingStepIndex, onboardingSteps, validateOnboardingProvider, type OnboardingStep } from '../lib/onboarding'
-import type { AgentProfileInput, CodexAccount, CodexModel, ProviderSettings, YuriClient } from '../lib/contracts'
+import type { AgentProfileInput, CodexAccount, CodexModel, OpenAIModel, OpenAIModelSort, ProviderSettings, YuriClient } from '../lib/contracts'
 import { AgentProfileForm } from './AgentProfileForm'
 import { Icon } from './Icon'
+import { OpenAIModelPicker } from './OpenAIModelPicker'
 
 type OnboardingViewProps = {
   client?: YuriClient
@@ -20,12 +22,7 @@ type Feedback = {
 type BusyState = 'loading' | 'agent' | 'oauth' | 'testing' | undefined
 
 const defaultSettings: ProviderSettings = {
-  kind: 'openai-compatible',
-  baseUrl: 'https://api.openai.com/v1',
-  model: 'gpt-4o-mini',
-  apiKeyConfigured: false,
-  timeoutSeconds: 90,
-  streamResponses: true,
+  ...openRouterSettings,
 }
 
 function errorMessage(cause: unknown, fallback: string): string {
@@ -50,6 +47,10 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
   const client = useMemo(() => providedClient ?? createYuriClient(), [providedClient])
   const [step, setStep] = useState<OnboardingStep>('welcome')
   const [settings, setSettings] = useState<ProviderSettings>(defaultSettings)
+  const [openAISettings, setOpenAISettings] = useState<ProviderSettings>(defaultSettings)
+  const [openAIModels, setOpenAIModels] = useState<OpenAIModel[]>([])
+  const [modelSort, setModelSort] = useState<OpenAIModelSort>('')
+  const [loadingModels, setLoadingModels] = useState(false)
   const [apiKey, setApiKey] = useState('')
   const [agentDraft, setAgentDraft] = useState<AgentProfileInput>(() => loadAgentDraft(newAgentDraft()))
   const [codex, setCodex] = useState<CodexAccount>({ connected: false })
@@ -68,6 +69,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
         client.listAgents(),
       ])
       setSettings(snapshot.settings)
+      setOpenAISettings(snapshot.openAI ?? defaultSettings)
       setCodex(snapshot.codex)
       setCodexModels(snapshot.codex.connected ? await client.getCodexModels().catch(() => []) : [])
       if (isOnboardingComplete(onboarding)) {
@@ -87,8 +89,56 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
   }, [load])
 
   const updateSettings = <K extends keyof ProviderSettings>(key: K, value: ProviderSettings[K]) => {
-    setSettings((current) => ({ ...current, [key]: value }))
+    setSettings((current) => {
+      const next = { ...current, [key]: value }
+      if (next.kind === 'openai-compatible') setOpenAISettings(next)
+      return next
+    })
     setFeedback(undefined)
+  }
+
+  const handleConnectOpenAI = async () => {
+    setLoadingModels(true)
+    setFeedback(undefined)
+    try {
+      const models = await client.connectOpenAIProvider(settings, apiKey.trim() || undefined)
+      const connected = { ...settings, apiKeyConfigured: true }
+      setSettings(connected)
+      setOpenAISettings(connected)
+      setOpenAIModels(models)
+      setApiKey('')
+      setFeedback({ kind: 'success', text: `Ключ сохранён в системном keyring. Выберите одну из ${models.length} моделей.` })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: errorMessage(cause, 'Не удалось сохранить ключ или получить каталог моделей.') })
+    } finally {
+      setLoadingModels(false)
+    }
+  }
+
+  const handleLoadOpenAIModels = async (sort: OpenAIModelSort) => {
+    setModelSort(sort)
+    setLoadingModels(true)
+    try {
+      setOpenAIModels(await client.getOpenAIModels(settings.providerId ?? 'openrouter', sort))
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: errorMessage(cause, 'Не удалось обновить каталог моделей.') })
+    } finally {
+      setLoadingModels(false)
+    }
+  }
+
+  const handleToggleModelFavorite = async (model: OpenAIModel) => {
+    const favorite = !model.favorite
+    try {
+      await client.setOpenAIModelFavorite(settings.providerId ?? 'openrouter', model.id, favorite)
+      setOpenAIModels((current) => current.map((item) => item.id === model.id ? { ...item, favorite } : item))
+      const favorites = new Set(settings.favoriteModels)
+      if (favorite) favorites.add(model.id)
+      else favorites.delete(model.id)
+      updateSettings('favoriteModels', [...favorites])
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: errorMessage(cause, 'Не удалось обновить избранное.') })
+    }
   }
 
   const handleProbe = async () => {
@@ -217,17 +267,19 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
                       <span className="onboarding-provider-state"><i /> SETUP</span>
                     </div>
                     <div aria-label="Выбор провайдера" className="onboarding-provider-tabs" role="tablist">
-                      <button aria-selected={settings.kind === 'openai-compatible'} className={settings.kind === 'openai-compatible' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => updateSettings('kind', 'openai-compatible')} role="tab" type="button"><span className="provider-tab__logo">O</span><span><strong>OpenAI-compatible</strong><small>API key · streaming</small></span></button>
+                      <button aria-selected={settings.kind === 'openai-compatible'} className={settings.kind === 'openai-compatible' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => { setSettings(openAISettings); setFeedback(undefined) }} role="tab" type="button"><span className="provider-tab__logo">O</span><span><strong>OpenAI-compatible</strong><small>OpenRouter · API key</small></span></button>
                       <button aria-selected={settings.kind === 'codex-app-server'} className={settings.kind === 'codex-app-server' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => setSettings((current) => ({ ...current, kind: 'codex-app-server', model: current.kind === 'codex-app-server' ? current.model : '' }))} role="tab" type="button"><span className="provider-tab__logo provider-tab__logo--codex">C</span><span><strong>Codex App Server</strong><small>ChatGPT OAuth</small></span></button>
                       <button aria-selected={settings.kind === 'antigravity'} className={settings.kind === 'antigravity' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => updateSettings('kind', 'antigravity')} role="tab" type="button"><span className="provider-tab__logo">A</span><span><strong>Antigravity</strong><small>OAuth unavailable</small></span></button>
                     </div>
                     {settings.kind === 'openai-compatible' ? (
                       <>
-                        <p className="onboarding-panel__hint">Подходит для OpenAI, локального прокси или другого endpoint с Responses/Chat Completions API. Ключ передаётся только в защищённый provider bridge.</p>
+                        <p className="onboarding-panel__hint">OpenRouter использует OpenAI-compatible Chat Completions API. Ключ передаётся только в защищённый provider bridge и сохраняется в системном keyring.</p>
                         <form className="onboarding-form" onSubmit={(event) => { event.preventDefault(); void handleProbe() }}>
                           <label htmlFor="onboarding-base-url"><span>Base URL</span><input autoComplete="url" id="onboarding-base-url" onChange={(event) => updateSettings('baseUrl', event.target.value)} spellCheck={false} type="url" value={settings.baseUrl} /></label>
-                          <label htmlFor="onboarding-model"><span>Model</span><input autoComplete="off" id="onboarding-model" onChange={(event) => updateSettings('model', event.target.value)} spellCheck={false} value={settings.model} /></label>
-                          <label htmlFor="onboarding-api-key"><span>API key <small>{settings.apiKeyConfigured ? '· сохранён в keyring' : '· optional in preview'}</small></span><input autoComplete="new-password" id="onboarding-api-key" onChange={(event) => setApiKey(event.target.value)} placeholder={settings.apiKeyConfigured ? 'Оставьте пустым, чтобы сохранить текущий' : 'sk-…'} type="password" value={apiKey} /></label>
+                          <label htmlFor="onboarding-api-key"><span>API key <small>{settings.apiKeyConfigured ? '· сохранён в keyring' : '· обязателен для каталога'}</small></span><input autoComplete="new-password" id="onboarding-api-key" onChange={(event) => setApiKey(event.target.value)} placeholder={settings.apiKeyConfigured ? 'Оставьте пустым, чтобы сохранить текущий' : 'sk-or-v1-…'} type="password" value={apiKey} /></label>
+                          <button className="button button--quiet button--wide" disabled={loadingModels || (!apiKey.trim() && !settings.apiKeyConfigured)} onClick={() => void handleConnectOpenAI()} type="button"><Icon name="lock" width={14} height={14} /> {loadingModels ? 'Загружаю модели…' : 'Сохранить ключ и загрузить модели'}</button>
+                          {(settings.apiKeyConfigured || openAIModels.length > 0) && <OpenAIModelPicker loading={loadingModels} models={openAIModels} onReload={(sort) => void handleLoadOpenAIModels(sort)} onSelect={(model) => updateSettings('model', model)} onToggleFavorite={(model) => void handleToggleModelFavorite(model)} sort={modelSort} value={settings.model} />}
+                          <label htmlFor="onboarding-model"><span>Model <small>· из каталога или вручную</small></span><input autoComplete="off" id="onboarding-model" onChange={(event) => updateSettings('model', event.target.value)} placeholder="openai/gpt-4.1-mini" spellCheck={false} value={settings.model} /></label>
                           <div className="onboarding-form__actions"><button className="button button--accent" disabled={busy === 'testing' || busy === 'oauth'} type="submit">{busy === 'testing' ? 'Сохраняю и проверяю…' : 'Сохранить и проверить'} <Icon name="arrow-up" width={14} height={14} /></button></div>
                         </form>
                       </>
@@ -243,7 +295,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
                       <div className="onboarding-codex">
                         <div className="codex-account__row"><div className="codex-account__avatar">A</div><div><strong>Antigravity OAuth недоступен</strong><small>unsupported_auth_mode · конфигурация не будет сохранена</small></div></div>
                         <p className="onboarding-panel__hint">Yuri не импортирует токены Gemini CLI, browser cookies и token cache и не имитирует официальный клиент. Интеграция появится только после публикации разрешённого vendor contract.</p>
-                        <button className="button button--quiet button--wide" onClick={() => updateSettings('kind', 'openai-compatible')} type="button">Использовать API key через совместимый endpoint</button>
+                        <button className="button button--quiet button--wide" onClick={() => { setSettings(openAISettings); setFeedback(undefined) }} type="button">Использовать API key через совместимый endpoint</button>
                         <div className="onboarding-form__actions" />
                       </div>
                     )}

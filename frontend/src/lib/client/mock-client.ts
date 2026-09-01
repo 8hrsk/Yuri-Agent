@@ -20,6 +20,8 @@ import type {
   CodexAccount,
   CodexLogoutResult,
   CodexModel,
+  OpenAIModel,
+  OpenAIModelSort,
   Conversation,
   ConversationPageOptions,
   EncryptedBackupInfo,
@@ -49,6 +51,7 @@ import type {
   PluginRecord,
   ProactivitySettings,
   ProviderSettings,
+  ProviderOption,
   ProviderSnapshot,
   ProviderTestResult,
   RunResult,
@@ -282,6 +285,7 @@ class MockYuriClient implements YuriClient {
     const agent: AgentProfile = {
       id: makeId('agent'), name: input.name.trim(), age: input.age, gender: input.gender.trim(),
       preferences: input.preferences.trim(), backstory: input.backstory.trim(), traits: { ...input.traits }, active: true,
+      providerId: input.providerId.trim(), model: input.model.trim(),
       createdAt: now, updatedAt: now,
     }
     this.agents.set(agent.id, agent)
@@ -318,6 +322,20 @@ class MockYuriClient implements YuriClient {
     this.activeAgentId = agent.id
     this.onboarding = { ...this.onboarding, activeAgentId: agent.id }
     return { ...agent, backstory: agent.backstory, traits: { ...agent.traits }, active: true }
+  }
+
+  async updateActiveAgentModelRoute(providerId: string, model: string): Promise<AgentProfile> {
+    if (!this.activeAgentId) throw new Error('Активный агент не выбран.')
+    const agent = this.agents.get(this.activeAgentId)
+    if (!agent) throw new Error('Агент не найден.')
+    const next = { ...agent, providerId: providerId.trim(), model: model.trim(), updatedAt: nowIso() }
+    this.agents.set(next.id, next)
+    return { ...next, traits: { ...next.traits }, active: true }
+  }
+
+  async listProviders(): Promise<ProviderOption[]> {
+    const settings = this.provider.settings
+    return [{ id: settings.providerId ?? (settings.kind === 'codex-app-server' ? 'codex' : 'openrouter'), kind: settings.kind, displayName: settings.displayName ?? (settings.kind === 'codex-app-server' ? 'Codex App Server' : 'OpenRouter'), model: settings.model, enabled: true, hasSecret: settings.apiKeyConfigured }]
   }
 
   async sendMessage(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult> {
@@ -359,6 +377,7 @@ class MockYuriClient implements YuriClient {
   async getProviderSnapshot(): Promise<ProviderSnapshot> {
     return {
       settings: { ...this.provider.settings },
+      openAI: this.provider.openAI ? { ...this.provider.openAI, favoriteModels: [...this.provider.openAI.favoriteModels] } : undefined,
       codex: { ...this.provider.codex, limits: this.provider.codex.limits ? { ...this.provider.codex.limits } : undefined },
     }
   }
@@ -370,7 +389,38 @@ class MockYuriClient implements YuriClient {
     this.provider = {
       ...this.provider,
       settings: { ...settings, apiKeyConfigured: settings.apiKeyConfigured || Boolean(apiKey?.trim()) },
+      openAI: settings.kind === 'openai-compatible'
+        ? { ...settings, apiKeyConfigured: settings.apiKeyConfigured || Boolean(apiKey?.trim()), favoriteModels: [...settings.favoriteModels] }
+        : this.provider.openAI,
     }
+  }
+
+  async connectOpenAIProvider(settings: ProviderSettings, apiKey?: string): Promise<OpenAIModel[]> {
+    const connected = { ...settings, apiKeyConfigured: settings.apiKeyConfigured || Boolean(apiKey?.trim()) }
+    if (!connected.apiKeyConfigured) throw new Error('API key обязателен для загрузки каталога.')
+    this.provider = { ...this.provider, openAI: connected }
+    return this.getOpenAIModels(connected.providerId ?? 'openrouter')
+  }
+
+  async getOpenAIModels(_providerId: string, sort: OpenAIModelSort = ''): Promise<OpenAIModel[]> {
+    const favorites = new Set(this.provider.openAI?.favoriteModels ?? [])
+    const models: OpenAIModel[] = [
+      { id: 'openai/gpt-4.1-mini', name: 'GPT-4.1 Mini', description: 'Быстрая универсальная модель.', contextLength: 1_047_576, maxCompletionTokens: 32_768, promptPrice: '0.0000004', completionPrice: '0.0000016', free: false, supportsTools: true, inputModalities: ['text', 'image'], outputModalities: ['text'], favorite: favorites.has('openai/gpt-4.1-mini') },
+      { id: 'openrouter/free', name: 'OpenRouter Free Models Router', description: 'Маршрутизатор по доступным бесплатным моделям.', contextLength: 200_000, maxCompletionTokens: 16_384, promptPrice: '0', completionPrice: '0', free: true, supportsTools: true, inputModalities: ['text'], outputModalities: ['text'], favorite: favorites.has('openrouter/free') },
+      { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4', description: 'Сильная модель для рассуждений и текста.', contextLength: 200_000, maxCompletionTokens: 64_000, promptPrice: '0.000003', completionPrice: '0.000015', free: false, supportsTools: true, inputModalities: ['text', 'image'], outputModalities: ['text'], favorite: favorites.has('anthropic/claude-sonnet-4') },
+    ]
+    if (sort === 'context-high-to-low') models.sort((a, b) => b.contextLength - a.contextLength)
+    if (sort === 'pricing-low-to-high') models.sort((a, b) => Number(a.promptPrice ?? Infinity) - Number(b.promptPrice ?? Infinity))
+    if (sort === 'pricing-high-to-low') models.sort((a, b) => Number(b.promptPrice ?? -1) - Number(a.promptPrice ?? -1))
+    return models
+  }
+
+  async setOpenAIModelFavorite(_providerId: string, model: string, favorite: boolean): Promise<void> {
+    const settings = this.provider.openAI ?? { ...defaultSettings }
+    const favorites = new Set(settings.favoriteModels)
+    if (favorite) favorites.add(model)
+    else favorites.delete(model)
+    this.provider = { ...this.provider, openAI: { ...settings, favoriteModels: [...favorites] } }
   }
 
   async getWebSearchSettings(): Promise<WebSearchSettings> {

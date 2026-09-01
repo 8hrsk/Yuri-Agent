@@ -36,6 +36,27 @@ func TestPeerDialogueLifecycleAndBudget(t *testing.T) {
 	}
 }
 
+func TestPeerDialogueRecordsFailedUsageWithoutInventingTurn(t *testing.T) {
+	now := time.Now().UTC()
+	budget := PeerDialogueBudget{MaxTurns: 1, MaxTokens: 8000, MaxDurationSeconds: 30, CooldownSeconds: 60}
+	dialogue, err := NewPeerDialogue("dialogue-failed-usage", "agent-a", "agent-b", "run-a", "diagnose", "key", "hash", budget, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.Transition(PeerDialogueRunning, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.RecordFailedUsage(1375, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if dialogue.TokensUsed != 1375 || dialogue.TurnCount != 0 {
+		t.Fatalf("failed usage dialogue = %#v", dialogue)
+	}
+	if err := dialogue.RecordFailedUsage(7000, now.Add(3*time.Second)); err == nil {
+		t.Fatal("usage beyond the dialogue budget was accepted")
+	}
+}
+
 func TestPeerDialogueRejectsSelfAndRequiresFailureReason(t *testing.T) {
 	now := time.Now().UTC()
 	budget := PeerDialogueBudget{MaxTurns: 2, MaxTokens: 1000, MaxDurationSeconds: 30, CooldownSeconds: 60}

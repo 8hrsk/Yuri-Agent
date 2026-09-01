@@ -36,7 +36,7 @@ func TestPeerDialogueToolRunsCapturedPeerInBackgroundWithoutToolsOrPrivateLeak(t
 		t.Fatalf("completed dialogue=%#v", stored)
 	}
 	requests := backend.snapshot()
-	if len(requests) != 1 || len(requests[0].Tools) != 0 || len(requests[0].Messages) != 3 {
+	if len(requests) != 1 || len(requests[0].Tools) != 0 || len(requests[0].Messages) != 3 || requests[0].MaxOutputTokens != peerDialogueMaxOutputTokens {
 		t.Fatalf("peer model requests=%#v", requests)
 	}
 	joinedSystem := requests[0].Messages[0].Content
@@ -114,11 +114,109 @@ func TestPeerDialogueToolRunsCapturedPeerInBackgroundWithoutToolsOrPrivateLeak(t
 	if err != nil || len(views) != 1 || len(views[0].Messages) != 2 || views[0].PeerName != "Мира" {
 		t.Fatalf("dialogue views=%#v err=%v", views, err)
 	}
+	responseView := views[0].Messages[1]
+	if responseView.ProviderID != "test-provider" || responseView.Model != "test-model" || responseView.TotalTokens != 24 {
+		t.Fatalf("peer response attribution=%#v", responseView)
+	}
 	if _, err := bridge.SetActiveAgent(SelectAgentInput{ID: string(peerID)}); err != nil {
 		t.Fatal(err)
 	}
 	if peerViews, err := bridge.ListPeerDialogues(PeerDialogueListInput{Limit: 10}); err != nil || len(peerViews) != 1 {
 		t.Fatalf("peer participant view=%#v err=%v", peerViews, err)
+	}
+}
+
+func TestPeerDialogueToolResolvesUniquePeerNameToCanonicalID(t *testing.T) {
+	bridge, initiatorID, peerID, parent := newPeerDialogueTestBridge(t)
+	backend := &delegationBackendStub{events: []agent.ModelEvent{
+		{Type: agent.ModelEventTextDelta, Delta: "Получила сообщение по имени."},
+		// The compiled identity/personality input can legitimately make total
+		// usage exceed the old 1,200-token dialogue cap even for a short answer.
+		{Type: agent.ModelEventCompleted, Usage: agent.Usage{TotalTokens: 1_500}},
+	}}
+	tool := peerDialogueAgentTool{bridge: bridge, backend: backend, model: "test-model", initiatorAgentID: initiatorID, triggerRunID: parent.ID}
+	result, err := tool.Execute(context.Background(), agent.ToolCall{
+		ID: "peer-call-by-name", Name: peerDialogueToolID,
+		Arguments: json.RawMessage(`{"peer_agent_id":"МИРА","purpose":"Проверить адресацию","message":"Ответь коротко"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialogueID := domain.ID(result.Metadata["dialogue_id"].(string))
+	stored := waitForPeerDialogue(t, bridge, dialogueID, domain.PeerDialogueCompleted)
+	if stored.PeerAgentID != peerID || stored.TokensUsed != 1_500 {
+		t.Fatalf("peer resolved to %q, want %q", stored.PeerAgentID, peerID)
+	}
+	wantHash := peerDialogueRequestHash(peerDialogueToolInput{PeerAgentID: peerID.String(), Purpose: "Проверить адресацию", Message: "Ответь коротко"})
+	if stored.RequestHash != wantHash {
+		t.Fatalf("request hash = %q, want canonical %q", stored.RequestHash, wantHash)
+	}
+}
+
+func TestPeerDialogueRetriesOneTransientProviderFailure(t *testing.T) {
+	bridge, initiatorID, peerID, parent := newPeerDialogueTestBridge(t)
+	backend := &delegationBackendStub{
+		startErr: []error{agent.NewInferenceError(domain.RunFailureTransient, true, 0, errors.New("temporary provider failure"))},
+		events: []agent.ModelEvent{
+			{Type: agent.ModelEventTextDelta, Delta: "Привет получила, у меня всё хорошо."},
+			{Type: agent.ModelEventCompleted, Usage: agent.Usage{TotalTokens: 11}},
+		},
+	}
+	tool := peerDialogueAgentTool{bridge: bridge, backend: backend, model: "test-model", initiatorAgentID: initiatorID, triggerRunID: parent.ID}
+	result, err := tool.Execute(context.Background(), agent.ToolCall{
+		ID: "peer-call-retry", Name: peerDialogueToolID,
+		Arguments: json.RawMessage(`{"peer_agent_id":"` + string(peerID) + `","purpose":"Передать привет","message":"Привет! Как дела?"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialogueID := domain.ID(result.Metadata["dialogue_id"].(string))
+	stored := waitForPeerDialogue(t, bridge, dialogueID, domain.PeerDialogueCompleted)
+	if stored.TurnCount != 1 || stored.TokensUsed != 11 || len(backend.snapshot()) != 2 {
+		t.Fatalf("retried dialogue=%#v requests=%d", stored, len(backend.snapshot()))
+	}
+	runs, err := bridge.repositories.Runs.ListByAgent(context.Background(), peerID)
+	if err != nil || len(runs) != 2 || runs[0].State != domain.RunStateFailed || runs[1].State != domain.RunStateCompleted {
+		t.Fatalf("retry runs=%#v err=%v", runs, err)
+	}
+}
+
+func TestPeerDialogueDoesNotRetryAuthenticationFailure(t *testing.T) {
+	bridge, initiatorID, peerID, parent := newPeerDialogueTestBridge(t)
+	backend := &delegationBackendStub{startErr: []error{
+		agent.NewInferenceError(domain.RunFailureAuthentication, false, 0, errors.New("sanitized authentication failure")),
+	}}
+	tool := peerDialogueAgentTool{bridge: bridge, backend: backend, model: "test-model", initiatorAgentID: initiatorID, triggerRunID: parent.ID}
+	result, err := tool.Execute(context.Background(), agent.ToolCall{
+		ID: "peer-call-auth", Name: peerDialogueToolID,
+		Arguments: json.RawMessage(`{"peer_agent_id":"` + string(peerID) + `","purpose":"Проверить авторизацию","message":"Ответь коротко"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialogueID := domain.ID(result.Metadata["dialogue_id"].(string))
+	stored := waitForPeerDialogue(t, bridge, dialogueID, domain.PeerDialogueFailed)
+	if len(backend.snapshot()) != 1 {
+		t.Fatalf("authentication failure was retried %d times", len(backend.snapshot()))
+	}
+	if stored.FailureInfo.Kind != domain.RunFailureAuthentication || stored.FailureInfo.Retryable || stored.Failure != "Авторизация провайдера недоступна" {
+		t.Fatalf("failed dialogue = %#v", stored)
+	}
+	views, err := bridge.ListPeerDialogues(PeerDialogueListInput{Limit: 10})
+	if err != nil || len(views) != 1 || views[0].FailureKind != string(domain.RunFailureAuthentication) || views[0].Retryable {
+		t.Fatalf("failure view = %#v err=%v", views, err)
+	}
+}
+
+func TestPeerDialogueToolRejectsAmbiguousPeerName(t *testing.T) {
+	bridge, initiatorID, _, parent := newPeerDialogueTestBridge(t)
+	if _, err := bridge.CreateAgent(CreateAgentInput{Name: "мира", Gender: "female"}); err != nil {
+		t.Fatal(err)
+	}
+	tool := peerDialogueAgentTool{bridge: bridge, backend: &delegationBackendStub{}, model: "test-model", initiatorAgentID: initiatorID, triggerRunID: parent.ID}
+	_, err := tool.resolvePeerAgent(context.Background(), "Мира")
+	if !errors.Is(err, domain.ErrInvalidArgument) || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("ambiguous name error = %v", err)
 	}
 }
 
@@ -295,6 +393,7 @@ func newPeerDialogueTestBridge(t *testing.T) (*Bridge, domain.ID, domain.ID, dom
 	if err != nil {
 		t.Fatal(err)
 	}
+	parent.Inference = domain.RunInferenceRoute{ProviderID: "test-provider", Model: "test-model"}
 	if err := bridge.repositories.Runs.Create(context.Background(), parent); err != nil {
 		t.Fatal(err)
 	}

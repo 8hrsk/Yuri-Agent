@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -72,6 +73,73 @@ func TestSaveOpenAIProviderKeepsSecretOutOfConfig(t *testing.T) {
 	}
 }
 
+func TestOpenRouterCredentialCatalogFavoriteAndActivationFlow(t *testing.T) {
+	const secret = "sk-openrouter-catalog-secret"
+	server := newIPv4ProviderTestServer(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		sortValue := request.URL.Query().Get("sort")
+		if request.URL.Path != "/api/v1/models" || (sortValue != "" && sortValue != "context-high-to-low") {
+			http.Error(writer, "unexpected endpoint", http.StatusNotFound)
+			return
+		}
+		if request.Header.Get("Authorization") != "Bearer "+secret {
+			http.Error(writer, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"data":[{"id":"vendor/model:free","name":"Free Model","context_length":128000,"pricing":{"prompt":"0","completion":"0","request":"0"},"supported_parameters":["tools"],"architecture":{"input_modalities":["text"],"output_modalities":["text"]}}]}`)
+	}))
+	defer server.Close()
+
+	paths := providerTestPaths(t)
+	keyringBackend := &providerTestKeyring{values: make(map[string]string)}
+	store, err := securitykeyring.NewWithBackend("test.openrouter", keyringBackend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := config.Default(paths)
+	value.Providers = []config.ProviderConfig{{ID: "codex", Kind: config.ProviderCodexAppServer, Enabled: true}}
+	bridge := &Bridge{paths: paths, config: value, keyring: store}
+	view, err := bridge.SaveOpenAIProviderCredential(SaveOpenAIProviderCredentialInput{
+		ID: "openrouter", DisplayName: "OpenRouter", BaseURL: server.URL + "/api/v1",
+		APIStyle: config.ProviderAPIStyleChatCompletions, APIKey: secret,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Enabled || view.Model != "" || !view.HasSecret || view.APIStyle != config.ProviderAPIStyleChatCompletions {
+		t.Fatalf("credential draft = %#v", view)
+	}
+	providers := bridge.ListProviders()
+	if len(providers) != 2 || !providers[0].Enabled || providers[1].Enabled {
+		t.Fatalf("credential save changed active provider: %#v", providers)
+	}
+	models, err := bridge.ListOpenAIModels(OpenAIModelCatalogInput{ProviderID: "openrouter", Sort: "context-high-to-low"})
+	if err != nil || len(models) != 1 || !models[0].Free || !models[0].SupportsTools || models[0].ContextLength != 128000 {
+		t.Fatalf("catalog = %#v err=%v", models, err)
+	}
+	if _, err := bridge.SetProviderModelFavorite(SetProviderModelFavoriteInput{ProviderID: "openrouter", Model: models[0].ID, Favorite: true}); err != nil {
+		t.Fatal(err)
+	}
+	models, err = bridge.ListOpenAIModels(OpenAIModelCatalogInput{ProviderID: "openrouter"})
+	if err != nil || !models[0].Favorite {
+		t.Fatalf("favorite catalog = %#v err=%v", models, err)
+	}
+	active, err := bridge.SaveOpenAIProvider(SaveOpenAIProviderInput{
+		ID: "openrouter", DisplayName: "OpenRouter", BaseURL: server.URL + "/api/v1",
+		Model: models[0].ID, APIStyle: config.ProviderAPIStyleChatCompletions, Enabled: true,
+	})
+	if err != nil || !active.Enabled || len(active.FavoriteModels) != 1 {
+		t.Fatalf("activated provider = %#v err=%v", active, err)
+	}
+	content, err := os.ReadFile(paths.ConfigFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), secret) || !strings.Contains(string(content), `"api_style": "chat_completions"`) {
+		t.Fatalf("unsafe or incomplete config: %s", content)
+	}
+}
+
 func TestSaveCodexProviderRejectsCredentialFieldsByConstruction(t *testing.T) {
 	root := t.TempDir()
 	paths := config.Paths{ConfigDirectory: root, ConfigFile: filepath.Join(root, "config.json"), DataDirectory: root}
@@ -85,6 +153,17 @@ func TestSaveCodexProviderRejectsCredentialFieldsByConstruction(t *testing.T) {
 	}
 	if view.Model != "model" {
 		t.Fatalf("Codex OAuth lost the model picker selection: %#v", view)
+	}
+}
+
+func TestOpenRouterDefaultsToChatCompletionsStyle(t *testing.T) {
+	provider := config.ProviderConfig{BaseURL: "https://openrouter.ai/api/v1"}
+	if got := openAIAdapterStyle(provider); got != "chat_completions" {
+		t.Fatalf("OpenRouter style = %q", got)
+	}
+	provider.APIStyle = config.ProviderAPIStyleResponses
+	if got := openAIAdapterStyle(provider); got != "responses" {
+		t.Fatalf("explicit style = %q", got)
 	}
 }
 

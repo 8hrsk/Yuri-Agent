@@ -19,12 +19,14 @@ import { formatDateTime } from '../lib/datetime'
 import { dominantAffectMood } from '../lib/personality'
 import { Icon } from './Icon'
 import { AgentProfileForm } from './AgentProfileForm'
+import { AgentModelRouteEditor } from './AgentModelRouteEditor'
 import { YuriAvatar } from './YuriAvatar'
 
 export type PersonaRelationshipSection = 'personality' | 'relationship'
 
 type PersonaRelationshipViewProps = {
   section: PersonaRelationshipSection
+  onActiveAgentChange?: (agent: AgentProfile) => void
   /**
    * The two sections are two shell destinations. The in-view tabs move the
    * whole shell rather than swapping content behind a nav rail that still
@@ -34,7 +36,7 @@ type PersonaRelationshipViewProps = {
 }
 
 type Feedback = { kind: 'success' | 'error'; text: string }
-type BusyAction = 'loading' | 'evolution' | 'policy' | 'pin' | 'rollback' | 'reset' | 'seed' | undefined
+type BusyAction = 'loading' | 'evolution' | 'policy' | 'pin' | 'rollback' | 'reset' | 'seed' | 'route' | undefined
 
 function ownerSeedDraft(agent: AgentProfile, seed: AgentPersonalizationProfile): AgentProfileInput {
   return {
@@ -43,6 +45,8 @@ function ownerSeedDraft(agent: AgentProfile, seed: AgentPersonalizationProfile):
     gender: agent.gender,
     preferences: seed.identity.selfDescription,
     backstory: seed.structuredBackstory.narrative,
+    providerId: agent.providerId ?? '',
+    model: agent.model ?? '',
     traits: { ...seed.temperament },
     personalization: clonePersonalization(seed),
     creationMode: 'advanced',
@@ -218,7 +222,7 @@ function PersonalityLayerMap({ snapshot, ownerSeed, section }: { snapshot: Perso
   return <section aria-label="Слои личности агента" className="personality-layer-map">{cards.map((card) => <article className={`personality-layer personality-layer--${card.id}${section === 'relationship' && (card.id === 'relationship' || card.id === 'opinion') ? ' personality-layer--active' : section === 'personality' && (card.id === 'owner_seed' || card.id === 'mutable_persona' || card.id === 'affect') ? ' personality-layer--active' : ''}`} key={card.id}><span>{card.label}</span><strong>{card.value}</strong><small>{card.detail}</small></article>)}</section>
 }
 
-export function PersonaRelationshipView({ section, onSelectSection }: PersonaRelationshipViewProps) {
+export function PersonaRelationshipView({ section, onActiveAgentChange, onSelectSection }: PersonaRelationshipViewProps) {
   const client = useMemo(() => createYuriClient(), [])
   const [snapshot, setSnapshot] = useState<PersonalitySnapshot>(() => createStarterPersonalitySnapshot())
   const [busy, setBusy] = useState<BusyAction>('loading')
@@ -230,6 +234,7 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
   const [seedEditorOpen, setSeedEditorOpen] = useState(false)
   const [seedReason, setSeedReason] = useState('')
   const [evolutionPolicy, setEvolutionPolicy] = useState<AgentEvolutionPolicy>()
+  const [modelRoute, setModelRoute] = useState({ providerId: '', model: '' })
 
   const load = useCallback(async () => {
     setBusy('loading')
@@ -242,6 +247,7 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
       ])
       setSnapshot(normalizePersonalitySnapshot(nextSnapshot))
       setActiveAgent(agent)
+      if (agent) setModelRoute({ providerId: agent.providerId ?? '', model: agent.model ?? '' })
       setOwnerSeed(seed)
       if (seed) setEvolutionPolicy({ ...seed.evolutionPolicy, lockedFields: [...seed.evolutionPolicy.lockedFields], traitBounds: { ...seed.evolutionPolicy.traitBounds } })
       if (agent && seed) setSeedDraft((current) => current ?? ownerSeedDraft(agent, seed))
@@ -366,6 +372,22 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
     }
   }
 
+  const saveModelRoute = async () => {
+    setBusy('route')
+    setFeedback(undefined)
+    try {
+      const next = await client.updateActiveAgentModelRoute(modelRoute.providerId, modelRoute.model)
+      setActiveAgent(next)
+      onActiveAgentChange?.(next)
+      setModelRoute({ providerId: next.providerId ?? '', model: next.model ?? '' })
+      setFeedback({ kind: 'success', text: `${next.name} теперь использует ${next.providerId || 'активный provider приложения'} · ${next.model || 'модель по умолчанию'}.` })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось сохранить модель агента.' })
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const saveEvolutionPolicy = async () => {
     if (!ownerSeed || !activeAgent || !evolutionPolicy) return
     setBusy('policy')
@@ -423,6 +445,12 @@ export function PersonaRelationshipView({ section, onSelectSection }: PersonaRel
     </div>
 
     <PersonalityLayerMap ownerSeed={ownerSeed} section={section} snapshot={snapshot} />
+
+    {!relationship && activeAgent && <section className="agent-route-panel" aria-labelledby="agent-route-title">
+      <div><span className="section-heading__overline">PER-AGENT MODEL ROUTING</span><h2 id="agent-route-title">Модель {activeAgent.name}</h2><p>Этот маршрут используется в обычном чате, фоновых run и когда агент отвечает другому агенту.</p></div>
+      <AgentModelRouteEditor disabled={busy !== undefined} model={modelRoute.model} onChange={(providerId, model) => setModelRoute({ providerId, model })} providerId={modelRoute.providerId} />
+      <button className="button button--accent" disabled={busy !== undefined || (modelRoute.providerId === (activeAgent.providerId ?? '') && modelRoute.model === (activeAgent.model ?? ''))} onClick={() => void saveModelRoute()} type="button"><Icon name="check" width={14} height={14} /> {busy === 'route' ? 'Сохраняю…' : 'Сохранить модель агента'}</button>
+    </section>}
 
     {!relationship && ownerSeed && <section className="owner-seed-summary" aria-labelledby="owner-seed-title">
       <div><span className="section-heading__overline">OWNER RESET BASELINE · v{ownerSeed.version}</span><h2 id="owner-seed-title">Исходная персонализация</h2><p>Это append-only baseline владельца. Новая revision задаёт будущие reset-значения и границы рефлексии, но не переписывает текущие persona, affect или relationship.</p></div>

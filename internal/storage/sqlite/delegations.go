@@ -199,9 +199,14 @@ func (repositories *Repositories) SaveDelegationWithChild(ctx context.Context, c
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE agent_runs SET state = ?, max_steps = ?, max_tokens = ?, max_tool_calls = ?,
-			max_tool_output_bytes = ?, max_duration_seconds = ?, failure = ?, version = ?, updated_at = ?, started_at = ?, finished_at = ?
+			max_tool_output_bytes = ?, max_duration_seconds = ?, provider_id = ?, model = ?,
+			input_tokens = ?, output_tokens = ?, total_tokens = ?, failure = ?,
+			failure_kind = ?, failure_retryable = ?, failure_retry_after_seconds = ?,
+			version = ?, updated_at = ?, started_at = ?, finished_at = ?
 		WHERE id = ? AND version = ?`, string(child.State), child.Budget.MaxSteps, child.Budget.MaxTokens, child.Budget.MaxToolCalls,
-		child.Budget.MaxToolOutputBytes, child.Budget.MaxDurationSeconds, nullableStringValue(child.Failure), child.Version, updatedAt,
+		child.Budget.MaxToolOutputBytes, child.Budget.MaxDurationSeconds, strings.TrimSpace(child.Inference.ProviderID), strings.TrimSpace(child.Inference.Model),
+		child.Usage.InputTokens, child.Usage.OutputTokens, child.Usage.TotalTokens, nullableStringValue(child.Failure),
+		string(child.FailureInfo.Kind), child.FailureInfo.Retryable, child.FailureInfo.RetryAfterSeconds, child.Version, updatedAt,
 		nullableTimeValue(child.StartedAt), nullableTimeValue(child.FinishedAt), string(child.ID), childVersion); err != nil {
 		return wrappedSQLError("save delegation child", err)
 	}

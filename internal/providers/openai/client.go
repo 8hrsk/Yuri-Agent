@@ -138,9 +138,9 @@ func (c *Client) marshalRequest(request agent.ModelRequest) ([]byte, APIStyle, e
 	var payload any
 	switch style {
 	case APIStyleResponses:
-		payload = responsesRequest{Model: request.Model, Input: responsesInput(request.Messages), Tools: responsesTools(request.Tools), Stream: true, MaxOutputTokens: request.MaxOutputTokens, Temperature: request.Temperature, Metadata: request.Metadata}
+		payload = responsesRequest{Model: request.Model, Input: responsesInput(request.Messages), Tools: responsesTools(request.Tools), ToolChoice: responsesToolChoice(request.ToolChoice), Stream: true, MaxOutputTokens: request.MaxOutputTokens, Temperature: request.Temperature, Metadata: request.Metadata}
 	case APIStyleChatCompletions:
-		payload = chatRequest{Model: request.Model, Messages: chatMessages(request.Messages), Tools: chatTools(request.Tools), Stream: true, StreamOptions: &chatStreamOptions{IncludeUsage: true}, MaxTokens: request.MaxOutputTokens, Temperature: request.Temperature, Metadata: request.Metadata}
+		payload = chatRequest{Model: request.Model, Messages: chatMessages(request.Messages), Tools: chatTools(request.Tools), ToolChoice: chatToolChoice(request.ToolChoice), Stream: true, StreamOptions: &chatStreamOptions{IncludeUsage: true}, MaxTokens: request.MaxOutputTokens, Temperature: request.Temperature, Metadata: request.Metadata}
 	default:
 		return nil, "", providerError(ErrorKindRequest, "marshal", 0, "unsupported API style", false, 0)
 	}

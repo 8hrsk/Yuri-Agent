@@ -289,6 +289,40 @@ func TestProviderConfigContainsOnlyKeyringReference(t *testing.T) {
 	}
 }
 
+func TestDisabledOpenAIProviderMayAwaitModelSelection(t *testing.T) {
+	paths := testPaths(t)
+	value := Default(paths)
+	value.Providers = []ProviderConfig{{
+		ID: "openrouter", Kind: ProviderOpenAICompatible, DisplayName: "OpenRouter",
+		BaseURL: "https://openrouter.ai/api/v1", APIStyle: ProviderAPIStyleChatCompletions,
+		CredentialRef: "provider.openrouter.api-key", Enabled: false,
+	}}
+	if err := value.Validate(); err != nil {
+		t.Fatalf("disabled provider draft rejected: %v", err)
+	}
+	value.Providers[0].Enabled = true
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "requires model") {
+		t.Fatalf("enabled provider without model error = %v", err)
+	}
+}
+
+func TestProviderRejectsInvalidStyleAndDuplicateFavorites(t *testing.T) {
+	paths := testPaths(t)
+	value := Default(paths)
+	value.Providers = []ProviderConfig{{
+		ID: "openrouter", Kind: ProviderOpenAICompatible, BaseURL: "https://openrouter.ai/api/v1",
+		Model: "openai/gpt-4", APIStyle: "unknown", FavoriteModels: []string{"model", "model"},
+		CredentialRef: "provider.openrouter.api-key", Enabled: true,
+	}}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "API style") {
+		t.Fatalf("invalid API style error = %v", err)
+	}
+	value.Providers[0].APIStyle = ProviderAPIStyleChatCompletions
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate favorite") {
+		t.Fatalf("duplicate favorite error = %v", err)
+	}
+}
+
 func TestProviderConfigRejectsInsecureRemoteURLAndCodexCredential(t *testing.T) {
 	paths := testPaths(t)
 	value := Default(paths)

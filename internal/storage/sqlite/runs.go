@@ -46,11 +46,16 @@ func (r *RunRepository) Create(ctx context.Context, run domain.AgentRun) error {
 		INSERT INTO agent_runs(
 			id, agent_id, kind, conversation_id, parent_run_id, state,
 			max_steps, max_tokens, max_tool_calls, max_tool_output_bytes, max_duration_seconds,
-			failure, version, created_at, updated_at, started_at, finished_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			provider_id, model, input_tokens, output_tokens, total_tokens,
+			failure, failure_kind, failure_retryable, failure_retry_after_seconds,
+			version, created_at, updated_at, started_at, finished_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(run.ID), string(run.AgentID), string(run.Kind), nullableID(run.ConversationID), nullableID(run.ParentRunID),
 		string(run.State), run.Budget.MaxSteps, run.Budget.MaxTokens, run.Budget.MaxToolCalls, run.Budget.MaxToolOutputBytes,
-		run.Budget.MaxDurationSeconds, nullableStringValue(run.Failure), run.Version, createdAt, updatedAt,
+		run.Budget.MaxDurationSeconds, strings.TrimSpace(run.Inference.ProviderID), strings.TrimSpace(run.Inference.Model),
+		run.Usage.InputTokens, run.Usage.OutputTokens, run.Usage.TotalTokens,
+		nullableStringValue(run.Failure), string(run.FailureInfo.Kind), run.FailureInfo.Retryable, run.FailureInfo.RetryAfterSeconds,
+		run.Version, createdAt, updatedAt,
 		nullableTimeValue(run.StartedAt), nullableTimeValue(run.FinishedAt))
 	return wrappedSQLError("create run", err)
 }
@@ -68,11 +73,16 @@ func insertRunTx(ctx context.Context, tx *sql.Tx, run domain.AgentRun) error {
 		INSERT INTO agent_runs(
 			id, agent_id, kind, conversation_id, parent_run_id, state,
 			max_steps, max_tokens, max_tool_calls, max_tool_output_bytes, max_duration_seconds,
-			failure, version, created_at, updated_at, started_at, finished_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			provider_id, model, input_tokens, output_tokens, total_tokens,
+			failure, failure_kind, failure_retryable, failure_retry_after_seconds,
+			version, created_at, updated_at, started_at, finished_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(run.ID), string(run.AgentID), string(run.Kind), nullableID(run.ConversationID), nullableID(run.ParentRunID),
 		string(run.State), run.Budget.MaxSteps, run.Budget.MaxTokens, run.Budget.MaxToolCalls, run.Budget.MaxToolOutputBytes,
-		run.Budget.MaxDurationSeconds, nullableStringValue(run.Failure), run.Version, createdAt, updatedAt,
+		run.Budget.MaxDurationSeconds, strings.TrimSpace(run.Inference.ProviderID), strings.TrimSpace(run.Inference.Model),
+		run.Usage.InputTokens, run.Usage.OutputTokens, run.Usage.TotalTokens,
+		nullableStringValue(run.Failure), string(run.FailureInfo.Kind), run.FailureInfo.Retryable, run.FailureInfo.RetryAfterSeconds,
+		run.Version, createdAt, updatedAt,
 		nullableTimeValue(run.StartedAt), nullableTimeValue(run.FinishedAt))
 	return wrappedSQLError("create run", err)
 }
@@ -94,7 +104,9 @@ func (r *RunRepository) Get(ctx context.Context, id domain.ID) (domain.AgentRun,
 // scanner and one round-trip per query.
 const runColumns = `id, agent_id, kind, conversation_id, parent_run_id, state,
 	       max_steps, max_tokens, max_tool_calls, max_tool_output_bytes, max_duration_seconds,
-	       failure, version, created_at, updated_at, started_at, finished_at`
+	       provider_id, model, input_tokens, output_tokens, total_tokens,
+	       failure, failure_kind, failure_retryable, failure_retry_after_seconds,
+	       version, created_at, updated_at, started_at, finished_at`
 
 const runSelect = `
 	SELECT ` + runColumns + `
@@ -114,7 +126,9 @@ func scanRun(row rowScanner) (domain.AgentRun, error) {
 	err := row.Scan(
 		&idValue, &agentID, &kind, &nullableString{Value: &conversationID}, &nullableString{Value: &parentID}, &state,
 		&run.Budget.MaxSteps, &run.Budget.MaxTokens, &run.Budget.MaxToolCalls, &run.Budget.MaxToolOutputBytes, &run.Budget.MaxDurationSeconds,
-		&nullableString{Value: &failure}, &run.Version, &createdAt, &updatedAt, &startedAt, &finishedAt)
+		&run.Inference.ProviderID, &run.Inference.Model, &run.Usage.InputTokens, &run.Usage.OutputTokens, &run.Usage.TotalTokens,
+		&nullableString{Value: &failure}, &run.FailureInfo.Kind, &run.FailureInfo.Retryable, &run.FailureInfo.RetryAfterSeconds,
+		&run.Version, &createdAt, &updatedAt, &startedAt, &finishedAt)
 	if err != nil {
 		return domain.AgentRun{}, wrappedSQLError("get run", err)
 	}
@@ -167,11 +181,16 @@ func (r *RunRepository) Save(ctx context.Context, run domain.AgentRun) error {
 		UPDATE agent_runs SET
 			agent_id = ?, kind = ?, conversation_id = ?, parent_run_id = ?, state = ?,
 			max_steps = ?, max_tokens = ?, max_tool_calls = ?, max_tool_output_bytes = ?, max_duration_seconds = ?,
-			failure = ?, version = ?, updated_at = ?, started_at = ?, finished_at = ?
+			provider_id = ?, model = ?, input_tokens = ?, output_tokens = ?, total_tokens = ?,
+			failure = ?, failure_kind = ?, failure_retryable = ?, failure_retry_after_seconds = ?,
+			version = ?, updated_at = ?, started_at = ?, finished_at = ?
 		WHERE id = ? AND version = ?`,
 		string(run.AgentID), string(run.Kind), nullableID(run.ConversationID), nullableID(run.ParentRunID), string(run.State),
 		run.Budget.MaxSteps, run.Budget.MaxTokens, run.Budget.MaxToolCalls, run.Budget.MaxToolOutputBytes, run.Budget.MaxDurationSeconds,
-		nullableStringValue(run.Failure), run.Version, updatedAt, nullableTimeValue(run.StartedAt), nullableTimeValue(run.FinishedAt),
+		strings.TrimSpace(run.Inference.ProviderID), strings.TrimSpace(run.Inference.Model),
+		run.Usage.InputTokens, run.Usage.OutputTokens, run.Usage.TotalTokens,
+		nullableStringValue(run.Failure), string(run.FailureInfo.Kind), run.FailureInfo.Retryable, run.FailureInfo.RetryAfterSeconds,
+		run.Version, updatedAt, nullableTimeValue(run.StartedAt), nullableTimeValue(run.FinishedAt),
 		string(run.ID), run.Version-1)
 	if err != nil {
 		return wrappedSQLError("save run", err)
@@ -252,8 +271,11 @@ func (r *RunRepository) list(ctx context.Context, predicate string, args []any, 
 }
 
 func validateRun(run domain.AgentRun) error {
-	if run.ID.Empty() || !run.Kind.Valid() || !run.State.Valid() || !run.Budget.Valid() {
+	if run.ID.Empty() || !run.Kind.Valid() || !run.State.Valid() || !run.Budget.Valid() || !run.Inference.Valid() || !run.Usage.Valid() || !run.FailureInfo.Valid() {
 		return fmt.Errorf("%w: invalid run", domain.ErrInvalidArgument)
+	}
+	if run.State != domain.RunStateFailed && run.FailureInfo.Kind != "" {
+		return fmt.Errorf("%w: failure metadata requires a failed run", domain.ErrInvalidArgument)
 	}
 	if run.Version == 0 {
 		return fmt.Errorf("%w: run version must be positive", domain.ErrInvalidArgument)

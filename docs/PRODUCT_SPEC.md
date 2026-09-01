@@ -111,6 +111,10 @@ Yuri инициирует разговор только при выполнен�
 
 - Абстракция `InferenceBackend` поддерживает два режима: `ModelBackend`, где Yuri сама выполняет agent loop поверх модельного API, и `AgentHarnessBackend`, где внешний официальный harness возвращает поток событий, tool intents и approval requests.
 - Поддержка OpenAI-compatible Chat Completions или Responses-style API через адаптер провайдера.
+- Каждый именованный агент хранит собственный маршрут inference: `provider_id` и выбранную модель. Маршрут задаётся при создании, редактируется в Personality и применяется к обычному Chat, Personality Preview, внутренним диалогам и фоновой рефлексии этого агента; отсутствие явного маршрута означает безопасный fallback на глобальный provider по умолчанию.
+- Chat, roster и Collaboration показывают выбранные для агентов provider/model. Каждый model-backed `AgentRun` до первого provider call неизменяемо фиксирует фактические `provider_id` и `model`; provider-reported input/output/total token usage сохраняется монотонно и остаётся доступным при success, error и cancellation. Изменение текущего маршрута агента не переписывает историю. Chat показывает route/usage у execution trace, а Collaboration — у конкретной реплики по её `source_run_id`, отдельно от текущих маршрутов участников.
+- Ошибки inference нормализуются в безопасные provider-neutral категории (`authentication`, `rate_limit`, `quota_exhausted`, `context_limit`, `model_unavailable`, `timeout`, `transient`, `invalid_request`, `budget_exceeded`, `unknown`). Категория, признак допустимости повтора и ограниченный `retry_after` сохраняются отдельно от текста ошибки и показываются как конкретное следующее действие в Chat и Collaboration. Ошибка не должна молча переключать агенту provider или модель; смена маршрута остаётся явным решением владельца.
+- Terminal error trace предлагает только соответствующие категории явные recovery-действия: повтор последнего user turn для retryable-сбоя, новый диалог при исчерпанном контексте/бюджете, Settings для восстановления provider account и Personality для выбора модели конкретного агента. Retry до первого assistant token использует durable user-turn anchor и повторно подставляет его сохранённые вложения; исторические ветки не интерпретируются повторно поверх более нового transcript. Action показывается один раз у последнего блока run, а не у каждого tool call.
 - Настройки: base URL, API key/OAuth account, model, timeout, context limit, temperature, support flags.
 - Потоковые ответы, structured tool calls, retry с backoff и отмена по context cancellation.
 - Capability probing или ручное указание поддержки tools, vision, JSON schema и embeddings.
@@ -463,7 +467,7 @@ PebbleDB используется только для производных и�
 MVP принимается, если:
 
 1. Чистая установка проходит onboarding и успешно выполняет тестовый запрос к настроенному провайдеру.
-2. Ответ отображается потоково, его можно отменить, а ошибка провайдера объясняется без падения приложения.
+2. Ответ отображается потоково, его можно отменить, а ошибка провайдера объясняется безопасной категорией и следующим действием без падения приложения или скрытого переключения маршрута.
 3. Агент читает файл в разрешённой директории; для пути за её пределами запрашивает доступ, после `allow_once` возобновляет тот же вызов без постоянного grant, после `allow_always` сохраняет только каноническую директорию, а после `deny` не читает файл.
 4. Изменение файла требует подтверждения и отражается в audit log.
 5. Тестовый out-of-process plugin устанавливается, запрашивает permission, вызывает tool и корректно переживает crash/restart.

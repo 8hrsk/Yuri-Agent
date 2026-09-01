@@ -12,11 +12,12 @@ import (
 
 func (b *Bridge) failChatRun(ctx context.Context, run *domain.AgentRun, emitter *chatEmitter, cause error) ChatRunResult {
 	status := "error"
-	message := safeError(cause.Error())
+	message, failureInfo := inferenceFailure(cause)
 	// Provider adapters flatten a cancelled transport error into a message, so
 	// the run context is the authoritative signal for an owner interruption.
 	if errors.Is(cause, context.Canceled) || (ctx != nil && errors.Is(ctx.Err(), context.Canceled)) {
 		status, message = "cancelled", "Запуск остановлен"
+		failureInfo = domain.RunFailureInfo{}
 	}
 	if run != nil && !run.State.Terminal() {
 		if status == "cancelled" {
@@ -26,7 +27,7 @@ func (b *Bridge) failChatRun(ctx context.Context, run *domain.AgentRun, emitter 
 			_ = transitionAndSave(context.Background(), b.repositories.Runs, run, domain.RunStateCancelled)
 		} else if run.State == domain.RunStateRunning || run.State == domain.RunStateWaitingApproval {
 			candidate := *run
-			if candidate.Fail(message, time.Now().UTC()) == nil && b.repositories.Runs.Save(context.Background(), candidate) == nil {
+			if candidate.FailWithInfo(message, failureInfo, time.Now().UTC()) == nil && b.repositories.Runs.Save(context.Background(), candidate) == nil {
 				*run = candidate
 			}
 		}
@@ -37,7 +38,8 @@ func (b *Bridge) failChatRun(ctx context.Context, run *domain.AgentRun, emitter 
 			RunID: emitter.runID, MessageID: completedID,
 		})
 	}
-	emitter.emitTerminal(ChatEvent{Type: runCompletedEventType, ConversationID: emitter.conversationID, RunID: emitter.runID, Status: status, Error: message})
+	emitter.emitTerminal(ChatEvent{Type: runCompletedEventType, ConversationID: emitter.conversationID, RunID: emitter.runID, Status: status, Error: message,
+		FailureKind: string(failureInfo.Kind), Retryable: failureInfo.Retryable, RetryAfterSeconds: failureInfo.RetryAfterSeconds})
 	return ChatRunResult{RunID: emitter.runID, Status: status, Events: emitter.Events()}
 }
 

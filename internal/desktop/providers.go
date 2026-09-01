@@ -50,11 +50,7 @@ func (b *Bridge) ListProviders() []ProviderView {
 	b.mu.RUnlock()
 	views := make([]ProviderView, 0, len(providers))
 	for _, provider := range providers {
-		views = append(views, ProviderView{
-			ID: provider.ID, Kind: provider.Kind, DisplayName: provider.DisplayName,
-			BaseURL: provider.BaseURL, Model: provider.Model, Binary: provider.Binary,
-			Enabled: provider.Enabled, HasSecret: provider.CredentialRef != "",
-		})
+		views = append(views, providerView(provider))
 	}
 	return views
 }
@@ -67,16 +63,61 @@ func (b *Bridge) SaveOpenAIProvider(input SaveOpenAIProviderInput) (ProviderView
 	if strings.TrimSpace(input.DisplayName) == "" {
 		input.DisplayName = "OpenAI-compatible"
 	}
-	reference := "provider." + input.ID + ".api-key"
+	ctx, cancel := b.context()
+	defer cancel()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	existing, _ := configuredProvider(b.config.Providers, input.ID)
+	style := normalizedOpenAIAPIStyle(input.APIStyle, input.BaseURL)
+	if input.APIStyle == "" && existing.APIStyle != "" {
+		style = existing.APIStyle
+	}
 	provider := config.ProviderConfig{
 		ID: input.ID, Kind: config.ProviderOpenAICompatible, DisplayName: strings.TrimSpace(input.DisplayName),
-		BaseURL: strings.TrimSpace(input.BaseURL), Model: strings.TrimSpace(input.Model),
-		CredentialRef: reference, Enabled: input.Enabled,
+		BaseURL: strings.TrimSpace(input.BaseURL), Model: strings.TrimSpace(input.Model), APIStyle: style,
+		FavoriteModels: append([]string(nil), existing.FavoriteModels...),
+		CredentialRef:  "provider." + input.ID + ".api-key", Enabled: input.Enabled,
+	}
+	return b.saveOpenAIProviderLocked(ctx, provider, input.APIKey)
+}
+
+// SaveOpenAIProviderCredential persists the token and endpoint metadata before
+// model selection. It never activates a new provider or disables the current
+// one. Existing activation/model/favorites are preserved.
+func (b *Bridge) SaveOpenAIProviderCredential(input SaveOpenAIProviderCredentialInput) (ProviderView, error) {
+	input.ID = strings.TrimSpace(input.ID)
+	if input.ID == "" {
+		input.ID = "openai"
+	}
+	if strings.TrimSpace(input.DisplayName) == "" {
+		input.DisplayName = "OpenAI-compatible"
 	}
 	ctx, cancel := b.context()
 	defer cancel()
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	existing, found := configuredProvider(b.config.Providers, input.ID)
+	if found && existing.Kind != config.ProviderOpenAICompatible {
+		return ProviderView{}, fmt.Errorf("provider %q is not OpenAI-compatible", input.ID)
+	}
+	style := normalizedOpenAIAPIStyle(input.APIStyle, input.BaseURL)
+	if input.APIStyle == "" && existing.APIStyle != "" {
+		style = existing.APIStyle
+	}
+	provider := config.ProviderConfig{
+		ID: input.ID, Kind: config.ProviderOpenAICompatible, DisplayName: strings.TrimSpace(input.DisplayName),
+		BaseURL: strings.TrimSpace(input.BaseURL), APIStyle: style,
+		CredentialRef: "provider." + input.ID + ".api-key",
+	}
+	if found {
+		provider.Model = existing.Model
+		provider.Enabled = existing.Enabled
+		provider.FavoriteModels = append([]string(nil), existing.FavoriteModels...)
+	}
+	return b.saveOpenAIProviderLocked(ctx, provider, input.APIKey)
+}
+
+func (b *Bridge) saveOpenAIProviderLocked(ctx context.Context, provider config.ProviderConfig, apiKey string) (ProviderView, error) {
 	candidate := b.config
 	if provider.Enabled {
 		candidate.Providers = disableProviders(candidate.Providers)
@@ -88,20 +129,20 @@ func (b *Bridge) SaveOpenAIProvider(input SaveOpenAIProviderInput) (ProviderView
 	if b.keyring == nil {
 		return ProviderView{}, errors.New("system keyring is unavailable")
 	}
-	oldSecret, oldError := b.keyring.Get(ctx, reference)
-	if input.APIKey == "" {
+	oldSecret, oldError := b.keyring.Get(ctx, provider.CredentialRef)
+	if apiKey == "" {
 		if oldError != nil {
 			return ProviderView{}, errors.New("API key is required for a new provider")
 		}
-	} else if err := b.keyring.Put(ctx, reference, input.APIKey); err != nil {
+	} else if err := b.keyring.Put(ctx, provider.CredentialRef, apiKey); err != nil {
 		return ProviderView{}, err
 	}
 	if err := config.Save(b.paths, candidate); err != nil {
-		if input.APIKey != "" {
+		if apiKey != "" {
 			if oldError == nil {
-				_ = b.keyring.Put(context.Background(), reference, oldSecret)
+				_ = b.keyring.Put(context.Background(), provider.CredentialRef, oldSecret)
 			} else {
-				_ = b.keyring.Delete(context.Background(), reference)
+				_ = b.keyring.Delete(context.Background(), provider.CredentialRef)
 			}
 		}
 		return ProviderView{}, err
@@ -178,7 +219,7 @@ func (b *Bridge) CompleteOnboarding(input CompleteOnboardingInput) OnboardingRes
 		}
 		if _, err := b.SaveOpenAIProvider(SaveOpenAIProviderInput{
 			ID: providerID, DisplayName: "OpenAI-compatible", BaseURL: settings.BaseURL,
-			Model: settings.Model, APIKey: input.APIKey, Enabled: true,
+			Model: settings.Model, APIStyle: settings.APIStyle, APIKey: input.APIKey, Enabled: true,
 		}); err != nil {
 			return OnboardingResult{Message: safeError(err.Error()), State: b.GetOnboardingState()}
 		}

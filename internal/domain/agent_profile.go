@@ -12,6 +12,8 @@ const (
 	AgentGenderMaxRunes      = 64
 	AgentPreferencesMaxRunes = 2000
 	AgentBackstoryMaxRunes   = 12000
+	AgentProviderIDMaxRunes  = 128
+	AgentModelMaxRunes       = 256
 	AgentMinimumAge          = 1
 	AgentMaximumAge          = 200
 )
@@ -27,6 +29,8 @@ type AgentProfile struct {
 	Gender      string    `json:"gender"`
 	Preferences string    `json:"preferences,omitempty"`
 	Backstory   string    `json:"backstory,omitempty"`
+	ProviderID  string    `json:"provider_id,omitempty"`
+	Model       string    `json:"model,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -73,6 +77,17 @@ func (p AgentProfile) Validate() error {
 	backstory := strings.TrimSpace(p.Backstory)
 	if utf8.RuneCountInString(backstory) > AgentBackstoryMaxRunes || strings.ContainsRune(backstory, '\x00') {
 		return fmt.Errorf("%w: agent backstory exceeds %d characters", ErrInvalidArgument, AgentBackstoryMaxRunes)
+	}
+	providerID := strings.TrimSpace(p.ProviderID)
+	model := strings.TrimSpace(p.Model)
+	if utf8.RuneCountInString(providerID) > AgentProviderIDMaxRunes || strings.ContainsRune(providerID, '\x00') {
+		return fmt.Errorf("%w: agent provider id exceeds %d characters", ErrInvalidArgument, AgentProviderIDMaxRunes)
+	}
+	if utf8.RuneCountInString(model) > AgentModelMaxRunes || strings.ContainsRune(model, '\x00') {
+		return fmt.Errorf("%w: agent model exceeds %d characters", ErrInvalidArgument, AgentModelMaxRunes)
+	}
+	if providerID == "" && model != "" {
+		return fmt.Errorf("%w: agent model requires an explicit provider", ErrInvalidArgument)
 	}
 	if p.CreatedAt.IsZero() || p.UpdatedAt.IsZero() || p.UpdatedAt.Before(p.CreatedAt) {
 		return fmt.Errorf("%w: invalid agent profile timestamps", ErrInvalidArgument)

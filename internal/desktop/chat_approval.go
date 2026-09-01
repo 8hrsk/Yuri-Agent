@@ -389,6 +389,17 @@ func approvalIDFor(runID domain.ID, callID string) domain.ID {
 // pending, so the renderer always observes deltas, tool events and lifecycle
 // events in the order the runtime produced them.
 func (emitter *chatEmitter) emit(event ChatEvent) {
+	if event.ProviderID == "" {
+		event.ProviderID = emitter.providerID
+	}
+	if event.Model == "" {
+		event.Model = emitter.model
+	}
+	if event.Type == runCompletedEventType {
+		event.InputTokens = emitter.usage.InputTokens
+		event.OutputTokens = emitter.usage.OutputTokens
+		event.TotalTokens = emitter.usage.TotalTokens
+	}
 	if event.CreatedAt == "" {
 		event.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}

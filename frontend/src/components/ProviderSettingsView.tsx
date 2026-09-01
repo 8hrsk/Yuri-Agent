@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
-import type { CodexAccount, CodexModel, ProviderSettings, UsageLimits, WebSearchSettings } from '../lib/contracts'
+import { openRouterSettings } from '../lib/client/settings'
+import type { CodexAccount, CodexModel, OpenAIModel, OpenAIModelSort, ProviderSettings, UsageLimits, WebSearchSettings } from '../lib/contracts'
 import { EncryptedBackupCard } from './EncryptedBackupCard'
 import { Icon } from './Icon'
+import { OpenAIModelPicker } from './OpenAIModelPicker'
 
 type ProviderSettingsViewProps = {
   onBackToChat: () => void
@@ -13,7 +15,9 @@ const initialSettings: ProviderSettings = {
   kind: 'openai-compatible',
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
+  apiStyle: 'responses',
   apiKeyConfigured: false,
+  favoriteModels: [],
   timeoutSeconds: 90,
   streamResponses: true,
 }
@@ -47,6 +51,10 @@ function UsageMeter({ limits }: { limits: UsageLimits }) {
 export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps) {
   const client = useMemo(() => createYuriClient(), [])
   const [settings, setSettings] = useState<ProviderSettings>(initialSettings)
+  const [openAISettings, setOpenAISettings] = useState<ProviderSettings>(openRouterSettings)
+  const [openAIModels, setOpenAIModels] = useState<OpenAIModel[]>([])
+  const [modelSort, setModelSort] = useState<OpenAIModelSort>('')
+  const [loadingModels, setLoadingModels] = useState(false)
   const [apiKey, setApiKey] = useState('')
   const [allowedDirectories, setAllowedDirectories] = useState('')
   const [webSearch, setWebSearch] = useState<WebSearchSettings>(initialWebSearch)
@@ -66,6 +74,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
     void Promise.all([client.getProviderSnapshot(), client.getAllowedDirectories(), client.getWebSearchSettings()]).then(([snapshot, directories, search]) => {
       if (!mounted) return
       setSettings(snapshot.settings)
+      setOpenAISettings(snapshot.openAI ?? openRouterSettings)
       setCodex(snapshot.codex)
       setLimits(snapshot.codex.limits)
       setAllowedDirectories(directories.join('\n'))
@@ -82,8 +91,77 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
   }, [client])
 
   const updateSettings = <K extends keyof ProviderSettings>(key: K, value: ProviderSettings[K]) => {
-    setSettings((current) => ({ ...current, [key]: value }))
+    setSettings((current) => {
+      const next = { ...current, [key]: value }
+      if (next.kind === 'openai-compatible') setOpenAISettings(next)
+      return next
+    })
     setFeedback(undefined)
+  }
+
+  const selectOpenAIProvider = () => {
+    setSettings(openAISettings)
+    setFeedback(undefined)
+  }
+
+  const selectOpenRouter = () => {
+    const configured = openAISettings.providerId === 'openrouter' ? openAISettings : openRouterSettings
+    setSettings(configured)
+    setOpenAISettings(configured)
+    setOpenAIModels([])
+    setApiKey('')
+    setFeedback(undefined)
+  }
+
+  const handleLoadOpenAIModels = async (sort: OpenAIModelSort = modelSort) => {
+    setModelSort(sort)
+    setLoadingModels(true)
+    setFeedback(undefined)
+    try {
+      const models = await client.getOpenAIModels(settings.providerId ?? 'openai', sort)
+      setOpenAIModels(models)
+      setFeedback({ kind: 'success', text: `Каталог загружен: ${models.length} моделей.` })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось загрузить каталог моделей.' })
+    } finally {
+      setLoadingModels(false)
+    }
+  }
+
+  const handleConnectOpenAI = async () => {
+    setLoadingModels(true)
+    setFeedback(undefined)
+    try {
+      const models = await client.connectOpenAIProvider(settings, apiKey.trim() || undefined)
+      const connected = { ...settings, apiKeyConfigured: true }
+      setSettings(connected)
+      setOpenAISettings(connected)
+      setOpenAIModels(models)
+      setApiKey('')
+      setFeedback({ kind: 'success', text: `Ключ сохранён в системном keyring. Доступно моделей: ${models.length}.` })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось сохранить ключ или получить модели.' })
+    } finally {
+      setLoadingModels(false)
+    }
+  }
+
+  const handleToggleModelFavorite = async (model: OpenAIModel) => {
+    const favorite = !model.favorite
+    try {
+      await client.setOpenAIModelFavorite(settings.providerId ?? 'openai', model.id, favorite)
+      setOpenAIModels((current) => current.map((item) => item.id === model.id ? { ...item, favorite } : item))
+      setSettings((current) => {
+        const favorites = new Set(current.favoriteModels)
+        if (favorite) favorites.add(model.id)
+        else favorites.delete(model.id)
+        const next = { ...current, favoriteModels: [...favorites] }
+        setOpenAISettings(next)
+        return next
+      })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось обновить избранное.' })
+    }
   }
 
   const handleSave = async () => {
@@ -93,7 +171,11 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
       await client.saveProviderSettings(settings, apiKey)
       await client.saveAllowedDirectories(allowedDirectories.split('\n').map((item) => item.trim()).filter(Boolean))
       await client.saveWebSearchSettings(webSearch)
-      setSettings((current) => ({ ...current, apiKeyConfigured: current.apiKeyConfigured || Boolean(apiKey.trim()) }))
+      setSettings((current) => {
+        const next = { ...current, apiKeyConfigured: current.apiKeyConfigured || Boolean(apiKey.trim()) }
+        if (next.kind === 'openai-compatible') setOpenAISettings(next)
+        return next
+      })
       setApiKey('')
       setFeedback({ kind: 'success', text: 'Настройки сохранены. Секрет передан только в защищённый backend-вызов.' })
     } catch (cause) {
@@ -191,7 +273,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
       </div>
 
       <div className="provider-tabs" role="tablist" aria-label="Тип провайдера">
-        <button aria-selected={settings.kind === 'openai-compatible'} className={settings.kind === 'openai-compatible' ? 'provider-tab provider-tab--active' : 'provider-tab'} onClick={() => updateSettings('kind', 'openai-compatible')} role="tab" type="button">
+        <button aria-selected={settings.kind === 'openai-compatible'} className={settings.kind === 'openai-compatible' ? 'provider-tab provider-tab--active' : 'provider-tab'} onClick={selectOpenAIProvider} role="tab" type="button">
           <span className="provider-tab__logo">O</span><span><strong>OpenAI-compatible</strong><small>API key · streaming</small></span>
         </button>
         <button aria-selected={settings.kind === 'codex-app-server'} className={settings.kind === 'codex-app-server' ? 'provider-tab provider-tab--active' : 'provider-tab'} onClick={() => setSettings((current) => ({ ...current, kind: 'codex-app-server', model: current.kind === 'codex-app-server' ? current.model : '' }))} role="tab" type="button">
@@ -211,9 +293,16 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
             </div>
             {settings.kind === 'openai-compatible' ? (
               <div className="settings-form">
+                <div className="openrouter-setup">
+                  <div className="openrouter-setup__heading"><span><strong>OpenRouter</strong><br /><small>OpenAI-compatible Chat Completions · каталог моделей</small></span><span className={`settings-status settings-status--${settings.providerId === 'openrouter' ? 'on' : 'off'}`}><i /> {settings.providerId === 'openrouter' ? 'selected' : 'preset'}</span></div>
+                  <div className="openrouter-setup__actions"><button className="button button--quiet" onClick={selectOpenRouter} type="button">Использовать OpenRouter</button></div>
+                </div>
                 <label><span>Base URL</span><input onChange={(event) => updateSettings('baseUrl', event.target.value)} spellCheck={false} type="url" value={settings.baseUrl} /></label>
-                <label><span>Model</span><input onChange={(event) => updateSettings('model', event.target.value)} spellCheck={false} value={settings.model} /></label>
-                <label><span>API key <small>{settings.apiKeyConfigured ? '· сохранён в keyring' : '· не задан'}</small></span><input autoComplete="new-password" onChange={(event) => setApiKey(event.target.value)} placeholder={settings.apiKeyConfigured ? 'Оставьте пустым, чтобы сохранить текущий' : 'sk-…'} type="password" value={apiKey} /></label>
+                <label><span>API style</span><select onChange={(event) => updateSettings('apiStyle', event.target.value as ProviderSettings['apiStyle'])} value={settings.apiStyle}><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
+                <label><span>API key <small>{settings.apiKeyConfigured ? '· сохранён в keyring' : '· не задан'}</small></span><input autoComplete="new-password" onChange={(event) => setApiKey(event.target.value)} placeholder={settings.apiKeyConfigured ? 'Оставьте пустым, чтобы сохранить текущий' : 'sk-or-v1-…'} type="password" value={apiKey} /></label>
+                <button className="button button--quiet button--wide" disabled={loadingModels || (!apiKey.trim() && !settings.apiKeyConfigured)} onClick={() => void handleConnectOpenAI()} type="button"><Icon name="lock" width={14} height={14} /> {loadingModels ? 'Загружаю модели…' : settings.apiKeyConfigured ? 'Обновить ключ и каталог моделей' : 'Сохранить ключ и загрузить модели'}</button>
+                {(settings.apiKeyConfigured || openAIModels.length > 0) && <OpenAIModelPicker loading={loadingModels} models={openAIModels} onReload={(sort) => void handleLoadOpenAIModels(sort)} onSelect={(model) => updateSettings('model', model)} onToggleFavorite={(model) => void handleToggleModelFavorite(model)} sort={modelSort} value={settings.model} />}
+                <label><span>Model <small>· выбран из каталога или введён вручную</small></span><input onChange={(event) => updateSettings('model', event.target.value)} placeholder="openai/gpt-4.1-mini" spellCheck={false} value={settings.model} /></label>
                 <div className="settings-form__row">
                   <label><span>Timeout, sec</span><input inputMode="numeric" max={600} min={5} onChange={(event) => updateSettings('timeoutSeconds', Number(event.target.value) || 90)} type="number" value={settings.timeoutSeconds} /></label>
                   <label className="toggle-label"><span>Stream responses</span><button aria-checked={settings.streamResponses} className={`toggle${settings.streamResponses ? ' toggle--on' : ''}`} onClick={() => updateSettings('streamResponses', !settings.streamResponses)} role="switch" type="button"><i /></button></label>
@@ -231,7 +320,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
               <div className="codex-account">
                 <div className="codex-account__row"><div className="codex-account__avatar">A</div><div><strong>Antigravity OAuth недоступен</strong><small>unsupported_auth_mode · данные авторизации не запрашиваются</small></div></div>
                 <p className="settings-footnote"><Icon name="lock" width={13} height={13} /> Yuri не импортирует токены Gemini CLI, browser cookies или token cache. Подключение останется выключенным до официального разрешённого integration contract.</p>
-                <button className="button button--quiet button--wide" onClick={() => updateSettings('kind', 'openai-compatible')} type="button">Перейти к API key endpoint</button>
+                <button className="button button--quiet button--wide" onClick={selectOpenAIProvider} type="button">Перейти к API key endpoint</button>
               </div>
             )}
             <div className="settings-form settings-form--permissions">

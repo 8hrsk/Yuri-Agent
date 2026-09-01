@@ -370,6 +370,9 @@ func attachmentPayloadMessageID(messages []storage.Message, createdUserMessageID
 	var previousUserMessageID domain.ID
 	for _, message := range messages {
 		if message.ID == retryID {
+			if agent.Role(message.Role) == agent.RoleUser {
+				return message.ID
+			}
 			return previousUserMessageID
 		}
 		if agent.Role(message.Role) == agent.RoleUser {

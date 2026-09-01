@@ -393,7 +393,7 @@ func (r *AgentRepository) ListByIDs(ctx context.Context, ids []domain.ID) (map[d
 	result := make(map[domain.ID]domain.AgentProfile)
 	for _, chunk := range chunkIDs(ids) {
 		placeholders, args := idPlaceholders(chunk)
-		query := `SELECT id, name, age, gender, preferences, backstory, created_at, updated_at
+		query := `SELECT id, name, age, gender, preferences, backstory, provider_id, model, created_at, updated_at
 			FROM agent_profiles WHERE id IN (` + placeholders + `) ORDER BY created_at, id`
 		if err := eachChunkRow(ctx, r.db, "agent profiles by ids", query, args, func(row rowScanner) error {
 			profile, scanErr := scanAgentProfile(row)

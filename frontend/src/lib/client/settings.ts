@@ -14,9 +14,20 @@ const defaultSettings: ProviderSettings = {
   kind: 'openai-compatible',
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
+  apiStyle: 'responses',
   apiKeyConfigured: false,
+  favoriteModels: [],
   timeoutSeconds: 90,
   streamResponses: true,
+}
+
+const openRouterSettings: ProviderSettings = {
+  ...defaultSettings,
+  providerId: 'openrouter',
+  displayName: 'OpenRouter',
+  baseUrl: 'https://openrouter.ai/api/v1',
+  model: '',
+  apiStyle: 'chat_completions',
 }
 
 const defaultOnboardingState: OnboardingState = {
@@ -137,6 +148,7 @@ function onboardingSettingsWire(settings: ProviderSettings): UnknownRecord {
     kind: settings.kind,
     baseUrl: settings.baseUrl,
     model: settings.model,
+    apiStyle: settings.apiStyle,
     timeoutSeconds: settings.timeoutSeconds,
     streamResponses: settings.streamResponses,
     apiKeyConfigured: settings.apiKeyConfigured,
@@ -198,6 +210,7 @@ export {
   defaultProactivitySettings,
   defaultWebSearchSettings,
   defaultSettings,
+  openRouterSettings,
   normalizeEncryptedBackup,
   normalizeOnboardingResult,
   normalizeOnboardingState,

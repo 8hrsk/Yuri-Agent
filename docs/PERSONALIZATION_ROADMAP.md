@@ -190,13 +190,14 @@ Preset разворачивается в видимые стартовые зн�
 Flow:
 
 1. Identity — имя, возраст, гендер/местоимения, язык и обращение.
-2. Образ — краткое описание или один из редактируемых presets.
-3. Манера общения — основные непосредственно наблюдаемые настройки.
-4. Характер — компактный основной набор и раскрываемые advanced groups.
-5. Эмоциональная динамика — реактивность, выражение, восстановление и конфликтный стиль.
-6. Отношения — relationship preset и видимые исходные значения.
-7. Backstory — свободный текст и optional structured editor.
-8. Review — итоговый профиль и объяснение ключевых свойств.
+2. Model — provider и модель именно этого агента либо явный fallback на глобальный default.
+3. Образ — краткое описание или один из редактируемых presets.
+4. Манера общения — основные непосредственно наблюдаемые настройки.
+5. Характер — компактный основной набор и раскрываемые advanced groups.
+6. Эмоциональная динамика — реактивность, выражение, восстановление и конфликтный стиль.
+7. Отношения — relationship preset и видимые исходные значения.
+8. Backstory — свободный текст и optional structured editor.
+9. Review — итоговый профиль и объяснение ключевых свойств.
 
 Требования UX:
 
@@ -210,7 +211,7 @@ Flow:
 
 **Готово, когда:** агент создаётся в обоих режимах, reload не теряет draft, keyboard/accessibility flow проходит тесты, а все поля доходят до SQLite и обратно.
 
-Реализовано: единый Quick/Advanced wizard используется в первом onboarding и в roster; presets разворачиваются в типизированные editable values; identity, communication style, полный temperament, emotional dynamics, relationship seed, свободный и structured backstory показываются до создания на Review. Versioned draft хранится локально и очищается только после успешного создания. Wails boundary принимает явный camelCase DTO, а integration test подтверждает round-trip всего `PersonalizationSeed` через SQLite и bridge view. Применение relationship seed к начальному runtime relationship намеренно остаётся в P4.
+Реализовано: единый Quick/Advanced wizard используется в первом onboarding и в roster; presets разворачиваются в типизированные editable values; identity, per-agent provider/model route, communication style, полный temperament, emotional dynamics, relationship seed, свободный и structured backstory показываются до создания на Review. Versioned draft хранится локально и очищается только после успешного создания. Wails boundary принимает явный camelCase DTO, а integration test подтверждает round-trip всего `PersonalizationSeed` и model route через SQLite и bridge view. Применение relationship seed к начальному runtime relationship намеренно остаётся в P4.
 
 ### P3. Emotional appraisal и affect dynamics
 
@@ -321,9 +322,15 @@ Preview-сценарии:
 
 P6 не сохраняет preview prompt/response в conversations, messages, runs, memory, persona, relationship, affect или audit. Единственный внешний эффект — расход лимита выбранного provider на явно запущенную пользователем генерацию.
 
+Для production Chat, peer exchange и anonymous subagent каждый durable run фиксирует неизменяемый фактический `provider_id/model` до первого запроса и монотонный provider-reported token usage. Историческая атрибуция показывается у конкретного execution trace или peer message и не зависит от последующей смены route в профиле.
+
+Provider failures также являются частью durable provenance: adapters переводят их в закрытый provider-neutral словарь без upstream payload, runtime сохраняет категорию, `retryable` и ограниченный `retry_after`, а Chat и Collaboration показывают безопасную причину и следующее действие. Автоматический retry разрешён только явно временным ошибкам в bounded flow; authentication, quota, context и unavailable model не повторяются и никогда не вызывают неявный fallback на другой маршрут.
+
+Recovery остаётся owner-driven: последний trace fragment содержит ровно один набор допустимых действий. Retry привязан к последнему user turn даже при ошибке до первого токена и повторно использует его durable attachments; старый failed branch не получает retry поверх более нового transcript. Settings восстанавливает account, новый Chat сбрасывает переполненный transcript, а переход из Collaboration сначала выбирает именно агента, чей peer turn не смог стартовать, и только затем открывает его model route в Personality.
+
 ### P7. Runtime UI и polish
 
-Статус: P7.1–P7.5 завершены; P7.6 прошёл полный authenticated baseline на Codex App Server (`codex-default`). OpenAI-compatible остаётся дополнительной provider-матрицей после настройки владельцем endpoint и credentials.
+Статус: P7.1–P7.5 завершены; P7.6 прошёл полный authenticated baseline на Codex App Server (`codex-default`). Per-agent provider/model route и его текущая UI-наблюдаемость реализованы; OpenAI-compatible остаётся дополнительной provider-матрицей после явного запуска владельцем с настроенными endpoint и credentials.
 
 **Задача:** сделать развивающуюся личность видимой и управляемой после onboarding.
 
@@ -347,7 +354,7 @@ P6 не сохраняет preview prompt/response в conversations, messages, r
 3. **P7.3 — прозрачные слои и change cards.** Personality/Activity визуально разделяют owner seed, mutable persona, relationship, opinion и affect, показывая reason/evidence/delta. Реализовано: Personality показывает карту пяти независимых слоёв и числовые дельты persona history; Activity классифицирует versioned audit events как `owner_seed`, `mutable_persona`, `relationship` или `affect`, подтягивает persisted reason/evidence/version и вычисляет компактный diff относительно parent revision. Reason проходит secret-like redaction и не подменяет factual memory.
 4. **P7.4 — evolution controls.** Per-agent toggle, cooldown, budget и locks управляются из одного места и round-trip сохраняются в versioned policy. Реализовано: Personality содержит единую карточку с явно отделённым installation-wide master switch и per-agent режимом, cooldown, token/time/evidence budgets и locks для mutable persona, relationship/opinions и affect. Сохранение создаёт append-only owner revision; старые профили без budget-полей продолжают использовать прежние безопасные defaults. Runtime применяет budgets и locks до атомарной записи как для post-turn, так и для peer social reflection; `temperament.<trait>` locks дополняют runtime pins.
 5. **P7.5 — portable profile.** Export/import v2 переносит owner profile без secrets, permissions и runtime histories. Реализовано: active owner profile экспортируется в owner-only JSON envelope с явными format/version, timestamp и SHA-256 payload checksum. Формат содержит только production `CreateAgentInput`; локальные ID, conversations, memory, mutable persona, affect, relationship histories, credentials и grants в нём отсутствуют. Unknown fields, checksum mismatch, oversized file и secret-like owner text отклоняются. Импорт сначала проходит backend validation без writes, затем открывается в обычном Advanced creation wizard для review; новый независимый агент создаётся только после явного подтверждения.
-6. **P7.6 — dogfooding.** Контрастные agents и поддерживаемые providers проходят preview/eval и реальные диалоговые сценарии; найденные различия фиксируются до завершения roadmap. Реализован versioned `yuri.personality-dogfood-suite` и строгий `cmd/yuri-personality-eval`: каждый provider/model обязан покрыть одинаковые контрастные profiles и семь сценариев отдельно в изолированном Preview и production Chat. Checker выявляет неполную матрицу, потерю русского языка/характера/task quality/security, одинаковые ответы контрастных profiles и чрезмерную экспрессию. Наблюдаемые сигналы имеют явный minimum coverage по поверхности, поэтому eval требует устойчивого характера, но не поощряет повтор одной фразы в каждом ответе. Offline fixture и negative fixtures доказывают fail-closed поведение. Изолированный live-runner создаёт disposable profile и отключает неизмеряемые post-turn calls. Authenticated `codex-default` baseline от 2026-08-31 прошёл 28/28: reserved `7/7` на обеих поверхностях, direct `6/7` Preview и `7/7` Chat при пороге `60%`. OpenAI-compatible baseline выполняется отдельно после явной настройки владельцем; автоматическое расходование quota запрещено. Runbook и сохранённые результаты: `docs/PERSONALITY_DOGFOOD.md`.
+6. **P7.6 — dogfooding.** Контрастные agents и поддерживаемые providers проходят preview/eval и реальные диалоговые сценарии; найденные различия фиксируются до завершения roadmap. Реализован versioned `yuri.personality-dogfood-suite` и строгий `cmd/yuri-personality-eval`: каждый provider/model обязан покрыть одинаковые контрастные profiles и семь сценариев отдельно в изолированном Preview и production Chat. Checker выявляет неполную матрицу, потерю русского языка/характера/task quality/security, одинаковые ответы контрастных profiles и чрезмерную экспрессию. Наблюдаемые сигналы имеют явный minimum coverage по поверхности, поэтому eval требует устойчивого характера, но не поощряет повтор одной фразы в каждом ответе. Offline fixture и negative fixtures доказывают fail-closed поведение. Изолированный live-runner создаёт disposable profile и отключает неизмеряемые post-turn calls. Authenticated `codex-default` baseline от 2026-08-31 прошёл 28/28: reserved `7/7` на обеих поверхностях, direct `6/7` Preview и `7/7` Chat при пороге `60%`. Per-agent route применяется к Chat, Preview, peer exchange и reflection; Chat, roster и Collaboration показывают текущий provider/model без раскрытия credentials. OpenAI-compatible baseline выполняется отдельно после явной настройки владельцем; автоматическое расходование quota запрещено. Runbook и сохранённые результаты: `docs/PERSONALITY_DOGFOOD.md`.
 
 ## 6. Порядок зависимостей
 
@@ -389,6 +396,7 @@ P2 не начинается до готовности compiler contract. P3–P
 
 ### Другой последующий scope
 
+- динамические лимиты внутренних диалогов: отдельные per-agent/per-dialogue budgets для числа реплик, токенов и времени вместо текущего фиксированного короткого exchange; UI должен показывать выбранный budget до запуска, а runtime — завершать разговор по смысловому outcome и жёстким верхним границам;
 - Live2D/VRM и сложная мимика;
 - распознавание эмоций пользователя по голосу или камере;
 - публичный каталог готовых character profiles;

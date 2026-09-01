@@ -119,6 +119,36 @@ describe('Yuri client contract', () => {
     })
   })
 
+  it('forwards an active-agent model route and normalizes configured providers', async () => {
+    const calls: unknown[] = []
+    await withWindow({
+      go: {
+        main: {
+          Bridge: {
+            ListConversations: () => [],
+            ListProviders: () => [{ id: 'openrouter', kind: 'openai-compatible', displayName: 'OpenRouter', model: 'openrouter/free', enabled: false, hasSecret: true }],
+            UpdateActiveAgentModelRoute: (input: unknown) => {
+              calls.push(input)
+              return {
+                id: 'agent-emily', name: 'Emily', gender: 'female', providerId: 'openrouter', model: 'openrouter/free',
+                active: true, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:01:00Z',
+              }
+            },
+          },
+        },
+      },
+    }, async () => {
+      const client = createYuriClient()
+      await expect(client.listProviders()).resolves.toEqual([
+        { id: 'openrouter', kind: 'openai-compatible', displayName: 'OpenRouter', model: 'openrouter/free', enabled: false, hasSecret: true },
+      ])
+      await expect(client.updateActiveAgentModelRoute('openrouter', 'openrouter/free')).resolves.toMatchObject({
+        id: 'agent-emily', providerId: 'openrouter', model: 'openrouter/free',
+      })
+      expect(calls).toEqual([{ providerId: 'openrouter', model: 'openrouter/free' }])
+    })
+  })
+
   it('routes rendered web and local links through dedicated Wails bridge methods', async () => {
     const calls: Array<{ name: string; value: string }> = []
     await withWindow({
@@ -243,7 +273,9 @@ describe('Yuri client contract', () => {
         kind: 'openai-compatible',
         baseUrl: 'https://api.example.test/v1',
         model: 'test-model',
+        apiStyle: 'responses',
         apiKeyConfigured: false,
+        favoriteModels: [],
         timeoutSeconds: 90,
         streamResponses: true,
       }, 'preview-key')
@@ -258,6 +290,7 @@ describe('Yuri client contract', () => {
               kind: 'openai-compatible',
               baseUrl: 'https://api.example.test/v1',
               model: 'test-model',
+              apiStyle: 'responses',
               apiKeyConfigured: false,
               timeoutSeconds: 90,
               streamResponses: true,
@@ -290,6 +323,49 @@ describe('Yuri client contract', () => {
       expect(snapshot.settings.kind).toBe('openai-compatible')
       expect(snapshot.codex.connected).toBe(false)
       expect(codexCalls).toBe(0)
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+      resetYuriClientForTests()
+    }
+  })
+
+  it('saves an OpenRouter credential before activation and projects a secret-free model catalog', async () => {
+    const calls: Array<{ name: string; input: unknown }> = []
+    const bridge = {
+      ListConversations: () => [],
+      SaveOpenAIProviderCredential: (input: unknown) => { calls.push({ name: 'credential', input }); return { id: 'openrouter' } },
+      ListOpenAIModels: (input: unknown) => {
+        calls.push({ name: 'models', input })
+        return [{
+          id: 'openrouter/free', name: 'Free Router', context_length: 200000,
+          max_completion_tokens: 16384, prompt_price: '0', completion_price: '0',
+          free: true, supports_tools: true, input_modalities: ['text'], output_modalities: ['text'], favorite: false,
+        }]
+      },
+      SetProviderModelFavorite: (input: unknown) => { calls.push({ name: 'favorite', input }); return { id: 'openrouter' } },
+    }
+    const previousWindow = (globalThis as { window?: unknown }).window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { go: { main: { Bridge: bridge } } } })
+    resetYuriClientForTests()
+
+    try {
+      const client = createYuriClient()
+      const settings = {
+        kind: 'openai-compatible' as const,
+        providerId: 'openrouter', displayName: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: '',
+        apiStyle: 'chat_completions' as const, apiKeyConfigured: false, favoriteModels: [], timeoutSeconds: 90, streamResponses: true,
+      }
+      await expect(client.connectOpenAIProvider(settings, 'sk-or-secret')).resolves.toEqual([expect.objectContaining({ id: 'openrouter/free', contextLength: 200000, free: true, supportsTools: true })])
+      await client.getOpenAIModels('openrouter', 'throughput-high-to-low')
+      await client.setOpenAIModelFavorite('openrouter', 'openrouter/free', true)
+
+      expect(calls).toEqual([
+        { name: 'credential', input: { id: 'openrouter', displayName: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', apiStyle: 'chat_completions', apiKey: 'sk-or-secret' } },
+        { name: 'models', input: { providerId: 'openrouter', sort: '' } },
+        { name: 'models', input: { providerId: 'openrouter', sort: 'throughput-high-to-low' } },
+        { name: 'favorite', input: { providerId: 'openrouter', model: 'openrouter/free', favorite: true } },
+      ])
     } finally {
       if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window
       else Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })

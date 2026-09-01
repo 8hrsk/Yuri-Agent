@@ -63,6 +63,58 @@ describe('a collapsed execution trace renders nothing (H-18/M-40)', () => {
     expect(document.querySelector('.run-trace__body')).toBeNull()
   })
 
+  it('shows the historical model route and usage while collapsed', () => {
+    const { toolCall } = spyingToolCall()
+    render(<ExecutionTrace trace={{
+      ...traceWith(toolCall), providerId: 'openrouter', model: 'model/free', totalTokens: 1_250,
+    }} />)
+
+    expect(screen.getByText('openrouter · model/free · 1 250 ток.')).toBeInTheDocument()
+    expect(document.querySelector('.run-trace__body')).toBeNull()
+  })
+
+  it('shows an actionable typed failure without silently changing the route', () => {
+    const { toolCall } = spyingToolCall()
+    render(<ExecutionTrace trace={{
+      ...traceWith(toolCall), status: 'error', failureKind: 'rate_limit', retryable: true, retryAfterSeconds: 12,
+    }} />)
+
+    expect(screen.getByText('Маршрут не переключён. Повторите запрос через 12 сек.')).toBeInTheDocument()
+  })
+
+  it('retries a failed run only through the explicit source-turn action', async () => {
+    const user = userEvent.setup()
+    const retry = vi.fn()
+    const { toolCall } = spyingToolCall()
+    render(<ExecutionTrace
+      onRetry={retry}
+      recoveryMessageId="message-user-1"
+      showRecovery
+      trace={{ ...traceWith(toolCall), status: 'error', failureKind: 'transient', retryable: true }}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Повторить запрос' }))
+    expect(retry).toHaveBeenCalledWith('message-user-1')
+  })
+
+  it('offers explicit route repair without inventing an automatic fallback', async () => {
+    const user = userEvent.setup()
+    const openSettings = vi.fn()
+    const openPersonality = vi.fn()
+    const { toolCall } = spyingToolCall()
+    render(<ExecutionTrace
+      onOpenPersonality={openPersonality}
+      onOpenSettings={openSettings}
+      showRecovery
+      trace={{ ...traceWith(toolCall), status: 'error', failureKind: 'quota_exhausted' }}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Открыть Settings' }))
+    await user.click(screen.getByRole('button', { name: 'Выбрать модель агента' }))
+    expect(openSettings).toHaveBeenCalledTimes(1)
+    expect(openPersonality).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     ['web.fetch', 'Чтение веб-страницы'],
     ['agent.delegate', 'Субагент'],

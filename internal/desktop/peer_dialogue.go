@@ -20,16 +20,21 @@ import (
 const (
 	peerDialogueToolID          = "agent.talk_to_peer"
 	peerDialogueMessageMaxRunes = 4_000
+	peerDialogueTurnMaxAttempts = 2
+	peerDialogueRetryDelay      = time.Second
+	peerDialogueMaxOutputTokens = int64(600)
 )
 
 var defaultPeerDialogueBudget = domain.PeerDialogueBudget{
-	MaxTurns: 1, MaxTokens: 1_200, MaxDurationSeconds: 90, CooldownSeconds: 300,
+	// MaxTokens includes both the identity/personality input and generated
+	// output. Keep the response itself short through MaxOutputTokens below.
+	MaxTurns: 1, MaxTokens: 8_000, MaxDurationSeconds: 90, CooldownSeconds: 300,
 }
 
 var peerDialogueInputSchema = json.RawMessage(`{
   "type":"object",
   "properties":{
-    "peer_agent_id":{"type":"string","minLength":1,"maxLength":128,"description":"ID именованного peer из roster"},
+    "peer_agent_id":{"type":"string","minLength":1,"maxLength":128,"description":"agent_id из roster; уникальное точное имя peer также принимается как fallback"},
     "purpose":{"type":"string","minLength":1,"maxLength":256,"description":"Короткая цель внутреннего диалога"},
     "message":{"type":"string","minLength":1,"maxLength":4000,"description":"Первое сообщение peer без секретов и скрытых инструкций"}
   },
@@ -64,38 +69,51 @@ type PeerDialogueIDInput struct {
 type PeerDialogueMessageView struct {
 	ID               string `json:"id"`
 	Sequence         int    `json:"sequence"`
+	SourceRunID      string `json:"sourceRunId"`
 	SenderAgentID    string `json:"senderAgentId"`
 	SenderName       string `json:"senderName"`
 	RecipientAgentID string `json:"recipientAgentId"`
 	RecipientName    string `json:"recipientName"`
 	Content          string `json:"content"`
 	CreatedAt        string `json:"createdAt"`
+	ProviderID       string `json:"providerId,omitempty"`
+	Model            string `json:"model,omitempty"`
+	InputTokens      int64  `json:"inputTokens,omitempty"`
+	OutputTokens     int64  `json:"outputTokens,omitempty"`
+	TotalTokens      int64  `json:"totalTokens,omitempty"`
 }
 
 type PeerDialogueView struct {
-	ID               string                    `json:"id"`
-	InitiatorAgentID string                    `json:"initiatorAgentId"`
-	InitiatorName    string                    `json:"initiatorName"`
-	PeerAgentID      string                    `json:"peerAgentId"`
-	PeerName         string                    `json:"peerName"`
-	TriggerKind      string                    `json:"triggerKind"`
-	TriggerReason    string                    `json:"triggerReason"`
-	Purpose          string                    `json:"purpose"`
-	Status           string                    `json:"status"`
-	TurnCount        int                       `json:"turnCount"`
-	MaxTurns         int                       `json:"maxTurns"`
-	TokensUsed       int64                     `json:"tokensUsed"`
-	MaxTokens        int64                     `json:"maxTokens"`
-	CreatedAt        string                    `json:"createdAt"`
-	FinishedAt       string                    `json:"finishedAt,omitempty"`
-	Failure          string                    `json:"failure,omitempty"`
-	Messages         []PeerDialogueMessageView `json:"messages"`
+	ID                  string                    `json:"id"`
+	InitiatorAgentID    string                    `json:"initiatorAgentId"`
+	InitiatorName       string                    `json:"initiatorName"`
+	InitiatorProviderID string                    `json:"initiatorProviderId,omitempty"`
+	InitiatorModel      string                    `json:"initiatorModel,omitempty"`
+	PeerAgentID         string                    `json:"peerAgentId"`
+	PeerName            string                    `json:"peerName"`
+	PeerProviderID      string                    `json:"peerProviderId,omitempty"`
+	PeerModel           string                    `json:"peerModel,omitempty"`
+	TriggerKind         string                    `json:"triggerKind"`
+	TriggerReason       string                    `json:"triggerReason"`
+	Purpose             string                    `json:"purpose"`
+	Status              string                    `json:"status"`
+	TurnCount           int                       `json:"turnCount"`
+	MaxTurns            int                       `json:"maxTurns"`
+	TokensUsed          int64                     `json:"tokensUsed"`
+	MaxTokens           int64                     `json:"maxTokens"`
+	CreatedAt           string                    `json:"createdAt"`
+	FinishedAt          string                    `json:"finishedAt,omitempty"`
+	Failure             string                    `json:"failure,omitempty"`
+	FailureKind         string                    `json:"failureKind,omitempty"`
+	Retryable           bool                      `json:"retryable,omitempty"`
+	RetryAfterSeconds   int64                     `json:"retryAfterSeconds,omitempty"`
+	Messages            []PeerDialogueMessageView `json:"messages"`
 }
 
 func (tool peerDialogueAgentTool) Descriptor() agent.ToolDescriptor {
 	return agent.ToolDescriptor{
 		Name:         peerDialogueToolID,
-		Description:  "Начать в фоне короткий внутренний диалог с известным именованным peer. Диалог не имеет tools и не меняет память или личность автоматически.",
+		Description:  "Начать в фоне короткий внутренний диалог с известным именованным peer. Передавай agent_id из roster; уникальное точное имя разрешается как fallback. Диалог не имеет tools и не меняет память или личность автоматически.",
 		InputSchema:  peerDialogueInputSchema,
 		Risk:         domain.RiskLow,
 		Capabilities: domain.CapabilitySet{domain.CapabilityPeerDialogueSend},
@@ -103,20 +121,24 @@ func (tool peerDialogueAgentTool) Descriptor() agent.ToolDescriptor {
 }
 
 func (tool peerDialogueAgentTool) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
-	if tool.bridge == nil || tool.backend == nil || tool.initiatorAgentID.Empty() || tool.triggerRunID.Empty() || call.Name != peerDialogueToolID || strings.TrimSpace(call.ID) == "" || len(call.ID) > 256 {
+	if tool.bridge == nil || tool.initiatorAgentID.Empty() || tool.triggerRunID.Empty() || call.Name != peerDialogueToolID || strings.TrimSpace(call.ID) == "" || len(call.ID) > 256 {
 		return agent.ToolResult{}, fmt.Errorf("%w: peer dialogue runtime is unavailable", domain.ErrInvalidArgument)
 	}
 	input, err := decodePeerDialogueInput(call.Arguments)
 	if err != nil {
 		return agent.ToolResult{}, err
 	}
-	peerID := domain.ID(input.PeerAgentID)
+	peer, err := tool.resolvePeerAgent(ctx, input.PeerAgentID)
+	if err != nil {
+		return agent.ToolResult{}, err
+	}
+	peerID := peer.ID
 	if peerID == tool.initiatorAgentID {
 		return agent.ToolResult{}, fmt.Errorf("%w: an agent cannot talk to itself", domain.ErrInvalidArgument)
 	}
-	if _, err := tool.bridge.repositories.Agents.Get(ctx, peerID); err != nil {
-		return agent.ToolResult{}, err
-	}
+	// Canonicalize before hashing/idempotency so the same peer referenced by
+	// roster ID or unique display name remains one semantic request.
+	input.PeerAgentID = peerID.String()
 	requestHash := peerDialogueRequestHash(input)
 	if existing, err := tool.bridge.repositories.PeerDialogues.FindByIdempotencyKey(ctx, tool.initiatorAgentID, tool.triggerRunID, call.ID); err == nil {
 		return existingPeerDialogueResult(existing, requestHash)
@@ -156,6 +178,42 @@ func (tool peerDialogueAgentTool) Execute(ctx context.Context, call agent.ToolCa
 		return agent.ToolResult{}, err
 	}
 	return peerDialogueToolResult(dialogue), nil
+}
+
+// resolvePeerAgent keeps model-facing ergonomics separate from durable
+// identity. IDs always win. A display name is accepted only when it matches
+// exactly (case-insensitively) and uniquely; fuzzy or ambiguous resolution
+// could silently send private content to the wrong local persona.
+func (tool peerDialogueAgentTool) resolvePeerAgent(ctx context.Context, reference string) (domain.AgentProfile, error) {
+	reference = strings.TrimSpace(reference)
+	if reference == "" {
+		return domain.AgentProfile{}, fmt.Errorf("%w: peer agent reference is required", domain.ErrInvalidArgument)
+	}
+	profile, err := tool.bridge.repositories.Agents.Get(ctx, domain.ID(reference))
+	if err == nil {
+		return profile, nil
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		return domain.AgentProfile{}, err
+	}
+	roster, err := tool.bridge.repositories.Agents.List(ctx)
+	if err != nil {
+		return domain.AgentProfile{}, err
+	}
+	matches := make([]domain.AgentProfile, 0, 1)
+	for _, candidate := range roster {
+		if strings.EqualFold(strings.TrimSpace(candidate.Name), reference) {
+			matches = append(matches, candidate)
+		}
+	}
+	switch len(matches) {
+	case 1:
+		return matches[0], nil
+	case 0:
+		return domain.AgentProfile{}, fmt.Errorf("%w: peer %q is absent from the local agent roster", domain.ErrNotFound, reference)
+	default:
+		return domain.AgentProfile{}, fmt.Errorf("%w: peer name %q is ambiguous; use agent_id from the roster", domain.ErrInvalidArgument, reference)
+	}
 }
 
 func decodePeerDialogueInput(raw json.RawMessage) (peerDialogueToolInput, error) {
@@ -245,8 +303,17 @@ func (b *Bridge) executePeerDialogue(ctx context.Context, dialogue domain.PeerDi
 		}
 		last := messages[len(messages)-1]
 		responderID, recipientID := last.RecipientAgentID, last.SenderAgentID
-		content, run, usage, err := b.runPeerDialogueTurn(ctx, dialogue, messages, responderID, recipientID, backend, model)
+		content, run, usage, err := b.runPeerDialogueTurnWithRetry(ctx, dialogue, messages, responderID, recipientID, backend, model)
 		if err != nil {
+			if usage.TotalTokens > 0 {
+				consumed := min(usage.TotalTokens, dialogue.Budget.MaxTokens-dialogue.TokensUsed)
+				if consumed > 0 {
+					candidate := dialogue
+					if candidate.RecordFailedUsage(consumed, time.Now().UTC()) == nil && b.repositories.PeerDialogues.Save(ctx, candidate) == nil {
+						dialogue = candidate
+					}
+				}
+			}
 			b.finishCancelledOrFailedPeerDialogue(dialogue, err)
 			return
 		}
@@ -303,10 +370,64 @@ func (b *Bridge) executePeerDialogue(ctx context.Context, dialogue domain.PeerDi
 	}
 }
 
+// runPeerDialogueTurnWithRetry gives an idempotent, side-effect-free model
+// turn one bounded recovery attempt. OpenRouter and other compatible gateways
+// can report transient failures after accepting the streaming response, which
+// is too late for the HTTP adapter's pre-stream retry loop. No peer message is
+// appended until a complete answer exists, so retrying cannot duplicate a
+// visible turn. Every attempt still has its own durable AgentRun.
+func (b *Bridge) runPeerDialogueTurnWithRetry(ctx context.Context, dialogue domain.PeerDialogue, messages []domain.PeerDialogueMessage, responderID, recipientID domain.ID, backend agent.ModelBackend, model string) (string, domain.AgentRun, agent.Usage, error) {
+	perTurnBudget := dialogue.Budget.MaxTokens / int64(dialogue.Budget.MaxTurns)
+	totalUsage := agent.Usage{}
+	lastRun := domain.AgentRun{}
+	var lastErr error
+	for attempt := 1; attempt <= peerDialogueTurnMaxAttempts; attempt++ {
+		attemptDialogue := dialogue
+		remainingTokens := perTurnBudget - totalUsage.TotalTokens
+		if remainingTokens <= 0 {
+			break
+		}
+		attemptDialogue.Budget.MaxTokens = remainingTokens * int64(dialogue.Budget.MaxTurns)
+		content, run, usage, err := b.runPeerDialogueTurn(ctx, attemptDialogue, messages, responderID, recipientID, backend, model)
+		lastRun = run
+		totalUsage = totalUsage.Add(usage)
+		if err == nil {
+			return content, run, totalUsage, nil
+		}
+		lastErr = err
+		failure, classified := agent.InferenceFailureFromError(err)
+		if !errors.Is(err, agent.ErrBackend) || !classified || !failure.Retryable || attempt == peerDialogueTurnMaxAttempts {
+			break
+		}
+		if b.logger != nil {
+			b.logger.WarnContext(ctx, "retry transient peer dialogue turn", "dialogue_id", dialogue.ID, "attempt", attempt, "error", safeError(err.Error()))
+		}
+		timer := time.NewTimer(peerDialogueRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", lastRun, totalUsage, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return "", lastRun, totalUsage, lastErr
+}
+
 func (b *Bridge) runPeerDialogueTurn(ctx context.Context, dialogue domain.PeerDialogue, messages []domain.PeerDialogueMessage, responderID, recipientID domain.ID, backend agent.ModelBackend, model string) (string, domain.AgentRun, agent.Usage, error) {
+	backendSupplied := backend != nil
 	responder, err := b.repositories.Agents.Get(ctx, responderID)
 	if err != nil {
 		return "", domain.AgentRun{}, agent.Usage{}, err
+	}
+	// An explicit route always belongs to the responding agent. A supplied
+	// backend is retained only for legacy global-fallback agents and offline
+	// tests, where both participants intentionally share the active provider.
+	if backend == nil || strings.TrimSpace(responder.ProviderID) != "" {
+		var err error
+		backend, model, err = b.chatBackendForAgent(ctx, responderID)
+		if err != nil {
+			return "", domain.AgentRun{}, agent.Usage{}, err
+		}
 	}
 	recipient, err := b.repositories.Agents.Get(ctx, recipientID)
 	if err != nil {
@@ -354,7 +475,26 @@ func (b *Bridge) runPeerDialogueTurn(ctx context.Context, dialogue domain.PeerDi
 	if err != nil {
 		return "", domain.AgentRun{}, agent.Usage{}, err
 	}
+	if strings.TrimSpace(responder.ProviderID) != "" {
+		run.Inference, err = b.resolveInferenceRoute(responder.ProviderID, model)
+		if err != nil {
+			return "", domain.AgentRun{}, agent.Usage{}, err
+		}
+	} else if triggerRun, triggerErr := b.repositories.Runs.Get(ctx, dialogue.TriggerRunID); triggerErr == nil && triggerRun.Inference.Valid() && triggerRun.Inference.ProviderID != "" {
+		// A legacy agent without an explicit route inherits the exact provider
+		// captured by the initiating chat turn. This keeps a background peer
+		// response stable even if the installation-wide default changes later.
+		run.Inference = triggerRun.Inference
+		if strings.TrimSpace(model) != "" {
+			run.Inference.Model = strings.TrimSpace(model)
+		}
+	} else if route, routeErr := b.resolveInferenceRoute("", model); routeErr == nil {
+		run.Inference = route
+	} else if !backendSupplied {
+		return "", domain.AgentRun{}, agent.Usage{}, routeErr
+	}
 	perTurnTokens := dialogue.Budget.MaxTokens / int64(dialogue.Budget.MaxTurns)
+	maxOutputTokens := min(peerDialogueMaxOutputTokens, perTurnTokens)
 	run.Budget = domain.RunBudget{MaxSteps: 1, MaxTokens: perTurnTokens, MaxToolCalls: 1, MaxToolOutputBytes: domain.PeerDialogueMessageMaxBytes, MaxDurationSeconds: min(30, dialogue.Budget.MaxDurationSeconds)}
 	if err := b.repositories.Runs.Create(ctx, run); err != nil {
 		return "", domain.AgentRun{}, agent.Usage{}, err
@@ -374,7 +514,7 @@ func (b *Bridge) runPeerDialogueTurn(ctx context.Context, dialogue domain.PeerDi
 	result, runErr := runtime.Run(ctx, agent.RunRequest{
 		RunID: run.ID,
 		ModelRequest: agent.ModelRequest{
-			Model: model, MaxOutputTokens: perTurnTokens,
+			Model: model, MaxOutputTokens: maxOutputTokens,
 			Messages: []agent.Message{
 				{Role: agent.RoleSystem, Content: strings.Join([]string{immutablePolicySystemPrompt, peerDialoguePolicyPrompt, agentIdentitySeed(responder, []domain.AgentProfile{responder, recipient})}, "\n\n")},
 				{Role: agent.RoleUser, Name: "yuri_context_data", Content: string(behaviorEnvelope)},
@@ -384,6 +524,7 @@ func (b *Bridge) runPeerDialogueTurn(ctx context.Context, dialogue domain.PeerDi
 		},
 		Budget: run.Budget,
 	})
+	run.Usage = runUsage(result.Usage)
 	if runErr != nil {
 		return "", run, result.Usage, b.failPeerTurn(run, runErr)
 	}
@@ -413,8 +554,9 @@ func (b *Bridge) failPeerTurn(run domain.AgentRun, cause error) error {
 		_ = transitionAndSave(ctx, b.repositories.Runs, &run, domain.RunStateCancelling)
 	}
 	if !run.State.Terminal() {
+		message, failureInfo := inferenceFailure(cause)
 		candidate := run
-		if candidate.Fail(safeError(cause.Error()), time.Now().UTC()) == nil && b.repositories.Runs.Save(ctx, candidate) == nil {
+		if candidate.FailWithInfo(message, failureInfo, time.Now().UTC()) == nil && b.repositories.Runs.Save(ctx, candidate) == nil {
 			run = candidate
 		}
 	}
@@ -467,7 +609,7 @@ func (b *Bridge) failPeerDialogue(dialogue domain.PeerDialogue, cause error) {
 	defer cancel()
 	if dialogue.Status == domain.PeerDialogueQueued || dialogue.Status == domain.PeerDialogueRunning || dialogue.Status == domain.PeerDialogueCancelling {
 		if dialogue.Transition(domain.PeerDialogueFailed, time.Now().UTC()) == nil {
-			dialogue.Failure = safeError(cause.Error())
+			dialogue.Failure, dialogue.FailureInfo = inferenceFailure(cause)
 			_ = b.repositories.PeerDialogues.Save(ctx, dialogue)
 		}
 	}
@@ -503,7 +645,7 @@ func (b *Bridge) ListPeerDialogues(input PeerDialogueListInput) ([]PeerDialogueV
 	if err != nil {
 		return nil, err
 	}
-	// Three queries for the whole page, not three per dialogue.
+	// Four queries for the whole page, not four per dialogue.
 	//
 	// This loop used to cost 1 + 3N: a turn read for each dialogue and an agent
 	// read for each of its two participants. At the page limit of 50 that was
@@ -524,6 +666,16 @@ func (b *Bridge) ListPeerDialogues(input PeerDialogueListInput) ([]PeerDialogueV
 	if err != nil {
 		return nil, err
 	}
+	sourceRunIDs := make([]domain.ID, 0)
+	for _, messages := range messagesByDialogue {
+		for _, message := range messages {
+			sourceRunIDs = append(sourceRunIDs, message.SourceRunID)
+		}
+	}
+	runs, err := b.repositories.Runs.ListByIDs(ctx, sourceRunIDs)
+	if err != nil {
+		return nil, err
+	}
 	views := make([]PeerDialogueView, 0, len(dialogues))
 	for _, dialogue := range dialogues {
 		// Absent, rather than present-and-empty, is "you are not a party to
@@ -533,7 +685,7 @@ func (b *Bridge) ListPeerDialogues(input PeerDialogueListInput) ([]PeerDialogueV
 		if !scoped {
 			return nil, fmt.Errorf("%w: peer dialogue %s is not visible to the active agent", domain.ErrNotFound, dialogue.ID)
 		}
-		view, err := peerDialogueView(dialogue, agents, messages)
+		view, err := peerDialogueView(dialogue, agents, runs, messages)
 		if err != nil {
 			return nil, err
 		}
@@ -545,7 +697,7 @@ func (b *Bridge) ListPeerDialogues(input PeerDialogueListInput) ([]PeerDialogueV
 // peerDialogueView projects one dialogue against already-read agents and turns.
 // It takes them rather than reading them so the list above can fetch a whole
 // page's worth in one statement each instead of three per dialogue.
-func peerDialogueView(dialogue domain.PeerDialogue, agents map[domain.ID]domain.AgentProfile, messages []domain.PeerDialogueMessage) (PeerDialogueView, error) {
+func peerDialogueView(dialogue domain.PeerDialogue, agents map[domain.ID]domain.AgentProfile, runs map[domain.ID]domain.AgentRun, messages []domain.PeerDialogueMessage) (PeerDialogueView, error) {
 	initiator, ok := agents[dialogue.InitiatorAgentID]
 	if !ok {
 		return PeerDialogueView{}, fmt.Errorf("%w: agent profile %s", domain.ErrNotFound, dialogue.InitiatorAgentID)
@@ -557,19 +709,26 @@ func peerDialogueView(dialogue domain.PeerDialogue, agents map[domain.ID]domain.
 	names := map[domain.ID]string{initiator.ID: initiator.Name, peer.ID: peer.Name}
 	view := PeerDialogueView{
 		ID: string(dialogue.ID), InitiatorAgentID: string(initiator.ID), InitiatorName: initiator.Name,
-		PeerAgentID: string(peer.ID), PeerName: peer.Name, TriggerKind: string(dialogue.TriggerKind), TriggerReason: dialogue.TriggerReason,
+		InitiatorProviderID: initiator.ProviderID, InitiatorModel: initiator.Model,
+		PeerAgentID: string(peer.ID), PeerName: peer.Name, PeerProviderID: peer.ProviderID, PeerModel: peer.Model,
+		TriggerKind: string(dialogue.TriggerKind), TriggerReason: dialogue.TriggerReason,
 		Purpose: dialogue.Purpose, Status: string(dialogue.Status),
 		TurnCount: dialogue.TurnCount, MaxTurns: dialogue.Budget.MaxTurns, TokensUsed: dialogue.TokensUsed, MaxTokens: dialogue.Budget.MaxTokens,
-		CreatedAt: dialogue.CreatedAt.Format(time.RFC3339Nano), Failure: dialogue.Failure, Messages: make([]PeerDialogueMessageView, 0, len(messages)),
+		CreatedAt: dialogue.CreatedAt.Format(time.RFC3339Nano), Failure: dialogue.Failure,
+		FailureKind: string(dialogue.FailureInfo.Kind), Retryable: dialogue.FailureInfo.Retryable, RetryAfterSeconds: dialogue.FailureInfo.RetryAfterSeconds,
+		Messages: make([]PeerDialogueMessageView, 0, len(messages)),
 	}
 	if !dialogue.FinishedAt.IsZero() {
 		view.FinishedAt = dialogue.FinishedAt.Format(time.RFC3339Nano)
 	}
 	for _, message := range messages {
+		sourceRun := runs[message.SourceRunID]
 		view.Messages = append(view.Messages, PeerDialogueMessageView{
-			ID: string(message.ID), Sequence: message.Sequence, SenderAgentID: string(message.SenderAgentID), SenderName: names[message.SenderAgentID],
+			ID: string(message.ID), Sequence: message.Sequence, SourceRunID: string(message.SourceRunID), SenderAgentID: string(message.SenderAgentID), SenderName: names[message.SenderAgentID],
 			RecipientAgentID: string(message.RecipientAgentID), RecipientName: names[message.RecipientAgentID], Content: message.Content,
-			CreatedAt: message.CreatedAt.Format(time.RFC3339Nano),
+			CreatedAt:  message.CreatedAt.Format(time.RFC3339Nano),
+			ProviderID: sourceRun.Inference.ProviderID, Model: sourceRun.Inference.Model,
+			InputTokens: sourceRun.Usage.InputTokens, OutputTokens: sourceRun.Usage.OutputTokens, TotalTokens: sourceRun.Usage.TotalTokens,
 		})
 	}
 	return view, nil

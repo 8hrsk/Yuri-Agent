@@ -24,6 +24,10 @@ type TranscriptFeedProps = {
   onOpenExternalURL: (url: string) => void
   onOpenLocalPath: (path: string) => void
   onRetry: (messageId: string) => void
+  onOpenSettings?: () => void
+  onOpenPersonality?: () => void
+  onNewConversation?: () => void
+  recoveryDisabled?: boolean
   onScroll: (event: UIEvent<HTMLDivElement>) => void
   onShowEarlier: () => void
   onSpeak: (messageId: string, text: string) => void
@@ -48,6 +52,10 @@ export function TranscriptFeed({
   onOpenExternalURL,
   onOpenLocalPath,
   onRetry,
+  onOpenSettings,
+  onOpenPersonality,
+  onNewConversation,
+  recoveryDisabled,
   onScroll,
   onShowEarlier,
   onSpeak,
@@ -82,7 +90,11 @@ export function TranscriptFeed({
         loadAttachment={loadAttachment}
         onOpenExternalURL={onOpenExternalURL}
         onOpenLocalPath={onOpenLocalPath}
+        onNewConversation={onNewConversation}
+        onOpenPersonality={onOpenPersonality}
+        onOpenSettings={onOpenSettings}
         onRetry={onRetry}
+        recoveryDisabled={recoveryDisabled}
         onSpeak={onSpeak}
         onStopSpeaking={onStopSpeaking}
         speakingId={speakingId}

@@ -43,6 +43,8 @@ func seedPeerDialogues(t *testing.T, bridge *Bridge, count int) domain.ID {
 		t.Fatal(err)
 	}
 	trigger.Budget = domain.RunBudget{MaxSteps: 4, MaxTokens: 2000, MaxToolOutputBytes: 4096, MaxDurationSeconds: 60}
+	trigger.Inference = domain.RunInferenceRoute{ProviderID: "openrouter", Model: "openrouter/free"}
+	trigger.Usage = domain.RunUsage{InputTokens: 120, OutputTokens: 30, TotalTokens: 150}
 	if err := bridge.repositories.Runs.Create(ctx, trigger); err != nil {
 		t.Fatal(err)
 	}
@@ -77,16 +79,29 @@ func seedPeerDialogues(t *testing.T, bridge *Bridge, count int) domain.ID {
 // rows. The pool is deliberately a single connection, so those are not merely
 // slow — every one of them is serialized against every writer in the process.
 //
-// The count is asserted at two page sizes, because "three" and "constant in the
+// The count is asserted at two page sizes, because "four" and "constant in the
 // page size" are different claims and only the second is the property that
 // matters.
 func TestPeerDialogueListReadsAreSetBased(t *testing.T) {
 	bridge := newCountingBridge(t)
 	const dialogues = 12
-	seedPeerDialogues(t, bridge, dialogues)
+	initiatorID := seedPeerDialogues(t, bridge, dialogues)
+	profiles, err := bridge.repositories.Agents.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range profiles {
+		providerID, model := "codex", "gpt-5.6"
+		if profile.ID == initiatorID {
+			providerID, model = "openrouter", "openrouter/free"
+		}
+		if _, err := bridge.repositories.Agents.UpdateModelRoute(context.Background(), profile.ID, providerID, model, profile.UpdatedAt.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	var views []PeerDialogueView
-	var err error
+	err = nil
 	queries := countBridgeQueries(func() {
 		views, err = bridge.ListPeerDialogues(PeerDialogueListInput{Limit: dialogues})
 	})
@@ -96,8 +111,8 @@ func TestPeerDialogueListReadsAreSetBased(t *testing.T) {
 	if len(views) != dialogues {
 		t.Fatalf("listed %d dialogues, want %d", len(views), dialogues)
 	}
-	if queries != 3 {
-		t.Fatalf("listing %d dialogues issued %d queries, want 3", dialogues, queries)
+	if queries != 4 {
+		t.Fatalf("listing %d dialogues issued %d queries, want 4", dialogues, queries)
 	}
 
 	narrow := countBridgeQueries(func() {
@@ -117,12 +132,18 @@ func TestPeerDialogueListReadsAreSetBased(t *testing.T) {
 		if view.InitiatorName != "Инициатор" || view.PeerName == "" {
 			t.Fatalf("dialogue %s lost a participant name: initiator=%q peer=%q", view.ID, view.InitiatorName, view.PeerName)
 		}
+		if view.InitiatorProviderID != "openrouter" || view.InitiatorModel != "openrouter/free" || view.PeerProviderID != "codex" || view.PeerModel != "gpt-5.6" {
+			t.Fatalf("dialogue %s routes = %#v", view.ID, view)
+		}
 		if len(view.Messages) != 1 {
 			t.Fatalf("dialogue %s carried %d turns, want 1", view.ID, len(view.Messages))
 		}
 		turn := view.Messages[0]
 		if turn.SenderName != "Инициатор" || turn.RecipientName != view.PeerName || turn.Content != "Проверь эту задачу." {
 			t.Fatalf("dialogue %s turn = %#v", view.ID, turn)
+		}
+		if turn.ProviderID != "openrouter" || turn.Model != "openrouter/free" || turn.TotalTokens != 150 {
+			t.Fatalf("dialogue %s historical turn attribution = %#v", view.ID, turn)
 		}
 	}
 }

@@ -7,7 +7,9 @@ const openAISettings: ProviderSettings = {
   kind: 'openai-compatible',
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
+  apiStyle: 'responses',
   apiKeyConfigured: false,
+  favoriteModels: [],
   timeoutSeconds: 90,
   streamResponses: true,
 }

@@ -8,6 +8,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/OrdoAI/yuri-agent/internal/agent"
+	"github.com/OrdoAI/yuri-agent/internal/domain"
 )
 
 type ErrorKind string
@@ -58,6 +61,33 @@ func (e *ProviderError) Unwrap() error {
 		return nil
 	}
 	return nil
+}
+
+func (e *ProviderError) InferenceFailure() agent.InferenceFailure {
+	if e == nil {
+		return agent.InferenceFailure{Kind: domain.RunFailureUnknown}
+	}
+	message := strings.ToLower(e.Message)
+	kind, retryable := domain.RunFailureUnknown, e.Retryable
+	switch {
+	case e.StatusCode == 401 || e.StatusCode == 403 || strings.Contains(message, "unauthorized") || strings.Contains(message, "invalid api key"):
+		kind, retryable = domain.RunFailureAuthentication, false
+	case e.StatusCode == 402 || strings.Contains(message, "insufficient credit") || strings.Contains(message, "insufficient balance") || strings.Contains(message, "quota") || strings.Contains(message, "usage limit"):
+		kind, retryable = domain.RunFailureQuotaExhausted, false
+	case e.StatusCode == 429 || strings.Contains(message, "rate limit") || strings.Contains(message, "too many requests"):
+		kind, retryable = domain.RunFailureRateLimit, true
+	case e.StatusCode == 413 || strings.Contains(message, "context length") || strings.Contains(message, "context window") || strings.Contains(message, "maximum context") || strings.Contains(message, "too many tokens"):
+		kind, retryable = domain.RunFailureContextLimit, false
+	case e.StatusCode == 404 || strings.Contains(message, "model not found") || strings.Contains(message, "unknown model") || strings.Contains(message, "no endpoints found") || strings.Contains(message, "model is unavailable"):
+		kind, retryable = domain.RunFailureModelUnavailable, false
+	case e.Kind == ErrorKindTimeout || e.StatusCode == 408:
+		kind, retryable = domain.RunFailureTimeout, true
+	case e.Kind == ErrorKindNetwork || e.StatusCode >= 500:
+		kind, retryable = domain.RunFailureTransient, true
+	case e.Kind == ErrorKindRequest || e.StatusCode == 400 || e.StatusCode == 422:
+		kind, retryable = domain.RunFailureInvalidRequest, false
+	}
+	return agent.InferenceFailure{Kind: kind, Retryable: retryable, RetryAfter: e.RetryAfter}
 }
 
 func isRetryableStatus(status int) bool {

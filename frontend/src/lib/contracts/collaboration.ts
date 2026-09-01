@@ -1,4 +1,5 @@
 import type { PersonaEvidence, SubjectiveOpinion } from './persona'
+import type { RunFailureKind } from './chat'
 
 /**
  * A bounded background conversation between two named agents. The backend
@@ -11,20 +12,32 @@ export type PeerDialogueTriggerKind = 'agent_tool' | 'autonomous' | 'unknown'
 export interface PeerDialogueMessage {
   id: string
   sequence: number
+  sourceRunId?: string
   senderAgentId: string
   senderName: string
   recipientAgentId: string
   recipientName: string
   content: string
   createdAt: string
+  providerId?: string
+  model?: string
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
 }
 
 export interface PeerDialogue {
   id: string
   initiatorAgentId: string
   initiatorName: string
+  /** Current route; historical messages remain identified by their source run. */
+  initiatorProviderId?: string
+  initiatorModel?: string
   peerAgentId: string
   peerName: string
+  /** Current route; historical messages remain identified by their source run. */
+  peerProviderId?: string
+  peerModel?: string
   triggerKind: PeerDialogueTriggerKind
   triggerReason: string
   purpose: string
@@ -36,6 +49,9 @@ export interface PeerDialogue {
   createdAt: string
   finishedAt?: string
   failure?: string
+  failureKind?: RunFailureKind
+  retryable?: boolean
+  retryAfterSeconds?: number
   messages: PeerDialogueMessage[]
 }
 

@@ -269,3 +269,32 @@ describe('ChatView run finalization', () => {
     expect(screen.getByText('Не удалось достучаться до рантайма')).toBeInTheDocument()
   })
 })
+
+describe('ChatView typed failure recovery', () => {
+  it('retries a trace that failed before the first assistant token using its original user turn', async () => {
+    const user = userEvent.setup()
+    const retryLast = vi.fn(async (_request: ChatRequest, onEvent: EventSink) => {
+      onEvent({ type: 'run.started', runId: 'run-retry' })
+      onEvent({ type: 'run.completed', runId: 'run-retry', status: 'complete' })
+      return { runId: 'run-retry', status: 'complete' as const }
+    })
+    const failedConversation: Conversation = {
+      ...conversationFixture(),
+      preview: 'Проверь провайдера',
+      messages: [{ id: 'message-user-failed', role: 'user', content: 'Проверь провайдера', status: 'complete', createdAt: '2026-09-01T10:00:00Z' }],
+      traces: [{
+        id: 'trace-failed', runId: 'run-failed', status: 'error', startedAt: '2026-09-01T10:00:01Z',
+        failureKind: 'transient', retryable: true,
+        steps: [{ id: 'thinking-failed', kind: 'thinking', status: 'failed', label: 'Обработка завершена', createdAt: '2026-09-01T10:00:01Z' }],
+      }],
+    }
+    createHarness({ listConversations: async () => [failedConversation], retryLast })
+    render(<ChatView agentName="Yuri" backend={backend} onOpenSettings={vi.fn()} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Повторить запрос' }))
+    await waitFor(() => expect(retryLast).toHaveBeenCalledTimes(1))
+    expect(retryLast.mock.calls[0]?.[0]).toMatchObject({
+      conversationId: 'conv-1', text: 'Проверь провайдера', retryOfMessageId: 'message-user-failed',
+    })
+  })
+})

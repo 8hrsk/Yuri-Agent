@@ -22,6 +22,11 @@ func TestAgentRepositoryCreateGetAndList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	first.ProviderID = "openrouter"
+	first.Model = "openrouter/free"
+	if err := first.Validate(); err != nil {
+		t.Fatal(err)
+	}
 	second, err := domain.NewAgentProfileWithBackstory("agent_mira", "Мира", 24, "female", "Предпочитает анализ.", "", now.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)
@@ -39,8 +44,15 @@ func TestAgentRepositoryCreateGetAndList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Name != first.Name || got.Preferences != first.Preferences || got.Backstory != first.Backstory || !got.CreatedAt.Equal(first.CreatedAt) {
+	if got.Name != first.Name || got.Preferences != first.Preferences || got.Backstory != first.Backstory || got.ProviderID != first.ProviderID || got.Model != first.Model || !got.CreatedAt.Equal(first.CreatedAt) {
 		t.Fatalf("Get() = %#v, want %#v", got, first)
+	}
+	updated, err := repository.UpdateModelRoute(context.Background(), first.ID, "codex", "gpt-5.6", now.Add(2*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ProviderID != "codex" || updated.Model != "gpt-5.6" || !updated.UpdatedAt.After(first.UpdatedAt) {
+		t.Fatalf("UpdateModelRoute() = %#v", updated)
 	}
 	profiles, err := repository.List(context.Background())
 	if err != nil {
@@ -49,7 +61,7 @@ func TestAgentRepositoryCreateGetAndList(t *testing.T) {
 	if len(profiles) != 2 || profiles[0].ID != first.ID || profiles[1].ID != second.ID {
 		t.Fatalf("List() = %#v", profiles)
 	}
-	if profiles[0].Backstory != first.Backstory || profiles[1].Backstory != "" {
+	if profiles[0].Backstory != first.Backstory || profiles[0].ProviderID != "codex" || profiles[0].Model != "gpt-5.6" || profiles[1].Backstory != "" {
 		t.Fatalf("List() backstories = %#v", profiles)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/OrdoAI/yuri-agent/internal/agent"
+	"github.com/OrdoAI/yuri-agent/internal/domain"
 )
 
 func TestEncodeConversationPreservesRolesAsStructuredData(t *testing.T) {
@@ -210,5 +211,9 @@ func TestSafeCodexTurnErrorClassifiesUnsupportedChatGPTModel(t *testing.T) {
 	err := safeCodexTurnError(&codexTurnError{Message: "The 'gpt-5-codex' model is not supported when using Codex with a ChatGPT account."})
 	if !strings.Contains(err.Error(), "модель недоступна") || strings.Contains(err.Error(), "gpt-5-codex") {
 		t.Fatalf("safeCodexTurnError() = %q", err)
+	}
+	failure, ok := agent.InferenceFailureFromError(err)
+	if !ok || failure.Kind != domain.RunFailureModelUnavailable || failure.Retryable {
+		t.Fatalf("inference failure = %#v, ok=%v", failure, ok)
 	}
 }

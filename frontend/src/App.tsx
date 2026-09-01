@@ -71,16 +71,19 @@ function App() {
     return () => { mounted = false }
   }, [client, onboardingStatus])
 
-  const handleSelectAgent = async (agentId: string) => {
-    if (agentId === activeAgent?.id || agentBusy) return
+  const handleSelectAgent = async (agentId: string): Promise<boolean> => {
+    if (agentId === activeAgent?.id) return true
+    if (agentBusy) return false
     setAgentBusy(true)
     setAgentError(undefined)
     try {
       const selected = await client.setActiveAgent(agentId)
       setActiveAgent(selected)
       setAgents((current) => current.map((agent) => ({ ...agent, active: agent.id === selected.id })))
+      return true
     } catch (cause) {
       setAgentError(cause instanceof Error ? cause.message : 'Не удалось выбрать агента.')
+      return false
     } finally {
       setAgentBusy(false)
     }
@@ -90,6 +93,14 @@ function App() {
   // on every App render.
   const openSettingsTab = useCallback(() => setActiveId('settings'), [])
   const openChatTab = useCallback(() => setActiveId('chat'), [])
+  const openPersonalityTab = useCallback(() => setActiveId('personality'), [])
+  const openAgentPersonality = (agentId: string) => {
+    void handleSelectAgent(agentId).then((selected) => { if (selected) setActiveId('personality') })
+  }
+  const handleActiveAgentChange = useCallback((updated: AgentProfile) => {
+    setActiveAgent(updated)
+    setAgents((current) => current.map((agent) => agent.id === updated.id ? { ...updated, active: true } : agent))
+  }, [])
 
   const openAgentForm = () => {
     setAgentDraft(loadAgentDraft(newAgentDraft({ name: '', preferences: '' })))
@@ -210,8 +221,11 @@ function App() {
                 backend={backend}
                 hidden={activeId !== 'chat'}
                 key={activeAgent?.id ?? 'no-active-agent'}
+                model={activeAgent?.model}
                 onOpenChat={openChatTab}
+                onOpenPersonality={openPersonalityTab}
                 onOpenSettings={openSettingsTab}
+                providerId={activeAgent?.providerId}
               />
               {activeId !== 'chat' && (activeId === 'tasks' ? (
                 <TasksView />
@@ -220,9 +234,14 @@ function App() {
               ) : activeId === 'activity' ? (
                 <ActivityView />
               ) : activeId === 'collaboration' ? (
-                <CollaborationView key={activeAgent?.id ?? 'no-active-agent'} activeAgentId={activeAgent?.id} />
+                <CollaborationView
+                  key={activeAgent?.id ?? 'no-active-agent'}
+                  activeAgentId={activeAgent?.id}
+                  onOpenAgentPersonality={openAgentPersonality}
+                  onOpenSettings={openSettingsTab}
+                />
               ) : activeId === 'relationship' || activeId === 'personality' ? (
-                <PersonaRelationshipView key={activeAgent?.id ?? 'no-active-agent'} onSelectSection={setActiveId} section={activeId} />
+                <PersonaRelationshipView key={activeAgent?.id ?? 'no-active-agent'} onActiveAgentChange={handleActiveAgentChange} onSelectSection={setActiveId} section={activeId} />
               ) : activeId === 'plugins' ? (
                 <PluginView />
               ) : activeId === 'settings' ? (

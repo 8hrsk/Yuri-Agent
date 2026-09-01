@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/OrdoAI/yuri-agent/internal/agent"
+	"github.com/OrdoAI/yuri-agent/internal/domain"
 )
 
 // Backend adapts the official Codex agent harness to Yuri's normalized model
@@ -289,19 +290,19 @@ func safeCodexTurnError(turnError *codexTurnError) error {
 	message := strings.ToLower(turnError.Message)
 	switch {
 	case strings.Contains(message, "not supported when using codex with a chatgpt account"):
-		return errors.New("Codex: выбранная модель недоступна для ChatGPT OAuth; используйте модель аккаунта по умолчанию")
+		return agent.NewInferenceError(domain.RunFailureModelUnavailable, false, 0, errors.New("Codex: выбранная модель недоступна для ChatGPT OAuth; используйте модель аккаунта по умолчанию"))
 	case strings.Contains(string(turnError.CodexErrorInfo), "usageLimitExceeded"):
-		return errors.New("Codex: лимит использования ChatGPT исчерпан")
+		return agent.NewInferenceError(domain.RunFailureQuotaExhausted, false, 0, errors.New("Codex: лимит использования ChatGPT исчерпан"))
 	case strings.Contains(string(turnError.CodexErrorInfo), "unauthorized"):
-		return errors.New("Codex: сессия ChatGPT OAuth недоступна; выполните вход повторно")
+		return agent.NewInferenceError(domain.RunFailureAuthentication, false, 0, errors.New("Codex: сессия ChatGPT OAuth недоступна; выполните вход повторно"))
 	case strings.Contains(string(turnError.CodexErrorInfo), "contextWindowExceeded"):
-		return errors.New("Codex: контекст диалога превышает лимит модели")
+		return agent.NewInferenceError(domain.RunFailureContextLimit, false, 0, errors.New("Codex: контекст диалога превышает лимит модели"))
 	case strings.Contains(string(turnError.CodexErrorInfo), "serverOverloaded"):
-		return errors.New("Codex: сервис временно перегружен; повторите запрос позже")
+		return agent.NewInferenceError(domain.RunFailureTransient, true, 0, errors.New("Codex: сервис временно перегружен; повторите запрос позже"))
 	default:
 		// Do not expose arbitrary upstream text: it may contain prompt fragments
 		// or provider diagnostics unsuitable for the conversation UI.
-		return errors.New("Codex app server reported a turn error")
+		return agent.NewInferenceError(domain.RunFailureUnknown, false, 0, errors.New("Codex app server reported a turn error"))
 	}
 }
 

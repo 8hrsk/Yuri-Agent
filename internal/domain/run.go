@@ -2,7 +2,9 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // RunKind identifies the source of work without coupling the lifecycle to a
@@ -70,31 +72,114 @@ type RunBudget struct {
 	MaxDurationSeconds int   `json:"max_duration_seconds"`
 }
 
+// RunInferenceRoute is the non-secret provider/model identity captured before
+// a model-backed run starts. It is historical provenance, not a live pointer
+// to the agent profile: changing an agent's current route must never rewrite
+// an existing run.
+type RunInferenceRoute struct {
+	ProviderID string `json:"provider_id,omitempty"`
+	Model      string `json:"model,omitempty"`
+}
+
+func (r RunInferenceRoute) Valid() bool {
+	providerID, model := strings.TrimSpace(r.ProviderID), strings.TrimSpace(r.Model)
+	if providerID == "" {
+		return model == ""
+	}
+	return utf8.RuneCountInString(providerID) <= 128 && utf8.RuneCountInString(model) <= 256 &&
+		!strings.ContainsRune(providerID, '\x00') && !strings.ContainsRune(model, '\x00')
+}
+
+// RunUsage contains provider-reported token accounting. Zero is a valid
+// value for providers which do not report usage.
+type RunUsage struct {
+	InputTokens  int64 `json:"input_tokens,omitempty"`
+	OutputTokens int64 `json:"output_tokens,omitempty"`
+	TotalTokens  int64 `json:"total_tokens,omitempty"`
+}
+
+// RunFailureKind is a stable, provider-neutral reason suitable for durable
+// history and UI decisions. It deliberately carries no upstream response body.
+type RunFailureKind string
+
+const (
+	RunFailureUnknown          RunFailureKind = "unknown"
+	RunFailureAuthentication   RunFailureKind = "authentication"
+	RunFailureRateLimit        RunFailureKind = "rate_limit"
+	RunFailureQuotaExhausted   RunFailureKind = "quota_exhausted"
+	RunFailureContextLimit     RunFailureKind = "context_limit"
+	RunFailureModelUnavailable RunFailureKind = "model_unavailable"
+	RunFailureTimeout          RunFailureKind = "timeout"
+	RunFailureTransient        RunFailureKind = "transient"
+	RunFailureInvalidRequest   RunFailureKind = "invalid_request"
+	RunFailureBudgetExceeded   RunFailureKind = "budget_exceeded"
+)
+
+func (kind RunFailureKind) Valid() bool {
+	switch kind {
+	case "", RunFailureUnknown, RunFailureAuthentication, RunFailureRateLimit,
+		RunFailureQuotaExhausted, RunFailureContextLimit, RunFailureModelUnavailable,
+		RunFailureTimeout, RunFailureTransient, RunFailureInvalidRequest, RunFailureBudgetExceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// RunFailureInfo is safe operational metadata. RetryAfterSeconds is a bounded
+// provider hint, not a promise that Yuri will retry automatically.
+type RunFailureInfo struct {
+	Kind              RunFailureKind `json:"kind,omitempty"`
+	Retryable         bool           `json:"retryable,omitempty"`
+	RetryAfterSeconds int64          `json:"retry_after_seconds,omitempty"`
+}
+
+func (info RunFailureInfo) Valid() bool {
+	if !info.Kind.Valid() || info.RetryAfterSeconds < 0 || info.RetryAfterSeconds > 24*60*60 {
+		return false
+	}
+	return info.Kind != "" || (!info.Retryable && info.RetryAfterSeconds == 0)
+}
+
+func (u RunUsage) Valid() bool {
+	if u.InputTokens < 0 || u.OutputTokens < 0 || u.TotalTokens < 0 {
+		return false
+	}
+	if u.InputTokens > int64(^uint64(0)>>1)-u.OutputTokens {
+		return false
+	}
+	return u.TotalTokens == 0 || u.TotalTokens >= u.InputTokens+u.OutputTokens
+}
+
 func (b RunBudget) Valid() bool {
 	return b.MaxSteps >= 0 && b.MaxTokens >= 0 && b.MaxToolCalls >= 0 &&
 		b.MaxToolOutputBytes >= 0 && b.MaxDurationSeconds >= 0
 }
 
-// AgentRun is the domain representation of an execution. It deliberately
-// contains no provider, tool, UI, or storage implementation details.
+// AgentRun is the domain representation of an execution. Provider/model names
+// are retained only as non-secret inference provenance; credentials, adapter
+// configuration, tool, UI, and storage implementation details stay outside.
 type AgentRun struct {
 	ID ID `json:"id"`
 	// AgentID identifies the named top-level agent that owns this execution.
 	// It is intentionally optional in the legacy NewRun constructor so callers
 	// that predate agent scoping can still construct a run; persistence adapters
 	// resolve it from the owned conversation before writing the row.
-	AgentID        ID        `json:"agent_id,omitempty"`
-	Kind           RunKind   `json:"kind"`
-	ConversationID ID        `json:"conversation_id"`
-	ParentRunID    ID        `json:"parent_run_id,omitempty"`
-	State          RunState  `json:"state"`
-	Budget         RunBudget `json:"budget"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	StartedAt      time.Time `json:"started_at,omitempty"`
-	FinishedAt     time.Time `json:"finished_at,omitempty"`
-	Failure        string    `json:"failure,omitempty"`
-	Version        uint64    `json:"version"`
+	AgentID        ID                `json:"agent_id,omitempty"`
+	Kind           RunKind           `json:"kind"`
+	ConversationID ID                `json:"conversation_id"`
+	ParentRunID    ID                `json:"parent_run_id,omitempty"`
+	State          RunState          `json:"state"`
+	Budget         RunBudget         `json:"budget"`
+	Inference      RunInferenceRoute `json:"inference,omitempty"`
+	Usage          RunUsage          `json:"usage,omitempty"`
+	FailureInfo    RunFailureInfo    `json:"failure_info,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
+	StartedAt      time.Time         `json:"started_at,omitempty"`
+	FinishedAt     time.Time         `json:"finished_at,omitempty"`
+	Failure        string            `json:"failure,omitempty"`
+	Version        uint64            `json:"version"`
 }
 
 // ValidateShape enforces the bounded execution hierarchy used by the
@@ -196,16 +281,21 @@ func (r *AgentRun) Transition(next RunState, now time.Time) error {
 }
 
 func (r *AgentRun) Fail(reason string, now time.Time) error {
+	return r.FailWithInfo(reason, RunFailureInfo{}, now)
+}
+
+func (r *AgentRun) FailWithInfo(reason string, info RunFailureInfo, now time.Time) error {
 	if r == nil {
 		return fmt.Errorf("%w: nil run", ErrInvalidArgument)
 	}
-	if reason == "" {
+	if reason == "" || !info.Valid() {
 		return fmt.Errorf("%w: failure reason is required", ErrInvalidArgument)
 	}
 	if err := r.Transition(RunStateFailed, now); err != nil {
 		return err
 	}
 	r.Failure = reason
+	r.FailureInfo = info
 	return nil
 }
 

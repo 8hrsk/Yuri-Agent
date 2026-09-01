@@ -48,15 +48,23 @@ type ConversationView struct {
 // intentionally contains lifecycle events and redacted tool data, never
 // provider reasoning or hidden chain-of-thought.
 type RunTraceView struct {
-	ID          string         `json:"id"`
-	Kind        string         `json:"kind"`
-	ParentRunID string         `json:"parentRunId,omitempty"`
-	Status      string         `json:"status"`
-	CreatedAt   string         `json:"createdAt"`
-	StartedAt   string         `json:"startedAt,omitempty"`
-	FinishedAt  string         `json:"finishedAt,omitempty"`
-	Failure     string         `json:"failure,omitempty"`
-	ToolCalls   []ToolCallView `json:"toolCalls"`
+	ID                string         `json:"id"`
+	Kind              string         `json:"kind"`
+	ParentRunID       string         `json:"parentRunId,omitempty"`
+	Status            string         `json:"status"`
+	CreatedAt         string         `json:"createdAt"`
+	StartedAt         string         `json:"startedAt,omitempty"`
+	FinishedAt        string         `json:"finishedAt,omitempty"`
+	Failure           string         `json:"failure,omitempty"`
+	ProviderID        string         `json:"providerId,omitempty"`
+	Model             string         `json:"model,omitempty"`
+	InputTokens       int64          `json:"inputTokens,omitempty"`
+	OutputTokens      int64          `json:"outputTokens,omitempty"`
+	TotalTokens       int64          `json:"totalTokens,omitempty"`
+	FailureKind       string         `json:"failureKind,omitempty"`
+	Retryable         bool           `json:"retryable,omitempty"`
+	RetryAfterSeconds int64          `json:"retryAfterSeconds,omitempty"`
+	ToolCalls         []ToolCallView `json:"toolCalls"`
 }
 
 type ChatToolDescriptorView struct {
@@ -97,19 +105,27 @@ type ApprovalView struct {
 // explicit so hidden model reasoning and provider-specific responses cannot
 // leak into the UI event stream.
 type ChatEvent struct {
-	Type           string        `json:"type"`
-	ConversationID string        `json:"conversationId,omitempty"`
-	RunID          string        `json:"runId"`
-	RunKind        string        `json:"runKind,omitempty"`
-	ParentRunID    string        `json:"parentRunId,omitempty"`
-	CreatedAt      string        `json:"createdAt"`
-	MessageID      string        `json:"messageId,omitempty"`
-	Delta          string        `json:"delta,omitempty"`
-	Status         string        `json:"status,omitempty"`
-	Label          string        `json:"label,omitempty"`
-	Error          string        `json:"error,omitempty"`
-	ToolCall       *ToolCallView `json:"toolCall,omitempty"`
-	Approval       *ApprovalView `json:"approval,omitempty"`
+	Type              string        `json:"type"`
+	ConversationID    string        `json:"conversationId,omitempty"`
+	RunID             string        `json:"runId"`
+	RunKind           string        `json:"runKind,omitempty"`
+	ParentRunID       string        `json:"parentRunId,omitempty"`
+	ProviderID        string        `json:"providerId,omitempty"`
+	Model             string        `json:"model,omitempty"`
+	InputTokens       int64         `json:"inputTokens,omitempty"`
+	OutputTokens      int64         `json:"outputTokens,omitempty"`
+	TotalTokens       int64         `json:"totalTokens,omitempty"`
+	FailureKind       string        `json:"failureKind,omitempty"`
+	Retryable         bool          `json:"retryable,omitempty"`
+	RetryAfterSeconds int64         `json:"retryAfterSeconds,omitempty"`
+	CreatedAt         string        `json:"createdAt"`
+	MessageID         string        `json:"messageId,omitempty"`
+	Delta             string        `json:"delta,omitempty"`
+	Status            string        `json:"status,omitempty"`
+	Label             string        `json:"label,omitempty"`
+	Error             string        `json:"error,omitempty"`
+	ToolCall          *ToolCallView `json:"toolCall,omitempty"`
+	Approval          *ApprovalView `json:"approval,omitempty"`
 }
 
 type ChatRunResult struct {

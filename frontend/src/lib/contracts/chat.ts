@@ -58,6 +58,8 @@ export type ApprovalDecision = 'approve' | 'allow_once' | 'allow_always' | 'deny
 
 export type RunTraceStatus = 'queued' | 'running' | 'waiting_approval' | 'complete' | 'cancelled' | 'error'
 
+export type RunFailureKind = 'unknown' | 'authentication' | 'rate_limit' | 'quota_exhausted' | 'context_limit' | 'model_unavailable' | 'timeout' | 'transient' | 'invalid_request' | 'budget_exceeded'
+
 export type RunTraceStepStatus = 'pending' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'denied'
 
 interface RunTraceStepBase {
@@ -124,6 +126,15 @@ export interface RunTrace {
   /** Optional persistence metadata retained for future trace screens. */
   kind?: string
   parentRunId?: string
+  /** Immutable, non-secret inference route captured when the run started. */
+  providerId?: string
+  model?: string
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  failureKind?: RunFailureKind
+  retryable?: boolean
+  retryAfterSeconds?: number
   failure?: string
   toolCalls?: ToolCall[]
   steps: RunTraceStep[]

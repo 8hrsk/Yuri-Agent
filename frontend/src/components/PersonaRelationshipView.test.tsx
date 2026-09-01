@@ -23,6 +23,7 @@ const ownerSeed: AgentPersonalizationProfile = {
   temperament: { ...defaultAgentDraft.traits },
 }
 const updateActiveAgentPersonalization = vi.fn(async (input: { personalization: AgentPersonalizationProfile }) => ({ ...ownerSeed, ...clonePersonalization(input.personalization), version: 2, revisionId: 'seed-2' }))
+const updateActiveAgentModelRoute = vi.fn(async (providerId: string, model: string) => ({ ...activeAgent, providerId, model, updatedAt: '2026-09-01T02:00:00Z' }))
 
 const clientStub = {
   mode: 'mock',
@@ -30,6 +31,10 @@ const clientStub = {
   getActiveAgent: async () => activeAgent,
   getActiveAgentPersonalization: async () => ownerSeed,
   updateActiveAgentPersonalization,
+  updateActiveAgentModelRoute,
+  listProviders: async () => [{ id: 'openrouter', kind: 'openai-compatible', displayName: 'OpenRouter', model: 'openrouter/free', enabled: false, hasSecret: true }],
+  getOpenAIModels: async () => [],
+  setOpenAIModelFavorite: async () => undefined,
 } as unknown as YuriClient
 
 vi.mock('../lib/client', () => ({
@@ -122,5 +127,19 @@ describe('Personality and Relationship are two destinations, not one page', () =
       personalization: expect.objectContaining({ evolutionPolicy: expect.objectContaining({ reflectionMaxTokens: 1800, lockedFields: expect.arrayContaining(['identity', 'backstory', 'mutable_persona']) }) }),
     }))
     expect(await screen.findByText(/Evolution policy сохранена как owner revision v2/)).toBeInTheDocument()
+  })
+
+  it('publishes a saved model route back to the shell immediately', async () => {
+    const user = userEvent.setup()
+    const onActiveAgentChange = vi.fn()
+    updateActiveAgentModelRoute.mockClear()
+    render(<PersonaRelationshipView onActiveAgentChange={onActiveAgentChange} section="personality" />)
+
+    const provider = await screen.findByRole('combobox', { name: 'Provider' })
+    await user.selectOptions(provider, 'openrouter')
+    await user.click(screen.getByRole('button', { name: /Сохранить модель агента/ }))
+
+    await waitFor(() => expect(updateActiveAgentModelRoute).toHaveBeenCalledWith('openrouter', 'openrouter/free'))
+    expect(onActiveAgentChange).toHaveBeenCalledWith(expect.objectContaining({ providerId: 'openrouter', model: 'openrouter/free' }))
   })
 })

@@ -27,9 +27,12 @@ import type {
   CodexAccount,
   CodexLogoutResult,
   CodexModel,
+  OpenAIModel,
+  OpenAIModelSort,
   OnboardingResult,
   OnboardingState,
   ProviderSettings,
+  ProviderOption,
   ProviderSnapshot,
   ProviderTestResult,
   UsageLimits,
@@ -58,6 +61,7 @@ export interface YuriClient {
   openPortableAgentProfile(): Promise<PortableAgentProfile | undefined>
   previewAgentPersonality(input: AgentProfileInput, scenario: PersonalityPreviewScenario): Promise<PersonalityPreview | undefined>
   setActiveAgent(agentId: string): Promise<AgentProfile>
+  updateActiveAgentModelRoute(providerId: string, model: string): Promise<AgentProfile>
   sendMessage(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult>
   cancelRun(runId: string): Promise<void>
   approve(approvalId: string, decision: ApprovalDecision): Promise<void>
@@ -66,7 +70,11 @@ export interface YuriClient {
   openExternalURL(url: string): Promise<void>
   openLocalPath(path: string): Promise<void>
   getProviderSnapshot(): Promise<ProviderSnapshot>
+  listProviders(): Promise<ProviderOption[]>
   saveProviderSettings(settings: ProviderSettings, apiKey?: string): Promise<void>
+  connectOpenAIProvider(settings: ProviderSettings, apiKey?: string): Promise<OpenAIModel[]>
+  getOpenAIModels(providerId: string, sort?: OpenAIModelSort): Promise<OpenAIModel[]>
+  setOpenAIModelFavorite(providerId: string, model: string, favorite: boolean): Promise<void>
   getWebSearchSettings(): Promise<WebSearchSettings>
   saveWebSearchSettings(settings: WebSearchSettings): Promise<void>
   testWebSearchSettings(settings: WebSearchSettings): Promise<ProviderTestResult>

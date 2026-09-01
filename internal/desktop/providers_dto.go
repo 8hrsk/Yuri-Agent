@@ -26,23 +26,65 @@ type OnboardingView struct {
 }
 
 type ProviderView struct {
-	ID          string              `json:"id"`
-	Kind        config.ProviderKind `json:"kind"`
-	DisplayName string              `json:"displayName"`
-	BaseURL     string              `json:"baseUrl,omitempty"`
-	Model       string              `json:"model,omitempty"`
-	Binary      string              `json:"binary,omitempty"`
-	Enabled     bool                `json:"enabled"`
-	HasSecret   bool                `json:"hasSecret"`
+	ID             string                  `json:"id"`
+	Kind           config.ProviderKind     `json:"kind"`
+	DisplayName    string                  `json:"displayName"`
+	BaseURL        string                  `json:"baseUrl,omitempty"`
+	Model          string                  `json:"model,omitempty"`
+	APIStyle       config.ProviderAPIStyle `json:"apiStyle,omitempty"`
+	FavoriteModels []string                `json:"favoriteModels,omitempty"`
+	Binary         string                  `json:"binary,omitempty"`
+	Enabled        bool                    `json:"enabled"`
+	HasSecret      bool                    `json:"hasSecret"`
 }
 
 type SaveOpenAIProviderInput struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName"`
-	BaseURL     string `json:"baseUrl"`
-	Model       string `json:"model"`
-	APIKey      string `json:"apiKey"`
-	Enabled     bool   `json:"enabled"`
+	ID          string                  `json:"id"`
+	DisplayName string                  `json:"displayName"`
+	BaseURL     string                  `json:"baseUrl"`
+	Model       string                  `json:"model"`
+	APIStyle    config.ProviderAPIStyle `json:"apiStyle,omitempty"`
+	APIKey      string                  `json:"apiKey"`
+	Enabled     bool                    `json:"enabled"`
+}
+
+// SaveOpenAIProviderCredentialInput stores a provider token before a model is
+// selected. A new provider remains disabled, so the currently active provider
+// keeps serving chat until the owner explicitly selects and saves a model.
+type SaveOpenAIProviderCredentialInput struct {
+	ID          string                  `json:"id"`
+	DisplayName string                  `json:"displayName"`
+	BaseURL     string                  `json:"baseUrl"`
+	APIStyle    config.ProviderAPIStyle `json:"apiStyle,omitempty"`
+	APIKey      string                  `json:"apiKey"`
+}
+
+type OpenAIModelCatalogInput struct {
+	ProviderID string `json:"providerId"`
+	Sort       string `json:"sort,omitempty"`
+}
+
+type OpenAIModelView struct {
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Description         string   `json:"description,omitempty"`
+	ContextLength       int      `json:"contextLength,omitempty"`
+	MaxCompletionTokens int      `json:"maxCompletionTokens,omitempty"`
+	PromptPrice         string   `json:"promptPrice,omitempty"`
+	CompletionPrice     string   `json:"completionPrice,omitempty"`
+	RequestPrice        string   `json:"requestPrice,omitempty"`
+	Free                bool     `json:"free"`
+	SupportsTools       bool     `json:"supportsTools"`
+	InputModalities     []string `json:"inputModalities,omitempty"`
+	OutputModalities    []string `json:"outputModalities,omitempty"`
+	Created             int64    `json:"created,omitempty"`
+	Favorite            bool     `json:"favorite"`
+}
+
+type SetProviderModelFavoriteInput struct {
+	ProviderID string `json:"providerId"`
+	Model      string `json:"model"`
+	Favorite   bool   `json:"favorite"`
 }
 
 type SaveCodexProviderInput struct {
@@ -77,13 +119,14 @@ type CodexModelView struct {
 }
 
 type ProviderSettingsInput struct {
-	ProviderID       string              `json:"providerId,omitempty"`
-	Kind             config.ProviderKind `json:"kind"`
-	BaseURL          string              `json:"baseUrl"`
-	Model            string              `json:"model"`
-	TimeoutSeconds   int                 `json:"timeoutSeconds"`
-	StreamResponses  bool                `json:"streamResponses"`
-	APIKeyConfigured bool                `json:"apiKeyConfigured"`
+	ProviderID       string                  `json:"providerId,omitempty"`
+	Kind             config.ProviderKind     `json:"kind"`
+	BaseURL          string                  `json:"baseUrl"`
+	Model            string                  `json:"model"`
+	APIStyle         config.ProviderAPIStyle `json:"apiStyle,omitempty"`
+	TimeoutSeconds   int                     `json:"timeoutSeconds"`
+	StreamResponses  bool                    `json:"streamResponses"`
+	APIKeyConfigured bool                    `json:"apiKeyConfigured"`
 }
 
 type ProviderTestResult struct {

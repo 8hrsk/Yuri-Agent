@@ -18,11 +18,43 @@ export interface UsageLimits {
 
 export interface ProviderSettings {
   kind: 'openai-compatible' | 'codex-app-server' | 'antigravity'
+  providerId?: string
+  displayName?: string
   baseUrl: string
   model: string
+  apiStyle: 'responses' | 'chat_completions'
   apiKeyConfigured: boolean
+  favoriteModels: string[]
   timeoutSeconds: number
   streamResponses: boolean
+}
+
+export interface ProviderOption {
+  id: string
+  kind: ProviderSettings['kind']
+  displayName: string
+  model: string
+  enabled: boolean
+  hasSecret: boolean
+}
+
+export type OpenAIModelSort = '' | 'pricing-low-to-high' | 'pricing-high-to-low' | 'context-high-to-low' | 'throughput-high-to-low' | 'latency-low-to-high' | 'most-popular' | 'newest'
+
+export interface OpenAIModel {
+  id: string
+  name: string
+  description?: string
+  contextLength: number
+  maxCompletionTokens: number
+  promptPrice?: string
+  completionPrice?: string
+  requestPrice?: string
+  free: boolean
+  supportsTools: boolean
+  inputModalities: string[]
+  outputModalities: string[]
+  created?: number
+  favorite: boolean
 }
 
 export interface WebSearchSettings {
@@ -60,6 +92,7 @@ export interface CodexLogoutResult {
 
 export interface ProviderSnapshot {
   settings: ProviderSettings
+  openAI?: ProviderSettings
   codex: CodexAccount
 }
 

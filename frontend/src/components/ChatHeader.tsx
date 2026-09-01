@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 
 import type { AffectiveState, AvatarState, RunStatus } from '../lib/contracts'
+import { modelRouteLabel } from '../lib/agents'
 import { dominantAffectMood } from '../lib/personality'
 import { Icon } from './Icon'
 import { YuriAvatar } from './YuriAvatar'
@@ -8,6 +9,8 @@ import { YuriAvatar } from './YuriAvatar'
 type ChatHeaderProps = {
   affect?: AffectiveState
   agentName: string
+  model?: string
+  providerId?: string
   avatarState: AvatarState
   runLabel: string
   runStatus: RunStatus
@@ -15,7 +18,7 @@ type ChatHeaderProps = {
   onRename: (title: string) => Promise<void>
 }
 
-export function ChatHeader({ affect, agentName, avatarState, onRename, runLabel, runStatus, title }: ChatHeaderProps) {
+export function ChatHeader({ affect, agentName, avatarState, model, onRename, providerId, runLabel, runStatus, title }: ChatHeaderProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(title)
   const [saving, setSaving] = useState(false)
@@ -95,6 +98,7 @@ export function ChatHeader({ affect, agentName, avatarState, onRename, runLabel,
         </div>
       </div>
       <div className="chat-main__header-meta">
+        <span aria-label={`Модель агента: ${modelRouteLabel(providerId, model)}`} className="chat-model-route"><Icon name="spark" width={12} height={12} /> {modelRouteLabel(providerId, model)}</span>
         {affect && <span aria-label={`Текущее эмоциональное состояние: ${affect.mood}`} className={`affect-state affect-state--${affectMood}`} title={affect.reason}><i /><span>{affect.mood}</span>{activeEmotions.length > 0 && <small>{activeEmotions.map((emotion) => `${emotion.label} ${Math.round(emotion.value * 100)}%`).join(' · ')}</small>}</span>}
         <span className={`run-state run-state--${runStatus}`} role="status"><i /> {runLabel}</span>
         <span className="chat-main__privacy"><Icon name="lock" width={13} height={13} /> private</span>

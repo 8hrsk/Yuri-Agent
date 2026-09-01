@@ -85,6 +85,9 @@ func TestAttachmentPayloadMessageIDReusesOriginalUserImageOnRetry(t *testing.T) 
 	if got := attachmentPayloadMessageID(messages, "", "message-assistant"); got != "message-user" {
 		t.Fatalf("retry attachment payload id = %q, want message-user", got)
 	}
+	if got := attachmentPayloadMessageID(messages, "", "message-user"); got != "message-user" {
+		t.Fatalf("trace retry attachment payload id = %q, want message-user", got)
+	}
 }
 
 func TestPrepareChatAttachmentsRejectsBinaryAndSpoofedPayloads(t *testing.T) {

@@ -547,6 +547,47 @@
   border-bottom: 1px solid var(--line);
 }
 
+.collaboration-card__routes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 12px;
+  padding: 9px 10px;
+  border: 1px solid rgba(var(--accent-rgb), 0.13);
+  border-radius: 8px;
+  background: rgba(var(--accent-rgb), 0.035);
+}
+
+.collaboration-card__routes > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.collaboration-card__routes small,
+.collaboration-card__routes em {
+  color: #716b80;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.collaboration-card__routes strong {
+  overflow: hidden;
+  color: #bdb3d7;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 8px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collaboration-card__routes > svg {
+  color: #645d74;
+}
+
 .collaboration-card__budget > span {
   display: grid;
   min-width: 0;
@@ -651,6 +692,23 @@
   white-space: pre-wrap;
 }
 
+.collaboration-message__route {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.collaboration-message__route span {
+  padding: 2px 5px;
+  border: 1px solid rgba(var(--accent-rgb), 0.11);
+  border-radius: 4px;
+  color: #837a98;
+  background: rgba(var(--accent-rgb), 0.035);
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 6px;
+}
+
 .collaboration-transcript__empty {
   margin: 0;
   padding: 3px 0 10px;
@@ -670,6 +728,40 @@
   font-size: 8px;
   line-height: 1.45;
   background: rgba(var(--rose-rgb), 0.04);
+}
+
+.collaboration-card__error > span {
+  display: grid;
+  gap: 4px;
+}
+
+.collaboration-card__error small {
+  color: #8c7f91;
+  font-size: 7px;
+  line-height: 1.45;
+}
+
+.collaboration-card__recovery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.collaboration-card__recovery button {
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid rgba(var(--rose-rgb), 0.2);
+  border-radius: 5px;
+  color: #cda0b0;
+  cursor: pointer;
+  font-size: 7px;
+  background: rgba(var(--rose-rgb), 0.055);
+}
+
+.collaboration-card__recovery button:hover {
+  border-color: rgba(var(--rose-rgb), 0.38);
+  color: var(--rose);
 }
 
 .collaboration-card__error svg {

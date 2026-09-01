@@ -651,6 +651,62 @@
   line-height: 1.55;
 }
 
+.agent-model-route {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid rgba(185, 166, 255, 0.2);
+  border-radius: 16px;
+  background: rgba(16, 14, 30, 0.5);
+}
+
+.agent-model-route__heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.agent-model-route__heading span,
+.agent-model-route__heading small {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.agent-model-route__heading h4 {
+  margin: 5px 0 0;
+  color: var(--text-primary);
+  font-size: 17px;
+}
+
+.agent-model-route > p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.agent-model-route__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--mint);
+  box-shadow: 0 0 8px var(--mint);
+}
+
+.agent-model-route__error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--pink);
+  font-size: 11px;
+}
+
 .agent-profile-grid--identity {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }

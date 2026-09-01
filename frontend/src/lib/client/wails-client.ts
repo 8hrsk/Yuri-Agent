@@ -19,6 +19,8 @@ import type {
   CodexAccount,
   CodexLogoutResult,
   CodexModel,
+  OpenAIModel,
+  OpenAIModelSort,
   Conversation,
   ConversationPageOptions,
   EncryptedBackupInfo,
@@ -46,6 +48,7 @@ import type {
   PluginRecord,
   ProactivitySettings,
   ProviderSettings,
+  ProviderOption,
   ProviderSnapshot,
   ProviderTestResult,
   RunResult,
@@ -72,7 +75,7 @@ import {
   normalizeScheduleList,
   scheduleWire,
 } from './normalize-scheduler'
-import { blobToBase64, makeId, normalizeBoolean, nowIso, optionalString } from './primitives'
+import { blobToBase64, makeId, normalizeBoolean, nowIso, optionalNumber, optionalString } from './primitives'
 import type { UnknownRecord } from './primitives'
 import {
   defaultSettings,
@@ -337,6 +340,12 @@ class WailsYuriClient implements YuriClient {
     return result
   }
 
+  async updateActiveAgentModelRoute(providerId: string, model: string): Promise<AgentProfile> {
+    const result = normalizeAgentProfile(await callBridge<unknown>(['UpdateActiveAgentModelRoute'], [{ providerId, model }]))
+    if (!result) throw new Error('Backend не подтвердил модель агента.')
+    return result
+  }
+
   async sendMessage(request: ChatRequest, onEvent: (event: ChatEvent) => void): Promise<RunResult> {
     return this.runWithBridge(['SendMessage', 'StartChat', 'Chat'], request, onEvent)
   }
@@ -383,25 +392,53 @@ class WailsYuriClient implements YuriClient {
     const accountResult = codexConfigured ? await callBridgeSafe<unknown>(['CodexAccount']) : undefined
     const account = accountResult && typeof accountResult === 'object' ? normalizeCodexAccount(accountResult as UnknownRecord) : undefined
     const limits = codexConfigured ? normalizeUsageLimits(await callBridgeSafe<unknown>(['CodexRateLimits'])) : undefined
-    const openai = providerList.find((item): item is UnknownRecord => Boolean(item && typeof item === 'object' && ((item as UnknownRecord).kind === 'openai-compatible' || (item as UnknownRecord).type === 'openai-compatible')))
-    const selectedOpenAI = enabledProvider && (enabledProvider.kind === 'openai-compatible' || enabledProvider.type === 'openai-compatible') ? enabledProvider : openai
+    const openAIProviders = providerList.filter((item): item is UnknownRecord => Boolean(item && typeof item === 'object' && ((item as UnknownRecord).kind === 'openai-compatible' || (item as UnknownRecord).type === 'openai-compatible')))
+    const configuredOpenAI = openAIProviders.find((item) => optionalString(item, 'id') === 'openrouter') ?? openAIProviders[0]
+    const selectedOpenAI = enabledProvider && (enabledProvider.kind === 'openai-compatible' || enabledProvider.type === 'openai-compatible') ? enabledProvider : configuredOpenAI
+    const rawOpenAIFavorites = selectedOpenAI?.favoriteModels ?? selectedOpenAI?.favorite_models
+    const openAISettings: ProviderSettings | undefined = selectedOpenAI ? {
+      ...defaultSettings,
+      providerId: optionalString(selectedOpenAI, 'id') ?? 'openai',
+      displayName: optionalString(selectedOpenAI, 'displayName', 'display_name') ?? 'OpenAI-compatible',
+      baseUrl: optionalString(selectedOpenAI, 'baseUrl', 'base_url') ?? defaultSettings.baseUrl,
+      model: optionalString(selectedOpenAI, 'model') ?? '',
+      apiStyle: selectedOpenAI.apiStyle === 'chat_completions' || selectedOpenAI.api_style === 'chat_completions' ? 'chat_completions' : 'responses',
+      apiKeyConfigured: Boolean(selectedOpenAI.apiKeyConfigured ?? selectedOpenAI.api_key_configured ?? selectedOpenAI.hasSecret),
+      favoriteModels: Array.isArray(rawOpenAIFavorites) ? rawOpenAIFavorites.map(String) : [],
+    } : undefined
     const settings: ProviderSettings = enabledProvider && (enabledProvider.kind === 'codex-app-server' || enabledProvider.type === 'codex-app-server')
       ? { ...defaultSettings, kind: 'codex-app-server', model: String(enabledProvider.model ?? '') }
-      : selectedOpenAI
-      ? {
-          ...defaultSettings,
-          ...selectedOpenAI,
-          kind: 'openai-compatible',
-          apiKeyConfigured: Boolean(selectedOpenAI.apiKeyConfigured ?? selectedOpenAI.api_key_configured ?? selectedOpenAI.hasSecret),
-        }
+      : selectedOpenAI && openAISettings
+      ? openAISettings
       : defaultSettings
     return {
       settings,
+      openAI: openAISettings,
       codex: {
         ...(account ?? { connected: false }),
         limits: limits ?? account?.limits,
       },
     }
+  }
+
+  async listProviders(): Promise<ProviderOption[]> {
+    const value = await callBridgeSafe<unknown>(['ListProviders'])
+    if (!Array.isArray(value)) return []
+    return value.flatMap((item) => {
+      if (!item || typeof item !== 'object') return []
+      const source = item as UnknownRecord
+      const id = optionalString(source, 'id')
+      const kind = optionalString(source, 'kind', 'type')
+      if (!id || (kind !== 'openai-compatible' && kind !== 'codex-app-server' && kind !== 'antigravity')) return []
+      return [{
+        id,
+        kind,
+        displayName: optionalString(source, 'displayName', 'display_name') ?? id,
+        model: optionalString(source, 'model') ?? '',
+        enabled: Boolean(source.enabled),
+        hasSecret: Boolean(source.hasSecret ?? source.has_secret),
+      } satisfies ProviderOption]
+    })
   }
 
   async saveProviderSettings(settings: ProviderSettings, apiKey?: string): Promise<void> {
@@ -410,10 +447,11 @@ class WailsYuriClient implements YuriClient {
     }
     if (settings.kind === 'openai-compatible') {
       await callBridge(['SaveOpenAIProvider'], [{
-        id: 'openai',
-        displayName: 'OpenAI-compatible',
+        id: settings.providerId ?? 'openai',
+        displayName: settings.displayName ?? 'OpenAI-compatible',
         baseUrl: settings.baseUrl,
         model: settings.model,
+        apiStyle: settings.apiStyle,
         apiKey,
         enabled: true,
       }])
@@ -426,6 +464,26 @@ class WailsYuriClient implements YuriClient {
       binary: 'codex',
       enabled: true,
     }])
+  }
+
+  async connectOpenAIProvider(settings: ProviderSettings, apiKey?: string): Promise<OpenAIModel[]> {
+    const providerId = settings.providerId ?? 'openai'
+    await callBridge(['SaveOpenAIProviderCredential'], [{
+      id: providerId,
+      displayName: settings.displayName ?? 'OpenAI-compatible',
+      baseUrl: settings.baseUrl,
+      apiStyle: settings.apiStyle,
+      apiKey,
+    }])
+    return this.getOpenAIModels(providerId)
+  }
+
+  async getOpenAIModels(providerId: string, sort: OpenAIModelSort = ''): Promise<OpenAIModel[]> {
+    return normalizeOpenAIModels(await callBridge<unknown>(['ListOpenAIModels'], [{ providerId, sort }]))
+  }
+
+  async setOpenAIModelFavorite(providerId: string, model: string, favorite: boolean): Promise<void> {
+    await callBridge(['SetProviderModelFavorite'], [{ providerId, model, favorite }])
   }
 
   async getWebSearchSettings(): Promise<WebSearchSettings> {
@@ -880,6 +938,34 @@ function normalizeCodexModels(value: unknown): CodexModel[] {
       isDefault: normalizeBoolean(source.isDefault ?? source.is_default, false),
       defaultReasoningEffort: optionalString(source, 'defaultReasoningEffort', 'default_reasoning_effort'),
       inputModalities: Array.isArray(rawModalities) ? rawModalities.map(String) : [],
+    }]
+  })
+}
+
+function normalizeOpenAIModels(value: unknown): OpenAIModel[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const source = item as UnknownRecord
+    const id = optionalString(source, 'id')
+    if (!id) return []
+    const inputModalities = source.inputModalities ?? source.input_modalities
+    const outputModalities = source.outputModalities ?? source.output_modalities
+    return [{
+      id,
+      name: optionalString(source, 'name', 'displayName', 'display_name') ?? id,
+      description: optionalString(source, 'description'),
+      contextLength: Math.max(0, optionalNumber(source, 'contextLength', 'context_length') ?? 0),
+      maxCompletionTokens: Math.max(0, optionalNumber(source, 'maxCompletionTokens', 'max_completion_tokens') ?? 0),
+      promptPrice: optionalString(source, 'promptPrice', 'prompt_price'),
+      completionPrice: optionalString(source, 'completionPrice', 'completion_price'),
+      requestPrice: optionalString(source, 'requestPrice', 'request_price'),
+      free: normalizeBoolean(source.free, false),
+      supportsTools: normalizeBoolean(source.supportsTools ?? source.supports_tools, false),
+      inputModalities: Array.isArray(inputModalities) ? inputModalities.map(String) : [],
+      outputModalities: Array.isArray(outputModalities) ? outputModalities.map(String) : [],
+      created: optionalNumber(source, 'created'),
+      favorite: normalizeBoolean(source.favorite, false),
     }]
   })
 }

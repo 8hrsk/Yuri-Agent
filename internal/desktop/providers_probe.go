@@ -67,7 +67,7 @@ func (b *Bridge) probeProvider(input ProviderSettingsInput) ProviderTestResult {
 	}
 	client, err := openaiadapter.New(openaiadapter.Config{
 		BaseURL: selected.BaseURL, APIKey: secret, Model: selected.Model,
-		Style: openaiadapter.APIStyleResponses, Timeout: timeout, MaxAttempts: 1,
+		Style: openAIAdapterStyle(*selected), Timeout: timeout, MaxAttempts: 1,
 	})
 	if err != nil {
 		return b.providerProbeFailure(providerID, safeError(err.Error()))

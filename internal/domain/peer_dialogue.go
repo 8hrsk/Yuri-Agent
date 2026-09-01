@@ -82,6 +82,7 @@ type PeerDialogue struct {
 	IdempotencyKey   string                  `json:"idempotency_key"`
 	RequestHash      string                  `json:"request_hash"`
 	Failure          string                  `json:"failure,omitempty"`
+	FailureInfo      RunFailureInfo          `json:"failure_info,omitempty"`
 	Version          uint64                  `json:"version"`
 	CreatedAt        time.Time               `json:"created_at"`
 	UpdatedAt        time.Time               `json:"updated_at"`
@@ -126,6 +127,9 @@ func (d PeerDialogue) Validate() error {
 	}
 	if len(d.Failure) > 1024 || strings.ContainsRune(d.Failure, '\x00') {
 		return fmt.Errorf("%w: dialogue failure exceeds its bound", ErrInvalidArgument)
+	}
+	if !d.FailureInfo.Valid() || (d.Status != PeerDialogueFailed && d.FailureInfo.Kind != "") {
+		return fmt.Errorf("%w: invalid dialogue failure metadata", ErrInvalidArgument)
 	}
 	if d.Status == PeerDialogueFailed && strings.TrimSpace(d.Failure) == "" {
 		return fmt.Errorf("%w: failed dialogue requires a failure", ErrInvalidArgument)
@@ -194,6 +198,23 @@ func (d *PeerDialogue) RecordTurn(tokens int64, now time.Time) error {
 		return fmt.Errorf("%w: dialogue budget exceeded", ErrNotPermitted)
 	}
 	d.TurnCount++
+	d.TokensUsed += tokens
+	d.UpdatedAt = now.UTC()
+	d.Version++
+	return nil
+}
+
+// RecordFailedUsage accounts provider-reported tokens when an attempted turn
+// never produced a durable peer message. It deliberately does not advance the
+// turn count: the history remains truthful while the budget and UI still show
+// resources consumed by the failed attempt.
+func (d *PeerDialogue) RecordFailedUsage(tokens int64, now time.Time) error {
+	if d == nil || d.Status != PeerDialogueRunning || tokens <= 0 || now.IsZero() {
+		return fmt.Errorf("%w: dialogue is not accepting failed attempt usage", ErrInvalidArgument)
+	}
+	if d.TokensUsed+tokens > d.Budget.MaxTokens {
+		return fmt.Errorf("%w: dialogue token budget exceeded", ErrNotPermitted)
+	}
 	d.TokensUsed += tokens
 	d.UpdatedAt = now.UTC()
 	d.Version++

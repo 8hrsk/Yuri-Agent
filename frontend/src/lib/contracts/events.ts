@@ -1,4 +1,4 @@
-import type { ApprovalRequest, RunStatus, RunTraceStep, ToolCall } from './chat'
+import type { ApprovalRequest, RunFailureKind, RunStatus, RunTraceStep, ToolCall } from './chat'
 
 interface ChatEventMeta {
   /** Optional on the Wails event bus; useful when several runs are active. */
@@ -9,6 +9,15 @@ interface ChatEventMeta {
   /** Operational provenance for nested anonymous runs. */
   runKind?: string
   parentRunId?: string
+  /** Immutable inference attribution; usage is populated on terminal events. */
+  providerId?: string
+  model?: string
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  failureKind?: RunFailureKind
+  retryable?: boolean
+  retryAfterSeconds?: number
 }
 
 export type ChatEvent =

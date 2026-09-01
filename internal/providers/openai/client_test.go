@@ -155,6 +155,52 @@ func TestChatCompletionsStreaming(t *testing.T) {
 	}
 }
 
+func TestNamedRequiredToolChoiceUsesProviderSpecificShape(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		style APIStyle
+		check func(*testing.T, map[string]any)
+	}{
+		{
+			name: "responses", style: APIStyleResponses,
+			check: func(t *testing.T, payload map[string]any) {
+				choice, ok := payload["tool_choice"].(map[string]any)
+				if !ok || choice["type"] != "function" || choice["name"] != "echo" {
+					t.Fatalf("responses tool_choice = %#v", payload["tool_choice"])
+				}
+			},
+		},
+		{
+			name: "chat", style: APIStyleChatCompletions,
+			check: func(t *testing.T, payload map[string]any) {
+				choice, ok := payload["tool_choice"].(map[string]any)
+				function, functionOK := choice["function"].(map[string]any)
+				if !ok || !functionOK || choice["type"] != "function" || function["name"] != "echo" {
+					t.Fatalf("chat tool_choice = %#v", payload["tool_choice"])
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client, err := New(Config{BaseURL: "https://example.invalid/v1", Style: test.style})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := testRequest()
+			request.ToolChoice = agent.ToolChoice{Mode: agent.ToolChoiceRequired, Name: "echo"}
+			body, _, err := client.marshalRequest(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatal(err)
+			}
+			test.check(t, payload)
+		})
+	}
+}
+
 func TestRetriesTransientResponsesBeforeReturningStream(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

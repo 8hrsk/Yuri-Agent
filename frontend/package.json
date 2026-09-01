@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build && node scripts/sync-wails-assets.mjs",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b --pretty false",
     "lint": "eslint . --max-warnings 0",
     "lint:css": "stylelint \"src/styles/**/*.css\" && node scripts/lint-css-cascade.mjs",
     "lint:contract": "node scripts/check-bridge-contract.mjs",

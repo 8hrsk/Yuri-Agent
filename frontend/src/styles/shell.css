@@ -355,6 +355,12 @@
   white-space: nowrap;
 }
 
+.sidebar__agent-option .sidebar__agent-route {
+  color: #9f91c4;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 7px;
+}
+
 .sidebar__agent-option > svg {
   margin-left: auto;
   flex: 0 0 auto;

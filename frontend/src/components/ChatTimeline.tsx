@@ -3,6 +3,12 @@ import { memo, useCallback, useEffect, useMemo, useState, type MouseEvent } from
 import { approvalStatusLabel, runStatusLabel, toolStatusLabel, type ChatTimelineEntry } from '../lib/chat-trace'
 import type { ChatAttachment, ChatAttachmentContent, ChatMessage, RunTrace, RunTraceStep, ToolCall } from '../lib/contracts'
 import { formatClock } from '../lib/datetime'
+import {
+  inferenceFailureGuidance,
+  inferenceFailureRecoveryActions,
+  inferenceRecoveryActionLabels,
+  type InferenceRecoveryAction,
+} from '../lib/inference-failures'
 import { Icon } from './Icon'
 import { MarkdownMessage } from './MarkdownMessage'
 
@@ -117,7 +123,27 @@ export const TraceStepCard = memo(function TraceStepCard({ step }: { step: RunTr
  * idiomatic hook, but it only fires after the browser has already expanded the
  * (empty) element, so the open state is driven from the summary click instead.
  */
-export const ExecutionTrace = memo(function ExecutionTrace({ trace }: { trace: RunTrace }) {
+type ExecutionTraceProps = {
+  trace: RunTrace
+  showRecovery?: boolean
+  recoveryMessageId?: string
+  recoveryDisabled?: boolean
+  onRetry?: (messageId: string) => void
+  onOpenSettings?: () => void
+  onOpenPersonality?: () => void
+  onNewConversation?: () => void
+}
+
+export const ExecutionTrace = memo(function ExecutionTrace({
+  trace,
+  showRecovery = false,
+  recoveryMessageId,
+  recoveryDisabled = false,
+  onRetry,
+  onOpenSettings,
+  onOpenPersonality,
+  onNewConversation,
+}: ExecutionTraceProps) {
   const [open, setOpen] = useState(false)
   const toggle = useCallback((event: MouseEvent<HTMLElement>) => {
     // Without this the user agent toggles the element under React, and the two
@@ -130,6 +156,24 @@ export const ExecutionTrace = memo(function ExecutionTrace({ trace }: { trace: R
   const thinkingOnly = toolCount === 0 && trace.steps.every((step) => step.kind === 'thinking')
   const summary = traceToolCopy(trace)
   const heading = trace.kind === 'subagent' ? 'Субагент' : thinkingOnly ? 'Thinking' : 'Выполнение'
+  const route = [trace.providerId, trace.model].filter(Boolean).join(' · ')
+  const usage = trace.totalTokens !== undefined && trace.totalTokens > 0 ? `${trace.totalTokens.toLocaleString('ru-RU')} ток.` : ''
+  const provenance = [route, usage].filter(Boolean).join(' · ')
+  const failureGuidance = trace.status === 'error' ? inferenceFailureGuidance(trace.failureKind, trace.retryAfterSeconds, trace.retryable) : undefined
+  const recoveryActions = showRecovery && trace.status === 'error'
+    ? inferenceFailureRecoveryActions(trace.failureKind, trace.retryable).filter((action) => {
+        if (action === 'retry') return Boolean(recoveryMessageId && onRetry)
+        if (action === 'settings') return Boolean(onOpenSettings)
+        if (action === 'personality') return Boolean(onOpenPersonality)
+        return Boolean(onNewConversation)
+      })
+    : []
+  const recover = (action: InferenceRecoveryAction) => {
+    if (action === 'retry' && recoveryMessageId) onRetry?.(recoveryMessageId)
+    else if (action === 'settings') onOpenSettings?.()
+    else if (action === 'personality') onOpenPersonality?.()
+    else if (action === 'new_chat') onNewConversation?.()
+  }
   return (
     <details className={`run-trace run-trace--${trace.status}`} open={open}>
       <summary className="run-trace__summary" onClick={toggle}>
@@ -137,10 +181,15 @@ export const ExecutionTrace = memo(function ExecutionTrace({ trace }: { trace: R
         <span className="run-trace__heading">
           <strong>{heading}</strong>
           <small>{summary}</small>
+          {provenance && <small className="run-trace__provenance">{provenance}</small>}
+          {failureGuidance && <small className="run-trace__failure-guidance">{failureGuidance}</small>}
         </span>
         <span className="run-trace__status">{traceStatusCopy(trace)}</span>
         <Icon name="chevron-right" width={14} height={14} />
       </summary>
+      {recoveryActions.length > 0 && <div aria-label="Действия после ошибки" className="run-trace__recovery">
+        {recoveryActions.map((action) => <button disabled={recoveryDisabled} key={action} onClick={() => recover(action)} type="button">{inferenceRecoveryActionLabels[action]}</button>)}
+      </div>}
       {open && (
         <div className="run-trace__body">
           <p className="run-trace__notice">Здесь показаны статусы выполнения, вызовы инструментов и их результаты. Скрытые рассуждения модели не отображаются.</p>
@@ -269,6 +318,10 @@ type ChatTimelineProps = {
   agentName: string
   entries: ChatTimelineEntry[]
   onRetry: (messageId: string) => void
+  onOpenSettings?: () => void
+  onOpenPersonality?: () => void
+  onNewConversation?: () => void
+  recoveryDisabled?: boolean
   onSpeak: (messageId: string, content: string) => void
   onStopSpeaking: () => void
   speakingId?: string
@@ -287,6 +340,10 @@ export const ChatTimeline = memo(function ChatTimeline({
   agentName,
   entries,
   onRetry,
+  onOpenSettings,
+  onOpenPersonality,
+  onNewConversation,
+  recoveryDisabled,
   onSpeak,
   onStopSpeaking,
   speakingId,
@@ -298,7 +355,17 @@ export const ChatTimeline = memo(function ChatTimeline({
   return (
     <>
       {entries.map((entry) => entry.kind === 'trace'
-        ? <ExecutionTrace key={entry.key} trace={entry.trace} />
+        ? <ExecutionTrace
+            key={entry.key}
+            onNewConversation={onNewConversation}
+            onOpenPersonality={onOpenPersonality}
+            onOpenSettings={onOpenSettings}
+            onRetry={onRetry}
+            recoveryDisabled={recoveryDisabled}
+            recoveryMessageId={entry.recoveryMessageId}
+            showRecovery={entry.showRecovery}
+            trace={entry.trace}
+          />
         : <MessageBubble
             agentName={agentName}
             key={entry.key}

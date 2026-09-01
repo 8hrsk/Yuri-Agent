@@ -120,6 +120,8 @@ export interface AgentProfile {
   preferences: string
   /** Owner-authored fictional autobiographical identity seed. */
   backstory: string
+  providerId?: string
+  model?: string
   traits: Record<string, number>
   active: boolean
   createdAt: string
@@ -133,6 +135,10 @@ export interface AgentProfileInput {
   preferences: string
   /** Owner-authored fictional autobiographical identity seed. */
   backstory: string
+  /** Empty means follow the installation-wide active provider. */
+  providerId: string
+  /** Empty means use the selected provider's configured default model. */
+  model: string
   traits: Record<string, number>
   personalization: AgentPersonalizationInput
   /** UI-only draft metadata. Unknown fields are ignored by the Go bridge. */

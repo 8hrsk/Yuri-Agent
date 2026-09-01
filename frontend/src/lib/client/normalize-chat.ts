@@ -1,7 +1,7 @@
-import type { ChatEvent, ChatTool } from '../contracts'
-import { normalizeApproval, normalizeRunTraceStep, normalizeToolCall } from '../chat-trace'
+import type { ChatEvent, ChatTool, RunFailureKind } from '../contracts'
+import { normalizeApproval, normalizeRunFailureKind, normalizeRunTraceStep, normalizeToolCall } from '../chat-trace'
 import { normalizeStringList } from './normalize-plugins'
-import { normalizeBoolean, nowIso, optionalString } from './primitives'
+import { normalizeBoolean, nowIso, optionalNumber, optionalString } from './primitives'
 import type { UnknownRecord } from './primitives'
 
 function normalizeChatEvent(value: unknown): ChatEvent | undefined {
@@ -21,17 +21,33 @@ function normalizeChatEvent(value: unknown): ChatEvent | undefined {
                 : rawType
   const runId = String(nested.runId ?? nested.run_id ?? '')
   if (!type || !runId) return undefined
-  const base: { runId: string; conversationId?: string; createdAt?: string; timestamp?: string; runKind?: string; parentRunId?: string } = { runId }
+  const base: { runId: string; conversationId?: string; createdAt?: string; timestamp?: string; runKind?: string; parentRunId?: string; providerId?: string; model?: string; inputTokens?: number; outputTokens?: number; totalTokens?: number; failureKind?: RunFailureKind; retryable?: boolean; retryAfterSeconds?: number } = { runId }
   const conversationId = optionalString(nested, 'conversationId', 'conversation_id')
   const createdAt = optionalString(nested, 'createdAt', 'created_at')
   const timestamp = optionalString(nested, 'timestamp', 'at')
   const runKind = optionalString(nested, 'runKind', 'run_kind', 'kind')
   const parentRunId = optionalString(nested, 'parentRunId', 'parent_run_id')
+  const providerId = optionalString(nested, 'providerId', 'provider_id')
+  const model = optionalString(nested, 'model')
+  const inputTokens = optionalNumber(nested, 'inputTokens', 'input_tokens')
+  const outputTokens = optionalNumber(nested, 'outputTokens', 'output_tokens')
+  const totalTokens = optionalNumber(nested, 'totalTokens', 'total_tokens')
+  const failureKind = normalizeRunFailureKind(nested.failureKind ?? nested.failure_kind)
+  const retryableValue = nested.retryable ?? nested.failureRetryable ?? nested.failure_retryable
+  const retryAfterSeconds = optionalNumber(nested, 'retryAfterSeconds', 'retry_after_seconds', 'failureRetryAfterSeconds', 'failure_retry_after_seconds')
   if (conversationId) base.conversationId = conversationId
   if (createdAt) base.createdAt = createdAt
   if (timestamp) base.timestamp = timestamp
   if (runKind) base.runKind = runKind
   if (parentRunId) base.parentRunId = parentRunId
+  if (providerId) base.providerId = providerId
+  if (model) base.model = model
+  if (inputTokens !== undefined && inputTokens >= 0) base.inputTokens = Math.round(inputTokens)
+  if (outputTokens !== undefined && outputTokens >= 0) base.outputTokens = Math.round(outputTokens)
+  if (totalTokens !== undefined && totalTokens >= 0) base.totalTokens = Math.round(totalTokens)
+  if (failureKind) base.failureKind = failureKind
+  if (typeof retryableValue === 'boolean') base.retryable = retryableValue
+  if (retryAfterSeconds !== undefined && retryAfterSeconds >= 0) base.retryAfterSeconds = Math.round(retryAfterSeconds)
   switch (type) {
     case 'run.started':
       return { type, ...base }

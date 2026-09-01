@@ -52,6 +52,8 @@ import { TranscriptFeed } from './TranscriptFeed'
 type ChatViewProps = {
   agentId?: string
   agentName: string
+  model?: string
+  providerId?: string
   backend: BackendConnection
   /**
    * The user is looking at another tab. The view stays mounted — a run must
@@ -62,9 +64,10 @@ type ChatViewProps = {
   /** Brings the chat back on screen from wherever the user is. */
   onOpenChat?: () => void
   onOpenSettings: () => void
+  onOpenPersonality?: () => void
 }
 
-export function ChatView({ agentId, agentName, backend, hidden = false, onOpenChat, onOpenSettings }: ChatViewProps) {
+export function ChatView({ agentId, agentName, backend, hidden = false, model, onOpenChat, onOpenPersonality, onOpenSettings, providerId }: ChatViewProps) {
   const client = useMemo(() => createYuriClient(), [])
   const labels = useMemo(() => statusCopy(agentName), [agentName])
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -156,6 +159,8 @@ export function ChatView({ agentId, agentName, backend, hidden = false, onOpenCh
   // stable is what makes their `React.memo` worth anything.
   const openSettingsRef = useRef(onOpenSettings)
   const openSettings = useCallback(() => openSettingsRef.current(), [])
+  const openPersonalityRef = useRef(onOpenPersonality)
+  const openPersonality = useCallback(() => openPersonalityRef.current?.(), [])
   const openChatRef = useRef(onOpenChat)
   const openChat = useCallback(() => openChatRef.current?.(), [])
   // Read by the scroll scheduler, which must not chase an off-screen container.
@@ -211,6 +216,10 @@ export function ChatView({ agentId, agentName, backend, hidden = false, onOpenCh
   useEffect(() => {
     openSettingsRef.current = onOpenSettings
   }, [onOpenSettings])
+
+  useEffect(() => {
+    openPersonalityRef.current = onOpenPersonality
+  }, [onOpenPersonality])
 
   useEffect(() => {
     openChatRef.current = onOpenChat
@@ -892,7 +901,7 @@ export function ChatView({ agentId, agentName, backend, hidden = false, onOpenCh
     }
   }
 
-  const handleNewConversation = () => {
+  const handleNewConversation = useCallback(() => {
     void client.createConversation('Новый диалог').then((conversation) => {
       // Created empty and known to be empty, so opening it must not spend a
       // round-trip asking the backend for a transcript that cannot exist.
@@ -903,7 +912,7 @@ export function ChatView({ agentId, agentName, backend, hidden = false, onOpenCh
       setAttachments([])
       setError(undefined)
     }).catch(() => setError('Не удалось создать новый диалог.'))
-  }
+  }, [client])
 
   const handleApproval = async (decision: ApprovalDecision) => {
     if (!pendingApproval || approvalBusy) return
@@ -954,10 +963,13 @@ export function ChatView({ agentId, agentName, backend, hidden = false, onOpenCh
     const { conversations: current, selectedId: currentId, startRun: run } = latestRef.current
     const conversation = current.find((candidate) => candidate.id === currentId)
     if (!conversation || !run) return
-    const previousUser = conversation.messages
-      .slice(0, conversation.messages.findIndex((candidate) => candidate.id === messageId))
-      .reverse()
-      .find((candidate) => candidate.role === 'user')
+    const anchorIndex = conversation.messages.findIndex((candidate) => candidate.id === messageId)
+    if (anchorIndex < 0) return
+    const anchor = conversation.messages[anchorIndex]
+    if (!anchor) return
+    const previousUser = anchor.role === 'user'
+      ? anchor
+      : conversation.messages.slice(0, anchorIndex).reverse().find((candidate) => candidate.role === 'user')
     if (previousUser) void run(previousUser.content, messageId)
   }, [])
 
@@ -1022,7 +1034,9 @@ export function ChatView({ agentId, agentName, backend, hidden = false, onOpenCh
             agentName={agentName}
             avatarState={avatarState}
             key={selectedId}
+            model={model}
             onRename={handleRenameConversation}
+            providerId={providerId}
             runLabel={runLabel}
             runStatus={runStatus}
             title={selectedConversation?.title ?? 'Новый диалог'}
@@ -1052,7 +1066,11 @@ export function ChatView({ agentId, agentName, backend, hidden = false, onOpenCh
             onJumpToBottom={handleJumpToBottom}
             onOpenExternalURL={handleOpenExternalURL}
             onOpenLocalPath={handleOpenLocalPath}
+            onNewConversation={handleNewConversation}
+            onOpenPersonality={openPersonality}
+            onOpenSettings={openSettings}
             onRetry={handleRetry}
+            recoveryDisabled={running}
             onScroll={handleMessagesScroll}
             onShowEarlier={handleShowEarlier}
             onSpeak={speakTTS}

@@ -20,6 +20,7 @@ type delegationBackendStub struct {
 	requests []agent.ModelRequest
 	events   []agent.ModelEvent
 	batches  [][]agent.ModelEvent
+	startErr []error
 	block    bool
 }
 
@@ -31,7 +32,14 @@ func (backend *delegationBackendStub) Start(_ context.Context, request agent.Mod
 	if requestIndex < len(backend.batches) {
 		events = backend.batches[requestIndex]
 	}
+	var startErr error
+	if requestIndex < len(backend.startErr) {
+		startErr = backend.startErr[requestIndex]
+	}
 	backend.mu.Unlock()
+	if startErr != nil {
+		return nil, startErr
+	}
 	if backend.block {
 		return delegationBlockingStream{}, nil
 	}
@@ -139,6 +147,9 @@ func TestDelegationToolCreatesAnonymousToollessChildAndIsIdempotent(t *testing.T
 	}
 	if child.Kind != domain.RunKindSubagent || child.ParentRunID != parent.ID || !child.ConversationID.Empty() || child.AgentID != agentID || child.State != domain.RunStateCompleted {
 		t.Fatalf("anonymous child=%#v", child)
+	}
+	if child.Inference != parent.Inference || child.Usage.TotalTokens != 15 {
+		t.Fatalf("anonymous child attribution=%#v usage=%#v", child.Inference, child.Usage)
 	}
 	if agents, err := bridge.repositories.Agents.List(context.Background()); err != nil || len(agents) != 1 {
 		t.Fatalf("delegation created an identity: agents=%#v err=%v", agents, err)
@@ -394,6 +405,7 @@ func newDelegationTestBridge(t *testing.T) (*Bridge, domain.ID, domain.AgentRun)
 	if err != nil {
 		t.Fatal(err)
 	}
+	parent.Inference = domain.RunInferenceRoute{ProviderID: "test-provider", Model: "test-model"}
 	if err := bridge.repositories.Runs.Create(context.Background(), parent); err != nil {
 		t.Fatal(err)
 	}

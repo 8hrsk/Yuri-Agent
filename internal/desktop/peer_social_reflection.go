@@ -62,7 +62,7 @@ func (b *Bridge) reconcileCompletedPeerSocialReflections(ctx context.Context, ba
 }
 
 func (b *Bridge) reflectOnPeerDialogueParticipants(ctx context.Context, backend agent.ModelBackend, model string, dialogue domain.PeerDialogue) (int, error) {
-	if dialogue.Status != domain.PeerDialogueCompleted || backend == nil || strings.TrimSpace(model) == "" {
+	if dialogue.Status != domain.PeerDialogueCompleted {
 		return 0, nil
 	}
 	b.mu.RLock()
@@ -74,7 +74,23 @@ func (b *Bridge) reflectOnPeerDialogueParticipants(ctx context.Context, backend 
 	writes := 0
 	var failures []error
 	for _, observer := range []domain.ID{dialogue.InitiatorAgentID, dialogue.PeerAgentID} {
-		changed, err := b.reflectOnPeerDialogue(ctx, backend, model, dialogue, observer)
+		observerBackend, observerModel := backend, model
+		profile, profileErr := b.repositories.Agents.Get(ctx, observer)
+		if profileErr != nil {
+			failures = append(failures, fmt.Errorf("observer %s profile: %w", observer, profileErr))
+			continue
+		}
+		// An explicit agent route always wins. The injected backend remains a
+		// useful fallback for legacy profiles and deterministic tests.
+		if observerBackend == nil || strings.TrimSpace(profile.ProviderID) != "" {
+			var routeErr error
+			observerBackend, observerModel, routeErr = b.chatBackendForAgent(ctx, observer)
+			if routeErr != nil {
+				failures = append(failures, fmt.Errorf("observer %s route: %w", observer, routeErr))
+				continue
+			}
+		}
+		changed, err := b.reflectOnPeerDialogue(ctx, observerBackend, observerModel, dialogue, observer)
 		if changed {
 			writes++
 		}

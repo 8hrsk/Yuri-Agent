@@ -73,6 +73,23 @@ JSON decoder запрещает неизвестные поля, размер в
 
 Мы не запускаем authenticated dogfood автоматически: каждый Preview и Chat расходует provider quota, а полный run создаёт не менее 28 ответов для двух профилей.
 
+## Ручной per-agent OpenRouter smoke
+
+Этот короткий проход проверяет не только Personality Compiler, но и маршрутизацию разных именованных агентов. Он запускается владельцем из приложения после сохранения OpenRouter token в системном keyring.
+
+1. В Settings проверить OpenRouter endpoint, получить список моделей и выбрать хотя бы одну модель. Token не копируется в отчёты, логи или screenshots.
+2. Назначить, например, Emily маршрут `OpenRouter · <выбранная модель>`, а Yuri — `Codex App Server · <выбранная модель>` или другой уже настроенный provider. Это можно сделать на шаге Model creation flow либо в Personality существующего агента.
+3. Переключить активного агента и убедиться, что одинаковый route label виден в roster и Chat header сразу после сохранения, без перезапуска приложения.
+4. Отправить каждому агенту один обычный запрос и один запрос с безопасным tool call. Проверить streaming trace, финальный ответ и отсутствие fallback на маршрут другого агента.
+5. Явно попросить одного агента обратиться к другому. В Collaboration проверить имена участников, оба текущих route label, transcript, aggregate token usage, terminal status и исторический route/usage каждой реплики, привязанный к её source run.
+6. Дождаться или явно инициировать разрешённую reflection и проверить, что она использует маршрут агента-владельца состояния. Provider error или rate limit одного маршрута не должен переключать другого агента на этот provider и не должен раскрывать credential.
+7. Для тестового `rate_limit` или временного сбоя проверить безопасную категорию, retry hint и явную фразу об отсутствии переключения маршрута. Для authentication/quota/context/model-unavailable проверить отсутствие автоматического повтора и конкретное действие в UI; upstream body, token и credential не должны появляться в trace или Collaboration.
+8. В Chat проверить, что recovery-кнопки показаны только у последнего fragment run: retry повторяет исходный turn даже без assistant bubble, context/budget создаёт новый диалог, а account/model actions открывают Settings или route editor. В Collaboration model action должен выбрать responder-а неуспешного peer turn, а не текущего наблюдателя.
+
+Для каждой проверки фиксируются: агент, текущий provider/model, сценарий, run status, token usage и наблюдаемый результат. Collaboration показывает **текущие** маршруты участников отдельно от неизменяемой исторической provider/model attribution конкретной реплики; Chat показывает тот же persisted route и usage в execution trace. Старые run до migration остаются явно неатрибутированными и не подменяются текущими настройками.
+
+Успешный smoke означает, что независимые маршруты работают в Chat, tools, peer exchange и reflection. Он не заменяет полную матрицу из 28 Personality samples ниже: реальные ответы OpenRouter добавляются в versioned suite только после отдельного явного прогона владельцем.
+
 ## Зафиксированный offline baseline
 
 `docs/dogfood/personality-suite.fixture.json` — не результат внешней модели, а небольшой детерминированный canary. Он доказывает, что versioned формат, обе поверхности, scenario coverage, contrast contract и CLI report работают end-to-end. Unit tests отдельно подменяют ответы на плохие и проверяют обнаружение пропусков, дубликатов, потери русского языка, security regression и runaway expression.

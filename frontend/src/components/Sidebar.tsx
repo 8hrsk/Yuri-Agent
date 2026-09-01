@@ -3,6 +3,7 @@ import { useState, type Dispatch, type SetStateAction } from 'react'
 import { ConnectionBadge } from './ConnectionBadge'
 import { Icon, type IconName } from './Icon'
 import { navGroups, type NavId } from '../lib/navigation'
+import { modelRouteLabel } from '../lib/agents'
 import type { BackendStatus } from '../lib/backend'
 import type { AgentProfile } from '../lib/contracts'
 
@@ -67,7 +68,7 @@ export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agen
           </div>
           <div className="profile-copy">
             <strong>{agentName}</strong>
-            <span>{activeAgent ? 'active · local' : 'profile unavailable'}</span>
+            <span>{activeAgent ? modelRouteLabel(activeAgent.providerId, activeAgent.model) : 'profile unavailable'}</span>
           </div>
           <span className="profile-status" aria-label={`${agentName} is idle`} />
           <Icon className="sidebar__profile-chevron" name="chevron-right" width={13} height={13} />
@@ -87,7 +88,7 @@ export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agen
                 type="button"
               >
                 <span className="sidebar__agent-option-initial">{Array.from(agent.name)[0]?.toLocaleUpperCase('ru-RU') ?? 'A'}</span>
-                <span><strong>{agent.name}</strong><small>{agent.gender}{agent.age ? ` · ${agent.age}` : ''}</small></span>
+                <span><strong>{agent.name}</strong><small>{agent.gender}{agent.age ? ` · ${agent.age}` : ''}</small><small className="sidebar__agent-route">{modelRouteLabel(agent.providerId, agent.model)}</small></span>
                 {agent.id === activeAgent?.id && <Icon name="check" width={13} height={13} />}
               </button>
             ))}

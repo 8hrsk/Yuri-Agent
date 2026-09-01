@@ -122,6 +122,43 @@ describe('chat execution trace', () => {
     expect(persisted).toMatchObject({ kind: 'subagent', parentRunId: 'run-parent' })
   })
 
+  it('keeps immutable provider/model attribution and terminal token usage', () => {
+    let live = aggregateChatEvent([], {
+      type: 'run.started', runId: 'run-route', providerId: 'openrouter', model: 'model/free',
+      createdAt: '2026-09-01T10:00:00Z',
+    })
+    live = aggregateChatEvent(live, {
+      type: 'run.completed', runId: 'run-route', status: 'complete', providerId: 'openrouter', model: 'model/free',
+      inputTokens: 120, outputTokens: 30, totalTokens: 150, createdAt: '2026-09-01T10:00:01Z',
+    })
+    expect(live[0]).toMatchObject({ providerId: 'openrouter', model: 'model/free', inputTokens: 120, outputTokens: 30, totalTokens: 150 })
+
+    const persisted = normalizeRunTrace({
+      id: 'run-history-route', status: 'completed', createdAt: '2026-09-01T09:00:00Z',
+      providerId: 'codex', model: 'gpt-5.6', inputTokens: 80, outputTokens: 20, totalTokens: 100,
+    })
+    expect(persisted).toMatchObject({ providerId: 'codex', model: 'gpt-5.6', inputTokens: 80, outputTokens: 20, totalTokens: 100 })
+  })
+
+  it('keeps provider-neutral failure metadata for live and persisted traces', () => {
+    let live = aggregateChatEvent([], {
+      type: 'run.started', runId: 'run-failure', createdAt: '2026-09-01T10:00:00Z',
+    })
+    live = aggregateChatEvent(live, {
+      type: 'run.completed', runId: 'run-failure', status: 'error', error: 'Провайдер ограничил частоту запросов',
+      failureKind: 'rate_limit', retryable: true, retryAfterSeconds: 17, createdAt: '2026-09-01T10:00:01Z',
+    })
+    expect(live[0]).toMatchObject({
+      status: 'error', failureKind: 'rate_limit', retryable: true, retryAfterSeconds: 17,
+    })
+
+    const persisted = normalizeRunTrace({
+      id: 'run-history-failure', status: 'failed', failure: 'Лимит исчерпан', failureKind: 'quota_exhausted',
+      retryable: false, retryAfterSeconds: 0, createdAt: '2026-09-01T09:00:00Z',
+    })
+    expect(persisted).toMatchObject({ status: 'error', failureKind: 'quota_exhausted', retryable: false })
+  })
+
   it('splits a run into one thinking block and one block per tool call', () => {
     const trace = normalizeRunTrace({
       id: 'trace-1', runId: 'run-1', status: 'completed',
@@ -170,6 +207,17 @@ describe('chat timeline assembly', () => {
       'user-2',
       'trace-trace-run-1:tool:call-run-1',
     ])
+    const traceEntries = timeline.filter((entry) => entry.kind === 'trace')
+    expect(traceEntries[0]).not.toHaveProperty('showRecovery')
+    expect(traceEntries[1]).toMatchObject({ showRecovery: true })
+    expect(traceEntries[1]).not.toHaveProperty('recoveryMessageId', 'user-1')
+  })
+
+  it('anchors retry only to the latest user turn, never to an older branch', () => {
+    const latestTrace = traceFor('run-latest', '2026-08-29T10:00:07Z', '2026-08-29T10:00:08Z')
+    const timeline = buildChatTimeline(history, [latestTrace])
+    const recovery = timeline.filter((entry) => entry.kind === 'trace' && entry.showRecovery).at(-1)
+    expect(recovery).toMatchObject({ recoveryMessageId: 'user-2' })
   })
 
   it('places a trace between the question and the answer that share its timestamp', () => {

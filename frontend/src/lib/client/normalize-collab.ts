@@ -11,6 +11,7 @@ import type {
   PeerRelationshipOperation,
   PeerRelationshipVersion,
 } from '../contracts'
+import { normalizeRunFailureKind } from '../chat-trace'
 import { clampPersonaValue, normalizePersonaEvidence, normalizeSubjectiveOpinions } from '../personality'
 import { nowIso, optionalNumber, optionalString } from './primitives'
 import type { UnknownRecord } from './primitives'
@@ -39,15 +40,27 @@ function normalizePeerDialogueMessage(value: unknown): PeerDialogueMessage | und
   const raw = value as UnknownRecord
   const id = optionalString(raw, 'id', 'messageId', 'message_id')
   if (!id) return undefined
+  const sourceRunId = optionalString(raw, 'sourceRunId', 'source_run_id')
+  const providerId = optionalString(raw, 'providerId', 'provider_id')
+  const model = optionalString(raw, 'model')
+  const inputTokens = Math.max(0, Math.round(optionalNumber(raw, 'inputTokens', 'input_tokens') ?? 0)) || undefined
+  const outputTokens = Math.max(0, Math.round(optionalNumber(raw, 'outputTokens', 'output_tokens') ?? 0)) || undefined
+  const totalTokens = Math.max(0, Math.round(optionalNumber(raw, 'totalTokens', 'total_tokens') ?? 0)) || undefined
   return {
     id,
     sequence: Math.max(0, Math.round(optionalNumber(raw, 'sequence', 'index', 'turn') ?? 0)),
+    ...(sourceRunId ? { sourceRunId } : {}),
     senderAgentId: optionalString(raw, 'senderAgentId', 'sender_agent_id', 'senderId', 'sender_id') ?? '',
     senderName: optionalString(raw, 'senderName', 'sender_name') ?? 'Агент',
     recipientAgentId: optionalString(raw, 'recipientAgentId', 'recipient_agent_id', 'recipientId', 'recipient_id') ?? '',
     recipientName: optionalString(raw, 'recipientName', 'recipient_name') ?? 'Агент',
     content: String(raw.content ?? raw.text ?? raw.message ?? ''),
     createdAt: optionalString(raw, 'createdAt', 'created_at', 'timestamp') ?? nowIso(),
+    ...(providerId ? { providerId } : {}),
+    ...(model ? { model } : {}),
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
   }
 }
 
@@ -65,12 +78,23 @@ function normalizePeerDialogue(value: unknown): PeerDialogue | undefined {
   const messages = Array.isArray(rawMessages)
     ? rawMessages.map(normalizePeerDialogueMessage).filter((item): item is PeerDialogueMessage => Boolean(item)).sort((a, b) => a.sequence - b.sequence)
     : []
+  const initiatorProviderId = optionalString(source, 'initiatorProviderId', 'initiator_provider_id')
+  const initiatorModel = optionalString(source, 'initiatorModel', 'initiator_model')
+  const peerProviderId = optionalString(source, 'peerProviderId', 'peer_provider_id')
+  const peerModel = optionalString(source, 'peerModel', 'peer_model')
+  const failureKind = normalizeRunFailureKind(source.failureKind ?? source.failure_kind)
+  const retryableValue = source.retryable ?? source.failureRetryable ?? source.failure_retryable
+  const retryAfterSeconds = Math.max(0, Math.round(optionalNumber(source, 'retryAfterSeconds', 'retry_after_seconds', 'failureRetryAfterSeconds', 'failure_retry_after_seconds') ?? 0)) || undefined
   return {
     id,
     initiatorAgentId,
     initiatorName: optionalString(source, 'initiatorName', 'initiator_name') ?? 'Агент',
+    ...(initiatorProviderId ? { initiatorProviderId } : {}),
+    ...(initiatorModel ? { initiatorModel } : {}),
     peerAgentId,
     peerName: optionalString(source, 'peerName', 'peer_name') ?? 'Агент',
+    ...(peerProviderId ? { peerProviderId } : {}),
+    ...(peerModel ? { peerModel } : {}),
     triggerKind: normalizePeerDialogueTriggerKind(source.triggerKind ?? source.trigger_kind),
     triggerReason: optionalString(source, 'triggerReason', 'trigger_reason') ?? 'Причина запуска не указана.',
     purpose: optionalString(source, 'purpose', 'goal', 'summary') ?? 'Внутренний диалог',
@@ -82,6 +106,9 @@ function normalizePeerDialogue(value: unknown): PeerDialogue | undefined {
     createdAt: optionalString(source, 'createdAt', 'created_at', 'timestamp') ?? nowIso(),
     finishedAt: optionalString(source, 'finishedAt', 'finished_at', 'completedAt', 'completed_at'),
     failure: optionalString(source, 'failure', 'error', 'lastError', 'last_error'),
+    ...(failureKind ? { failureKind } : {}),
+    ...(typeof retryableValue === 'boolean' ? { retryable: retryableValue } : {}),
+    ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
     messages,
   }
 }

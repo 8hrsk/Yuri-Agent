@@ -114,3 +114,59 @@ func TestRunShapeBoundsAnonymousSubagents(t *testing.T) {
 		t.Fatalf("root parent shape error = %v", err)
 	}
 }
+
+func TestRunInferenceRouteAndUsageValidation(t *testing.T) {
+	if !(RunInferenceRoute{ProviderID: "openrouter", Model: "model/free"}).Valid() {
+		t.Fatal("valid inference route was rejected")
+	}
+	if (RunInferenceRoute{Model: "orphan-model"}).Valid() {
+		t.Fatal("model without provider was accepted")
+	}
+	if (RunInferenceRoute{ProviderID: "provider\x00id", Model: "model"}).Valid() {
+		t.Fatal("route with NUL was accepted")
+	}
+	if !(RunUsage{InputTokens: 100, OutputTokens: 50, TotalTokens: 150}).Valid() {
+		t.Fatal("valid token usage was rejected")
+	}
+	if (RunUsage{InputTokens: 100, OutputTokens: 50, TotalTokens: 120}).Valid() {
+		t.Fatal("total smaller than input plus output was accepted")
+	}
+	if (RunUsage{InputTokens: -1}).Valid() {
+		t.Fatal("negative token usage was accepted")
+	}
+}
+
+func TestRunFailureInfoIsTypedBoundedAndStoredByFailureTransition(t *testing.T) {
+	valid := RunFailureInfo{Kind: RunFailureRateLimit, Retryable: true, RetryAfterSeconds: 45}
+	if !valid.Valid() {
+		t.Fatal("valid failure metadata was rejected")
+	}
+	for _, invalid := range []RunFailureInfo{
+		{Kind: RunFailureKind("provider_secret")},
+		{Retryable: true},
+		{Kind: RunFailureRateLimit, RetryAfterSeconds: -1},
+		{Kind: RunFailureRateLimit, RetryAfterSeconds: 24*60*60 + 1},
+	} {
+		if invalid.Valid() {
+			t.Fatalf("invalid failure metadata was accepted: %#v", invalid)
+		}
+	}
+
+	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	run, err := NewRun("run-failure", RunKindInteractive, "conversation", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []RunState{RunStateQueued, RunStateRunning} {
+		now = now.Add(time.Second)
+		if err := run.Transition(state, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := run.FailWithInfo("rate limited", valid, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if run.State != RunStateFailed || run.FailureInfo != valid || run.Failure != "rate limited" {
+		t.Fatalf("failed run = %#v", run)
+	}
+}

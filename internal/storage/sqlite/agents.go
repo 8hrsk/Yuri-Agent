@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"time"
 
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 )
@@ -39,9 +40,10 @@ func (r *AgentRepository) Create(ctx context.Context, profile domain.AgentProfil
 		return err
 	}
 	_, err = r.db.ExecContext(ctx, `
-		INSERT INTO agent_profiles(id, name, age, gender, preferences, backstory, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, string(profile.ID), strings.TrimSpace(profile.Name), profile.Age,
-		strings.TrimSpace(profile.Gender), strings.TrimSpace(profile.Preferences), strings.TrimSpace(profile.Backstory), createdAt, updatedAt)
+		INSERT INTO agent_profiles(id, name, age, gender, preferences, backstory, provider_id, model, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, string(profile.ID), strings.TrimSpace(profile.Name), profile.Age,
+		strings.TrimSpace(profile.Gender), strings.TrimSpace(profile.Preferences), strings.TrimSpace(profile.Backstory),
+		strings.TrimSpace(profile.ProviderID), strings.TrimSpace(profile.Model), createdAt, updatedAt)
 	return wrappedSQLError("create agent profile", err)
 }
 
@@ -121,9 +123,10 @@ func (repositories *Repositories) createAgentWithDefaults(ctx context.Context, p
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO agent_profiles(id, name, age, gender, preferences, backstory, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, string(profile.ID), strings.TrimSpace(profile.Name), profile.Age,
-		strings.TrimSpace(profile.Gender), strings.TrimSpace(profile.Preferences), strings.TrimSpace(profile.Backstory), createdAt, updatedAt); err != nil {
+		INSERT INTO agent_profiles(id, name, age, gender, preferences, backstory, provider_id, model, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, string(profile.ID), strings.TrimSpace(profile.Name), profile.Age,
+		strings.TrimSpace(profile.Gender), strings.TrimSpace(profile.Preferences), strings.TrimSpace(profile.Backstory),
+		strings.TrimSpace(profile.ProviderID), strings.TrimSpace(profile.Model), createdAt, updatedAt); err != nil {
 		return wrappedSQLError("create agent profile", err)
 	}
 	if err := repositories.Persona.appendPersonaTx(ctx, tx, persona, 0, nil, false); err != nil {
@@ -157,7 +160,7 @@ func (r *AgentRepository) Get(ctx context.Context, id domain.ID) (domain.AgentPr
 		return domain.AgentProfile{}, fmt.Errorf("%w: agent profile id is required", domain.ErrInvalidArgument)
 	}
 	return scanAgentProfile(r.db.QueryRowContext(ctx, `
-		SELECT id, name, age, gender, preferences, backstory, created_at, updated_at
+		SELECT id, name, age, gender, preferences, backstory, provider_id, model, created_at, updated_at
 		FROM agent_profiles WHERE id = ?`, string(id)))
 }
 
@@ -169,7 +172,7 @@ func (r *AgentRepository) List(ctx context.Context) ([]domain.AgentProfile, erro
 		return nil, err
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, age, gender, preferences, backstory, created_at, updated_at
+		SELECT id, name, age, gender, preferences, backstory, provider_id, model, created_at, updated_at
 		FROM agent_profiles ORDER BY created_at, id`)
 	if err != nil {
 		return nil, wrappedSQLError("list agent profiles", err)
@@ -196,7 +199,7 @@ type agentProfileScanner interface {
 func scanAgentProfile(scanner agentProfileScanner) (domain.AgentProfile, error) {
 	var profile domain.AgentProfile
 	var id, createdAt, updatedAt string
-	if err := scanner.Scan(&id, &profile.Name, &profile.Age, &profile.Gender, &profile.Preferences, &profile.Backstory, &createdAt, &updatedAt); err != nil {
+	if err := scanner.Scan(&id, &profile.Name, &profile.Age, &profile.Gender, &profile.Preferences, &profile.Backstory, &profile.ProviderID, &profile.Model, &createdAt, &updatedAt); err != nil {
 		return domain.AgentProfile{}, wrappedSQLError("scan agent profile", err)
 	}
 	profile.ID = domain.ID(id)
@@ -209,6 +212,41 @@ func scanAgentProfile(scanner agentProfileScanner) (domain.AgentProfile, error) 
 	}
 	if err := profile.Validate(); err != nil {
 		return domain.AgentProfile{}, err
+	}
+	return profile, nil
+}
+
+// UpdateModelRoute changes only the non-secret provider/model preference of an
+// existing named agent. Personality and memory revisions are independent.
+func (r *AgentRepository) UpdateModelRoute(ctx context.Context, id domain.ID, providerID, model string, updatedAt time.Time) (domain.AgentProfile, error) {
+	if err := requireDatabase(r.db); err != nil {
+		return domain.AgentProfile{}, err
+	}
+	profile, err := r.Get(ctx, id)
+	if err != nil {
+		return domain.AgentProfile{}, err
+	}
+	profile.ProviderID = strings.TrimSpace(providerID)
+	profile.Model = strings.TrimSpace(model)
+	profile.UpdatedAt = updatedAt.UTC()
+	if !profile.UpdatedAt.After(profile.CreatedAt) {
+		profile.UpdatedAt = profile.CreatedAt.Add(time.Nanosecond)
+	}
+	if err := profile.Validate(); err != nil {
+		return domain.AgentProfile{}, err
+	}
+	encodedTime, err := timeValue(profile.UpdatedAt)
+	if err != nil {
+		return domain.AgentProfile{}, err
+	}
+	result, err := r.db.ExecContext(ctx, `UPDATE agent_profiles SET provider_id = ?, model = ?, updated_at = ? WHERE id = ?`, profile.ProviderID, profile.Model, encodedTime, string(id))
+	if err != nil {
+		return domain.AgentProfile{}, wrappedSQLError("update agent model route", err)
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr != nil {
+		return domain.AgentProfile{}, affectedErr
+	} else if affected != 1 {
+		return domain.AgentProfile{}, domain.ErrNotFound
 	}
 	return profile, nil
 }

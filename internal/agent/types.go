@@ -171,9 +171,52 @@ type ModelRequest struct {
 	Model           string            `json:"model"`
 	Messages        []Message         `json:"messages"`
 	Tools           []ToolDescriptor  `json:"tools,omitempty"`
+	ToolChoice      ToolChoice        `json:"tool_choice,omitempty"`
 	MaxOutputTokens int64             `json:"max_output_tokens,omitempty"`
 	Temperature     *float64          `json:"temperature,omitempty"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
+}
+
+type ToolChoiceMode string
+
+const (
+	ToolChoiceAuto     ToolChoiceMode = "auto"
+	ToolChoiceRequired ToolChoiceMode = "required"
+	ToolChoiceNone     ToolChoiceMode = "none"
+)
+
+// ToolChoice is provider-neutral. Required with an empty Name requires any
+// available tool; Required with Name forces that exact tool until the model
+// emits a tool call. Runtime resets it to auto after tool execution so an
+// agent loop cannot be trapped into repeating the same side effect.
+type ToolChoice struct {
+	Mode ToolChoiceMode `json:"mode,omitempty"`
+	Name string         `json:"name,omitempty"`
+}
+
+func (choice ToolChoice) Valid(tools []ToolDescriptor) error {
+	if choice.Mode == "" {
+		if strings.TrimSpace(choice.Name) != "" {
+			return fmt.Errorf("%w: tool choice name requires a mode", ErrInvalidRequest)
+		}
+		return nil
+	}
+	if choice.Mode != ToolChoiceAuto && choice.Mode != ToolChoiceRequired && choice.Mode != ToolChoiceNone {
+		return fmt.Errorf("%w: unsupported tool choice %q", ErrInvalidRequest, choice.Mode)
+	}
+	name := strings.TrimSpace(choice.Name)
+	if name == "" {
+		return nil
+	}
+	if choice.Mode != ToolChoiceRequired {
+		return fmt.Errorf("%w: named tool choice must be required", ErrInvalidRequest)
+	}
+	for _, tool := range tools {
+		if tool.Name == name {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: required tool %q is unavailable", ErrInvalidRequest, name)
 }
 
 func (r ModelRequest) Valid() error {
@@ -197,6 +240,9 @@ func (r ModelRequest) Valid() error {
 			return fmt.Errorf("%w: duplicate tool %q", ErrInvalidRequest, tool.Name)
 		}
 		seen[tool.Name] = struct{}{}
+	}
+	if err := r.ToolChoice.Valid(r.Tools); err != nil {
+		return err
 	}
 	if r.MaxOutputTokens < 0 {
 		return fmt.Errorf("%w: max output tokens must not be negative", ErrInvalidRequest)
@@ -319,16 +365,17 @@ const (
 )
 
 type Event struct {
-	Type       EventType   `json:"type"`
-	RunID      domain.ID   `json:"run_id,omitempty"`
-	Step       int         `json:"step,omitempty"`
-	ResponseID string      `json:"response_id,omitempty"`
-	Text       string      `json:"text,omitempty"`
-	Status     RunStatus   `json:"status,omitempty"`
-	ToolCall   *ToolCall   `json:"tool_call,omitempty"`
-	ToolResult *ToolResult `json:"tool_result,omitempty"`
-	Usage      Usage       `json:"usage,omitempty"`
-	Error      string      `json:"error,omitempty"`
+	Type        EventType             `json:"type"`
+	RunID       domain.ID             `json:"run_id,omitempty"`
+	Step        int                   `json:"step,omitempty"`
+	ResponseID  string                `json:"response_id,omitempty"`
+	Text        string                `json:"text,omitempty"`
+	Status      RunStatus             `json:"status,omitempty"`
+	ToolCall    *ToolCall             `json:"tool_call,omitempty"`
+	ToolResult  *ToolResult           `json:"tool_result,omitempty"`
+	Usage       Usage                 `json:"usage,omitempty"`
+	Error       string                `json:"error,omitempty"`
+	FailureInfo domain.RunFailureInfo `json:"failure_info,omitempty"`
 }
 
 type EventSink func(context.Context, Event) error

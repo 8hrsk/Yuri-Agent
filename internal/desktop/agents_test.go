@@ -14,6 +14,7 @@ import (
 	contextbuilder "github.com/OrdoAI/yuri-agent/internal/context"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 	"github.com/OrdoAI/yuri-agent/internal/memory"
+	securitykeyring "github.com/OrdoAI/yuri-agent/internal/security/keyring"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 )
 
@@ -128,6 +129,67 @@ func TestCreateAgentPersistsOwnerIdentityAndInitialPersona(t *testing.T) {
 	}
 	if loaded.Persona.ProfileID != created.ID || !loaded.Onboarding.AgentConfigured {
 		t.Fatalf("persisted config = %#v", loaded)
+	}
+}
+
+func TestAgentModelRouteIsDurableAndIndependentFromActiveProvider(t *testing.T) {
+	bridge := newAgentTestBridge(t)
+	credentialStore, err := securitykeyring.NewWithBackend("test.yuri.agent-route", &providerTestKeyring{values: make(map[string]string)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge.keyring = credentialStore
+	if err := credentialStore.Put(context.Background(), "provider.openrouter.api-key", "sk-test-only"); err != nil {
+		t.Fatal(err)
+	}
+	bridge.config.Providers = []config.ProviderConfig{
+		{ID: "codex", Kind: config.ProviderCodexAppServer, DisplayName: "Codex", Model: "codex-default", Enabled: true},
+		{ID: "openrouter", Kind: config.ProviderOpenAICompatible, DisplayName: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", Model: "openrouter/default", CredentialRef: "provider.openrouter.api-key"},
+	}
+	created, err := bridge.CreateAgent(CreateAgentInput{
+		Name: "Эмили", Gender: "female", ProviderID: "openrouter", Model: "openrouter/free",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ProviderID != "openrouter" || created.Model != "openrouter/free" {
+		t.Fatalf("created route = %#v", created)
+	}
+	backend, model, err := bridge.chatBackendForAgent(context.Background(), domain.ID(created.ID))
+	if err != nil || backend == nil || model != "openrouter/free" {
+		t.Fatalf("explicit disabled-provider route = backend %T, model %q, error %v", backend, model, err)
+	}
+
+	updated, err := bridge.UpdateActiveAgentModelRoute(UpdateAgentModelRouteInput{ProviderID: "codex", Model: "gpt-5.6"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ProviderID != "codex" || updated.Model != "gpt-5.6" {
+		t.Fatalf("updated route = %#v", updated)
+	}
+	stored, err := bridge.repositories.Agents.Get(context.Background(), domain.ID(created.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ProviderID != "codex" || stored.Model != "gpt-5.6" {
+		t.Fatalf("stored route = %#v", stored)
+	}
+
+	fallback, err := bridge.UpdateActiveAgentModelRoute(UpdateAgentModelRouteInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fallback.ProviderID != "" || fallback.Model != "" {
+		t.Fatalf("fallback route = %#v", fallback)
+	}
+	if _, err := bridge.UpdateActiveAgentModelRoute(UpdateAgentModelRouteInput{ProviderID: "missing", Model: "model"}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("missing provider error = %v", err)
+	}
+	bridge.config.Providers = append(bridge.config.Providers, config.ProviderConfig{
+		ID: "empty-openai", Kind: config.ProviderOpenAICompatible, DisplayName: "Empty OpenAI", BaseURL: "https://api.example.com/v1",
+	})
+	if _, err := bridge.UpdateActiveAgentModelRoute(UpdateAgentModelRouteInput{ProviderID: "empty-openai"}); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("empty OpenAI model error = %v", err)
 	}
 }
 

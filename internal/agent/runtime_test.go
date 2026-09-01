@@ -184,6 +184,51 @@ func TestRuntimeRunsToolLoopAndKeepsToolResultsInNextRequest(t *testing.T) {
 	}
 }
 
+func TestRuntimeRetriesRequiredToolInsteadOfAcceptingPromise(t *testing.T) {
+	backend := &scriptedBackend{streams: [][]ModelEvent{
+		{{Type: ModelEventTextDelta, Delta: "Сейчас попробую…"}, {Type: ModelEventCompleted}},
+		{
+			{Type: ModelEventToolCallStarted, ToolCallID: "call_required", ToolName: "echo"},
+			{Type: ModelEventToolCallDelta, ToolCallID: "call_required", ArgumentsDelta: `{"value":"hello"}`},
+			{Type: ModelEventCompleted},
+		},
+		{{Type: ModelEventTextDelta, Delta: "Готово."}, {Type: ModelEventCompleted}},
+	}}
+	registry := NewToolRegistry()
+	echo := &echoTool{}
+	if err := registry.Register(echo); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := NewRuntime(backend, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runtime.Run(context.Background(), RunRequest{
+		RunID: "required-tool-run",
+		ModelRequest: ModelRequest{
+			Model: "test-model", Messages: []Message{{Role: RoleUser, Content: "выполни действие"}},
+			ToolChoice: ToolChoice{Mode: ToolChoiceRequired, Name: "echo"},
+		},
+		Budget: domain.RunBudget{MaxSteps: 4, MaxTokens: 100, MaxToolCalls: 2, MaxToolOutputBytes: 1000, MaxDurationSeconds: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Message.Content != "Готово." || echo.calls != 1 || len(backend.requests) != 3 {
+		t.Fatalf("result=%#v echo=%d requests=%d", result, echo.calls, len(backend.requests))
+	}
+	if backend.requests[0].ToolChoice.Mode != ToolChoiceRequired || backend.requests[1].ToolChoice.Mode != ToolChoiceRequired {
+		t.Fatalf("required choice was not preserved across corrective retry: %#v", backend.requests)
+	}
+	if backend.requests[2].ToolChoice.Mode != ToolChoiceAuto || backend.requests[2].ToolChoice.Name != "" {
+		t.Fatalf("choice after tool execution = %#v, want auto", backend.requests[2].ToolChoice)
+	}
+	secondMessages := backend.requests[1].Messages
+	if len(secondMessages) < 3 || secondMessages[len(secondMessages)-1].Role != RoleDeveloper {
+		t.Fatalf("corrective developer message missing: %#v", secondMessages)
+	}
+}
+
 func TestRuntimeExecutesInteractiveToolInsideOneProviderTurn(t *testing.T) {
 	backend := &interactiveBackend{}
 	registry := NewToolRegistry()

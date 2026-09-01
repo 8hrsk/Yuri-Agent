@@ -121,6 +121,14 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if err != nil {
 		return ChatRunResult{}, err
 	}
+	profileRoute, err := b.repositories.Agents.Get(runContext, agentID)
+	if err != nil {
+		return ChatRunResult{}, err
+	}
+	run.Inference, err = b.resolveInferenceRoute(profileRoute.ProviderID, profileRoute.Model)
+	if err != nil {
+		return ChatRunResult{}, fmt.Errorf("model route for agent %s: %w", profileRoute.Name, err)
+	}
 	run.Budget = domain.RunBudget{MaxSteps: 8, MaxTokens: 32_000, MaxToolCalls: 32, MaxToolOutputBytes: 256 * 1024, MaxDurationSeconds: 600}
 	if requestedBudget.MaxSteps > 0 {
 		run.Budget.MaxSteps = requestedBudget.MaxSteps
@@ -161,6 +169,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 		return ChatRunResult{}, err
 	}
 	emitter := newChatEmitter(b, string(conversationID), string(runID), string(assistantMessageID))
+	emitter.setInference(run.Inference)
 	// Whatever ends this run — success, provider error, owner cancellation —
 	// the renderer gets its pending deltas, a closed assistant segment and
 	// exactly one terminal event.
@@ -182,7 +191,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	// The approval handler runs inside runtime.Run on this goroutine and needs
 	// this run to record waiting_approval while it blocks on the owner.
 	runContext = withApprovalRunState(runContext, &run)
-	backend, model, err := b.chatBackend(runContext)
+	backend, model, err := b.chatBackendForRoute(runContext, run.Inference.ProviderID, run.Inference.Model)
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
@@ -198,8 +207,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 			return b.failChatRun(runContext, &run, emitter, err), nil
 		}
 		if err := registry.Register(peerDialogueAgentTool{
-			bridge: b, backend: backend, model: model,
-			initiatorAgentID: agentID, triggerRunID: runID,
+			bridge: b, initiatorAgentID: agentID, triggerRunID: runID,
 		}); err != nil {
 			return b.failChatRun(runContext, &run, emitter, err), nil
 		}
@@ -273,6 +281,10 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
+	toolChoice, err := b.chatToolChoice(runContext, conversationID, agentID, request.Text, roster)
+	if err != nil {
+		return b.failChatRun(runContext, &run, emitter, err), nil
+	}
 	snapshot, err := assembler.Assemble(runContext, contextbuilder.Input{
 		AgentID: profileID, ConversationID: conversationID, Query: titleSeed,
 		ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, roster),
@@ -285,9 +297,10 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 
 	result, runErr := runtime.Run(runContext, agent.RunRequest{
 		RunID: runID, ConversationID: conversationID, Budget: run.Budget,
-		ModelRequest: agent.ModelRequest{Model: model, Messages: snapshot.Messages},
+		ModelRequest: agent.ModelRequest{Model: model, Messages: snapshot.Messages, ToolChoice: toolChoice},
 		Sink:         emitter.Sink,
 	})
+	run.Usage = runUsage(result.Usage)
 	if runErr != nil {
 		return b.failChatRun(runContext, &run, emitter, runErr), nil
 	}

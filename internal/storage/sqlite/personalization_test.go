@@ -216,7 +216,8 @@ func TestPersonalizationMigrationBackfillsLegacyOwnerSeed(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 31, 14, 0, 0, 0, time.UTC)
 	profile, _ := domain.NewAgentProfileWithBackstory("legacy-agent", "Legacy", 0, "female", "Старое описание.", "Старая история.", now)
-	if err := NewAgentRepository(database).Create(ctx, profile); err != nil {
+	if _, err := database.ExecContext(ctx, `INSERT INTO agent_profiles(id, name, age, gender, preferences, backstory, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		profile.ID, profile.Name, profile.Age, profile.Gender, profile.Preferences, profile.Backstory, profile.CreatedAt.Format(time.RFC3339Nano), profile.UpdatedAt.Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 	persona, _ := domain.NewMutablePersona(profile.ID, map[string]float64{"warmth": .93, "dry_humor": .41}, "legacy", now)

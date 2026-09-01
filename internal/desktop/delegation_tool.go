@@ -127,8 +127,16 @@ func (tool delegationAgentTool) Execute(ctx context.Context, call agent.ToolCall
 	if err != nil {
 		return agent.ToolResult{}, err
 	}
+	parentRun, err := tool.bridge.repositories.Runs.Get(ctx, tool.parentRunID)
+	if err != nil {
+		return agent.ToolResult{}, err
+	}
 	child.ParentRunID = tool.parentRunID
 	child.Budget = defaultDelegationBudget
+	child.Inference = parentRun.Inference
+	if child.Inference.ProviderID != "" && strings.TrimSpace(tool.model) != "" {
+		child.Inference.Model = strings.TrimSpace(tool.model)
+	}
 	scopeJSON, _ := json.Marshal(map[string]any{
 		"depth": 1, "tools": input.Tools, "capabilities": capabilities,
 		"task_bytes": len(input.Task), "context_bytes": len(input.Context),
@@ -162,7 +170,7 @@ func (tool delegationAgentTool) Execute(ctx context.Context, call agent.ToolCall
 		return agent.ToolResult{}, tool.failDelegation(child, delegation, err)
 	}
 	childRuntime.Authorizer = delegationToolAuthorizer{bridge: tool.bridge, allowed: delegationToolSet(input.Tools)}
-	trace := newDelegationTrace(tool.bridge, tool.conversationID, child.ID, tool.parentRunID, childTools)
+	trace := newDelegationTrace(tool.bridge, tool.conversationID, child.ID, tool.parentRunID, child.Inference, childTools)
 	userContent := "Задача:\n" + input.Task
 	if input.Context != "" {
 		userContent += "\n\nОграниченный контекст:\n" + input.Context
@@ -180,6 +188,7 @@ func (tool delegationAgentTool) Execute(ctx context.Context, call agent.ToolCall
 		},
 		Budget: child.Budget, Sink: trace.Sink,
 	})
+	child.Usage = runUsage(result.Usage)
 	if runErr != nil {
 		trace.Finish(runErr)
 		return agent.ToolResult{}, tool.failDelegation(child, delegation, runErr)
@@ -322,9 +331,10 @@ type delegationTrace struct {
 	parentRunID domain.ID
 }
 
-func newDelegationTrace(bridge *Bridge, conversationID, childRunID, parentRunID domain.ID, tools *agent.ToolRegistry) *delegationTrace {
+func newDelegationTrace(bridge *Bridge, conversationID, childRunID, parentRunID domain.ID, route domain.RunInferenceRoute, tools *agent.ToolRegistry) *delegationTrace {
 	emitter := newChatEmitter(bridge, string(conversationID), string(childRunID), "")
 	emitter.tools = tools
+	emitter.setInference(route)
 	return &delegationTrace{emitter: emitter, parentRunID: parentRunID}
 }
 
@@ -341,6 +351,9 @@ func (trace *delegationTrace) Sink(ctx context.Context, event agent.Event) error
 		return nil
 	case agent.EventToolCallStarted, agent.EventToolStarted, agent.EventToolCompleted:
 		return trace.emitter.Sink(ctx, event)
+	case agent.EventRunCompleted:
+		trace.emitter.usage = runUsage(event.Usage)
+		return nil
 	case agent.EventRunFailed:
 		return trace.emitter.Sink(ctx, event)
 	default:
@@ -394,9 +407,9 @@ func (tool delegationAgentTool) failDelegation(child domain.AgentRun, delegation
 		_ = tool.appendAudit(cleanupCtx, child.ID, delegation.ID, "delegation.cancelled", domain.PermissionDeny, delegation.Status)
 		return cause
 	}
-	message := safeError(cause.Error())
+	message, failureInfo := inferenceFailure(cause)
 	childCandidate, delegationCandidate := child, delegation
-	if childCandidate.Fail(message, time.Now().UTC()) == nil && delegationCandidate.Transition(domain.DelegationStatusFailed, childCandidate.UpdatedAt) == nil {
+	if childCandidate.FailWithInfo(message, failureInfo, time.Now().UTC()) == nil && delegationCandidate.Transition(domain.DelegationStatusFailed, childCandidate.UpdatedAt) == nil {
 		delegationCandidate.Failure = message
 		if tool.bridge.repositories.SaveDelegationWithChild(cleanupCtx, childCandidate, delegationCandidate) == nil {
 			child, delegation = childCandidate, delegationCandidate

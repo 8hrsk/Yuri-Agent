@@ -28,6 +28,9 @@ type chatEmitter struct {
 	conversationID string
 	runID          string
 	messageID      string
+	providerID     string
+	model          string
+	usage          domain.RunUsage
 
 	// deliver observes every dispatched event. Production leaves it nil and
 	// delivery goes through the Wails runtime; it is assigned once, before the
@@ -83,7 +86,7 @@ func newChatEmitter(b *Bridge, conversationID, runID, messageID string) *chatEmi
 
 func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
 	now := time.Now().UTC()
-	view := ChatEvent{ConversationID: emitter.conversationID, RunID: emitter.runID, CreatedAt: now.Format(time.RFC3339Nano)}
+	view := ChatEvent{ConversationID: emitter.conversationID, RunID: emitter.runID, CreatedAt: now.Format(time.RFC3339Nano), ProviderID: emitter.providerID, Model: emitter.model}
 	switch event.Type {
 	case agent.EventRunStarted:
 		view.Type = "run.started"
@@ -147,6 +150,7 @@ func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
 		view.Type, view.Approval = "approval.required", approval
 		view.Status, view.Label = "waiting_approval", "Ожидается разрешение пользователя"
 	case agent.EventRunCompleted:
+		emitter.usage = runUsage(event.Usage)
 		if completedID := emitter.closeAssistantSegment(); completedID != "" {
 			emitter.emit(ChatEvent{
 				Type: "assistant.completed", ConversationID: emitter.conversationID,
@@ -155,6 +159,7 @@ func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
 		}
 		return nil
 	case agent.EventRunFailed:
+		emitter.usage = runUsage(event.Usage)
 		if completedID := emitter.closeAssistantSegment(); completedID != "" {
 			emitter.emit(ChatEvent{
 				Type: "assistant.completed", ConversationID: emitter.conversationID,
@@ -163,9 +168,12 @@ func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
 		}
 		// A cancelled run must not be reported as a failure: the renderer
 		// finalizes an interrupted message differently from an errored one.
-		view.Type, view.Status, view.Error = runCompletedEventType, "error", safeError(event.Error)
+		view.Type, view.Status = runCompletedEventType, "error"
+		view.FailureKind, view.Retryable, view.RetryAfterSeconds = string(event.FailureInfo.Kind), event.FailureInfo.Retryable, event.FailureInfo.RetryAfterSeconds
+		view.Error = inferenceFailureMessage(event.FailureInfo, safeError(event.Error))
 		if event.Status == agent.RunStatusCancelled {
 			view.Status, view.Error = "cancelled", "Запуск остановлен"
+			view.FailureKind, view.Retryable, view.RetryAfterSeconds = "", false, 0
 		}
 		emitter.emitTerminal(view)
 		return nil
@@ -174,6 +182,14 @@ func (emitter *chatEmitter) Sink(ctx context.Context, event agent.Event) error {
 	}
 	emitter.emit(view)
 	return nil
+}
+
+func (emitter *chatEmitter) setInference(route domain.RunInferenceRoute) {
+	emitter.providerID, emitter.model = route.ProviderID, route.Model
+}
+
+func runUsage(usage agent.Usage) domain.RunUsage {
+	return domain.RunUsage{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens}
 }
 
 func (emitter *chatEmitter) appendAssistantDelta(responseID, delta string, now time.Time) (string, string, error) {

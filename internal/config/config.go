@@ -60,23 +60,30 @@ type OnboardingConfig struct {
 
 type ProviderKind string
 
+type ProviderAPIStyle string
+
 const (
 	ProviderOpenAICompatible ProviderKind = "openai-compatible"
 	ProviderCodexAppServer   ProviderKind = "codex-app-server"
 	ProviderAntigravity      ProviderKind = "antigravity"
+
+	ProviderAPIStyleResponses       ProviderAPIStyle = "responses"
+	ProviderAPIStyleChatCompletions ProviderAPIStyle = "chat_completions"
 )
 
 // ProviderConfig contains only non-secret metadata. CredentialRef addresses
 // a system-keyring item and is never an API key itself.
 type ProviderConfig struct {
-	ID            string       `json:"id"`
-	Kind          ProviderKind `json:"kind"`
-	DisplayName   string       `json:"display_name"`
-	BaseURL       string       `json:"base_url,omitempty"`
-	Model         string       `json:"model,omitempty"`
-	CredentialRef string       `json:"credential_ref,omitempty"`
-	Binary        string       `json:"binary,omitempty"`
-	Enabled       bool         `json:"enabled"`
+	ID             string           `json:"id"`
+	Kind           ProviderKind     `json:"kind"`
+	DisplayName    string           `json:"display_name"`
+	BaseURL        string           `json:"base_url,omitempty"`
+	Model          string           `json:"model,omitempty"`
+	APIStyle       ProviderAPIStyle `json:"api_style,omitempty"`
+	FavoriteModels []string         `json:"favorite_models,omitempty"`
+	CredentialRef  string           `json:"credential_ref,omitempty"`
+	Binary         string           `json:"binary,omitempty"`
+	Enabled        bool             `json:"enabled"`
 }
 
 type VoiceConfig struct {
@@ -379,8 +386,25 @@ func (c Config) Validate() error {
 		seen[provider.ID] = struct{}{}
 		switch provider.Kind {
 		case ProviderOpenAICompatible:
-			if provider.Model == "" || provider.CredentialRef == "" {
-				return fmt.Errorf("provider %q requires model and credential_ref", provider.ID)
+			if provider.CredentialRef == "" {
+				return fmt.Errorf("provider %q requires credential_ref", provider.ID)
+			}
+			if provider.Enabled && strings.TrimSpace(provider.Model) == "" {
+				return fmt.Errorf("enabled provider %q requires model", provider.ID)
+			}
+			if provider.APIStyle != "" && provider.APIStyle != ProviderAPIStyleResponses && provider.APIStyle != ProviderAPIStyleChatCompletions {
+				return fmt.Errorf("provider %q has unsupported API style %q", provider.ID, provider.APIStyle)
+			}
+			favorites := make(map[string]struct{}, len(provider.FavoriteModels))
+			for _, model := range provider.FavoriteModels {
+				model = strings.TrimSpace(model)
+				if model == "" || len(model) > 256 {
+					return fmt.Errorf("provider %q has invalid favorite model", provider.ID)
+				}
+				if _, exists := favorites[model]; exists {
+					return fmt.Errorf("provider %q has duplicate favorite model %q", provider.ID, model)
+				}
+				favorites[model] = struct{}{}
 			}
 			if err := validateRemoteURL(provider.BaseURL); err != nil {
 				return fmt.Errorf("provider %q: %w", provider.ID, err)

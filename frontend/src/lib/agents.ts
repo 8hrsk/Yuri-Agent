@@ -100,6 +100,8 @@ export const defaultAgentDraft: AgentProfileInput = {
   gender: 'female',
   preferences: 'Тёплая, самостоятельная и немного цундере.',
   backstory: '',
+  providerId: '',
+  model: '',
   traits: { ...defaultAgentTraits },
   personalization: clonePersonalization(defaultAgentPersonalization),
   creationMode: 'quick',
@@ -141,6 +143,14 @@ export function clonePersonalization(value: AgentPersonalizationInput): AgentPer
 
 export function cloneAgentDraft(value: AgentProfileInput): AgentProfileInput {
   return { ...value, traits: { ...value.traits }, personalization: clonePersonalization(value.personalization) }
+}
+
+/** Secret-free label used wherever the owner needs to verify model routing. */
+export function modelRouteLabel(providerId?: string, model?: string): string {
+  const provider = providerId?.trim() ?? ''
+  const selectedModel = model?.trim() ?? ''
+  if (!provider) return 'global · default'
+  return `${provider} · ${selectedModel || 'provider default'}`
 }
 
 export function newAgentDraft(overrides: Partial<Pick<AgentProfileInput, 'name' | 'preferences' | 'creationMode'>> = {}): AgentProfileInput {
@@ -212,6 +222,8 @@ export function normalizeAgentProfileInput(value: unknown): AgentProfileInput | 
     gender,
     preferences: typeof source.preferences === 'string' ? limitRunes(source.preferences, 2_000) : '',
     backstory: typeof source.backstory === 'string' ? limitRunes(source.backstory, AGENT_BACKSTORY_MAX_LENGTH) : '',
+    providerId: typeof source.providerId === 'string' ? limitRunes(source.providerId.trim(), 128) : '',
+    model: typeof source.model === 'string' ? limitRunes(source.model.trim(), 256) : '',
     traits: { ...defaultAgentTraits, ...normalizeAgentTraits(source.traits) },
     personalization: normalizePersonalizationInput(source.personalization),
     creationMode: 'advanced',
@@ -385,6 +397,8 @@ export function normalizeAgentProfile(value: unknown): AgentProfile | undefined 
     gender,
     preferences: text(source, 'preferences', 'shortPreferences', 'short_preferences') ?? '',
     backstory: limitRunes(text(source, 'backstory', 'identityBackstory', 'identity_backstory') ?? '', AGENT_BACKSTORY_MAX_LENGTH),
+    providerId: text(source, 'providerId', 'provider_id') ?? '',
+    model: text(source, 'model') ?? '',
     traits: normalizeAgentTraits(source.traits ?? source.initialTraits ?? source.initial_traits),
     active: source.active === true || source.isActive === true || source.is_active === true,
     createdAt: text(source, 'createdAt', 'created_at') ?? new Date(0).toISOString(),

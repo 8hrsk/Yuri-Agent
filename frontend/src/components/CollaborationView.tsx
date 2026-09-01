@@ -2,6 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
 import type { PeerDialogue, PeerDialogueStatus, PeerRelationship, PeerRelationshipDetail, PeerRelationshipVersion } from '../lib/contracts'
+import { modelRouteLabel } from '../lib/agents'
+import {
+  inferenceFailureGuidance,
+  inferenceFailureRecoveryActions,
+  inferenceRecoveryActionLabels,
+  type InferenceRecoveryAction,
+} from '../lib/inference-failures'
 import { formatDateTime } from '../lib/datetime'
 import { Icon } from './Icon'
 
@@ -100,12 +107,22 @@ function PeerRelationshipCard({ relationship, detail, busy, onOpen, onReset, onR
   </article>
 }
 
-function PeerDialogueCard({ dialogue, busy, onCancel }: {
+function PeerDialogueCard({ dialogue, busy, onCancel, onOpenAgentPersonality, onOpenSettings }: {
   dialogue: PeerDialogue
   busy: boolean
   onCancel: (dialogue: PeerDialogue) => void
+  onOpenSettings?: () => void
+  onOpenAgentPersonality?: (agentId: string) => void
 }) {
   const canCancel = dialogue.status === 'queued' || dialogue.status === 'running'
+  const failureGuidance = inferenceFailureGuidance(dialogue.failureKind, dialogue.retryAfterSeconds, dialogue.retryable)
+  const failedAgentId = dialogue.messages.at(-1)?.recipientAgentId
+  const recoveryActions = inferenceFailureRecoveryActions(dialogue.failureKind, dialogue.retryable).filter((action) =>
+    action === 'settings' ? Boolean(onOpenSettings) : action === 'personality' ? Boolean(onOpenAgentPersonality && failedAgentId) : false)
+  const recover = (action: InferenceRecoveryAction) => {
+    if (action === 'settings') onOpenSettings?.()
+    else if (action === 'personality' && failedAgentId) onOpenAgentPersonality?.(failedAgentId)
+  }
   return <article className={`collaboration-card collaboration-card--${dialogue.status}`}>
     <header className="collaboration-card__header">
       <div className="collaboration-card__identity">
@@ -120,6 +137,12 @@ function PeerDialogueCard({ dialogue, busy, onCancel }: {
 
     <p className="collaboration-card__purpose">{dialogue.purpose}</p>
     <div className={`collaboration-card__trigger collaboration-card__trigger--${dialogue.triggerKind}`}><span>{dialogue.triggerKind === 'autonomous' ? 'автономный триггер' : dialogue.triggerKind === 'agent_tool' ? 'tool intent' : 'неизвестный триггер'}</span><p>{dialogue.triggerReason}</p></div>
+    <div aria-label="Текущие маршруты моделей участников" className="collaboration-card__routes">
+      <span><small>{dialogue.initiatorName}</small><strong>{modelRouteLabel(dialogue.initiatorProviderId, dialogue.initiatorModel)}</strong></span>
+      <Icon name="chevron-right" width={12} height={12} />
+      <span><small>{dialogue.peerName}</small><strong>{modelRouteLabel(dialogue.peerProviderId, dialogue.peerModel)}</strong></span>
+      <em>current routes</em>
+    </div>
 
     <div className="collaboration-card__budget" aria-label="Бюджет диалога">
       <span><small>Ходы</small><strong>{budgetLabel(dialogue.turnCount, dialogue.maxTurns, '')}</strong></span>
@@ -135,11 +158,15 @@ function PeerDialogueCard({ dialogue, busy, onCancel }: {
           {dialogue.messages.map((message) => <div className="collaboration-message" key={message.id} role="listitem">
             <div className="collaboration-message__meta"><strong>{message.senderName}</strong><span>→ {message.recipientName}</span><time dateTime={message.createdAt}>{formatDate(message.createdAt)}</time></div>
             <p>{message.content}</p>
+            {(message.providerId || message.model || message.totalTokens) && <div className="collaboration-message__route">
+              <span>{modelRouteLabel(message.providerId, message.model)}</span>
+              {message.totalTokens !== undefined && <span>{message.totalTokens.toLocaleString('ru-RU')} ток.</span>}
+            </div>}
           </div>)}
         </div>}
     </details>
 
-    {dialogue.failure && <div className="collaboration-card__error"><Icon name="warning" width={13} height={13} /> {dialogue.failure}</div>}
+    {dialogue.failure && <div className="collaboration-card__error"><Icon name="warning" width={13} height={13} /><span>{dialogue.failure}{failureGuidance && <small>{failureGuidance}</small>}{recoveryActions.length > 0 && <span className="collaboration-card__recovery">{recoveryActions.map((action) => <button key={action} onClick={() => recover(action)} type="button">{inferenceRecoveryActionLabels[action]}</button>)}</span>}</span></div>}
     <footer className="collaboration-card__footer">
       <span>{dialogue.finishedAt ? `Завершено ${formatDate(dialogue.finishedAt)}` : 'Работает в фоне'}</span>
       {canCancel && <button className="collaboration-card__cancel" disabled={busy} onClick={() => onCancel(dialogue)} type="button">{busy ? 'Останавливаю…' : 'Остановить'}</button>}
@@ -147,7 +174,13 @@ function PeerDialogueCard({ dialogue, busy, onCancel }: {
   </article>
 }
 
-export function CollaborationView({ activeAgentId }: { activeAgentId?: string }) {
+type CollaborationViewProps = {
+  activeAgentId?: string
+  onOpenSettings?: () => void
+  onOpenAgentPersonality?: (agentId: string) => void
+}
+
+export function CollaborationView({ activeAgentId, onOpenAgentPersonality, onOpenSettings }: CollaborationViewProps) {
   const client = useMemo(() => createYuriClient(), [])
   const [dialogues, setDialogues] = useState<PeerDialogue[]>([])
   const [relationships, setRelationships] = useState<PeerRelationship[]>([])
@@ -260,7 +293,14 @@ export function CollaborationView({ activeAgentId }: { activeAgentId?: string })
     {loading && <div className="collaboration-state" role="status"><span className="memory-spinner" /> Загружаю фоновые диалоги…</div>}
     {error && <div className="tasks-feedback tasks-feedback--error" role="alert"><Icon name="warning" width={14} height={14} /> {error}</div>}
     {!loading && !error && visibleDialogues.length === 0 && <div className="collaboration-state collaboration-state--empty"><Icon name="relationship" width={23} height={23} /><strong>Внутренних диалогов пока нет</strong><span>Агенты начинают их сами, когда задача требует совета. Ручной запуск не предусмотрен.</span></div>}
-    {!loading && !error && visibleDialogues.length > 0 && <div className="collaboration-list">{visibleDialogues.map((dialogue) => <PeerDialogueCard busy={busyIds.has(dialogue.id)} dialogue={dialogue} key={dialogue.id} onCancel={(item) => void cancel(item)} />)}</div>}
+    {!loading && !error && visibleDialogues.length > 0 && <div className="collaboration-list">{visibleDialogues.map((dialogue) => <PeerDialogueCard
+      busy={busyIds.has(dialogue.id)}
+      dialogue={dialogue}
+      key={dialogue.id}
+      onCancel={(item) => void cancel(item)}
+      onOpenAgentPersonality={onOpenAgentPersonality}
+      onOpenSettings={onOpenSettings}
+    />)}</div>}
 
     {feedback && <div className={`tasks-feedback tasks-feedback--${feedback.kind}`} role={feedback.kind === 'error' ? 'alert' : 'status'}><Icon name={feedback.kind === 'success' ? 'check' : 'warning'} width={14} height={14} /> {feedback.text}<button aria-label="Закрыть уведомление" className="icon-button icon-button--small" onClick={() => setFeedback(undefined)} type="button"><Icon name="x" width={13} height={13} /></button></div>}
     <div className="collaboration-note"><span className="collaboration-note__icon"><Icon name="shield" width={16} height={16} /></span><div><strong>Ограниченный канал между агентами</strong><p>Каждый диалог имеет фиксированный лимит ходов и токенов, не получает tools и не может сам создать новый диалог. Остановить queued/running запуск можно здесь.</p></div></div>

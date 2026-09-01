@@ -11,6 +11,7 @@ type responsesRequest struct {
 	Model           string            `json:"model"`
 	Input           []any             `json:"input"`
 	Tools           []responsesTool   `json:"tools,omitempty"`
+	ToolChoice      any               `json:"tool_choice,omitempty"`
 	Stream          bool              `json:"stream"`
 	MaxOutputTokens int64             `json:"max_output_tokens,omitempty"`
 	Temperature     *float64          `json:"temperature,omitempty"`
@@ -93,6 +94,7 @@ type chatRequest struct {
 	Model         string             `json:"model"`
 	Messages      []chatMessage      `json:"messages"`
 	Tools         []chatTool         `json:"tools,omitempty"`
+	ToolChoice    any                `json:"tool_choice,omitempty"`
 	Stream        bool               `json:"stream"`
 	StreamOptions *chatStreamOptions `json:"stream_options,omitempty"`
 	MaxTokens     int64              `json:"max_tokens,omitempty"`
@@ -184,6 +186,36 @@ func chatTools(tools []agent.ToolDescriptor) []chatTool {
 		result = append(result, chatTool{Type: "function", Function: chatToolFunction{Name: tool.Name, Description: tool.Description, Parameters: tool.InputSchema}})
 	}
 	return result
+}
+
+func responsesToolChoice(choice agent.ToolChoice) any {
+	if choice.Mode == "" {
+		return nil
+	}
+	if choice.Name == "" {
+		return string(choice.Mode)
+	}
+	return struct {
+		Type string `json:"type"`
+		Name string `json:"name"`
+	}{Type: "function", Name: choice.Name}
+}
+
+func chatToolChoice(choice agent.ToolChoice) any {
+	if choice.Mode == "" {
+		return nil
+	}
+	if choice.Name == "" {
+		return string(choice.Mode)
+	}
+	return struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}{Type: "function", Function: struct {
+		Name string `json:"name"`
+	}{Name: choice.Name}}
 }
 
 func ordinalID(index int) string {

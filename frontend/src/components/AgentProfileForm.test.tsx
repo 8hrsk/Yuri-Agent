@@ -31,6 +31,9 @@ describe('AgentProfileForm', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Продолжить/ }))
 
+    expect(screen.getByRole('heading', { name: 'Какой моделью думает агент?' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Продолжить/ }))
+
     expect(screen.getByRole('heading', { name: 'Выберите отправную точку' })).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: /Заботливая спутница/ })).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: /Застенчивая аналитик/ })).toBeInTheDocument()
@@ -64,6 +67,7 @@ describe('AgentProfileForm', () => {
 
   it('explains that explicit speech habits have roleplay priority', () => {
     render(<ProfileHarness />)
+    fireEvent.click(screen.getByRole('button', { name: /Продолжить/ }))
     fireEvent.click(screen.getByRole('button', { name: /Продолжить/ }))
 
     expect(screen.getByText(/заикание, паузы или характерные обращения/)).toBeInTheDocument()

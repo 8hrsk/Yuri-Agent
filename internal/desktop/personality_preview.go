@@ -106,7 +106,11 @@ func (b *Bridge) PreviewAgentPersonality(input PersonalityPreviewInput) (Persona
 	}
 	previewCtx, previewCancel := context.WithTimeout(appContext, personalityPreviewTimeout)
 	defer previewCancel()
-	backend, model, err := b.chatBackend(previewCtx)
+	state, err := buildAgentCreationState("preview-agent", input.Profile, time.Now().UTC())
+	if err != nil {
+		return PersonalityPreviewView{}, err
+	}
+	backend, model, err := b.chatBackendForRoute(previewCtx, state.Profile.ProviderID, state.Profile.Model)
 	if err != nil {
 		return PersonalityPreviewView{}, err
 	}

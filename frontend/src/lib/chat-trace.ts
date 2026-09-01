@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   CompletionTraceStep,
   RunStatus,
+  RunFailureKind,
   RunTrace,
   RunTraceStatus,
   RunTraceStep,
@@ -65,6 +66,34 @@ function optionalString(source: UnknownRecord, ...keys: string[]): string | unde
   for (const key of keys) {
     const result = stringValue(source[key])
     if (result) return result
+  }
+  return undefined
+}
+
+function nonNegativeInteger(source: UnknownRecord, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const numeric = Number(source[key])
+    if (source[key] !== undefined && source[key] !== null && source[key] !== '' && Number.isFinite(numeric) && numeric >= 0) {
+      return Math.round(numeric)
+    }
+  }
+  return undefined
+}
+
+export function normalizeRunFailureKind(value: unknown): RunFailureKind | undefined {
+  const kind = String(value ?? '').trim().toLowerCase()
+  if (kind === 'unknown' || kind === 'authentication' || kind === 'rate_limit' || kind === 'quota_exhausted' ||
+      kind === 'context_limit' || kind === 'model_unavailable' || kind === 'timeout' || kind === 'transient' ||
+      kind === 'invalid_request' || kind === 'budget_exceeded') return kind
+  return undefined
+}
+
+function optionalBoolean(source: UnknownRecord, ...keys: string[]): boolean | undefined {
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === 'boolean') return value
+    if (value === 1 || value === '1' || value === 'true') return true
+    if (value === 0 || value === '0' || value === 'false') return false
   }
   return undefined
 }
@@ -376,7 +405,16 @@ export function createRunTrace(runId: string, startedAt = nowIso()): RunTrace {
  * arbitrary event payload is copied into the returned object.
  */
 export function reduceRunTrace(trace: RunTrace, event: ChatEvent, at = eventTime(event, nowIso())): RunTrace {
-  let next = withUpdatedTrace(trace, at, {})
+  let next = withUpdatedTrace(trace, at, {
+    providerId: event.providerId ?? trace.providerId,
+    model: event.model ?? trace.model,
+    inputTokens: event.inputTokens ?? trace.inputTokens,
+    outputTokens: event.outputTokens ?? trace.outputTokens,
+    totalTokens: event.totalTokens ?? trace.totalTokens,
+    failureKind: event.failureKind ?? trace.failureKind,
+    retryable: event.retryable ?? trace.retryable,
+    retryAfterSeconds: event.retryAfterSeconds ?? trace.retryAfterSeconds,
+  })
   switch (event.type) {
     case 'run.started':
       return withUpdatedTrace(next, at, {
@@ -646,6 +684,14 @@ export function normalizeRunTrace(value: unknown, fallbackIndex = 0): RunTrace |
     finishedAt,
     kind: optionalString(value, 'kind', 'runKind', 'run_kind'),
     parentRunId: optionalString(value, 'parentRunId', 'parent_run_id'),
+    providerId: optionalString(value, 'providerId', 'provider_id'),
+    model: optionalString(value, 'model'),
+    inputTokens: nonNegativeInteger(value, 'inputTokens', 'input_tokens'),
+    outputTokens: nonNegativeInteger(value, 'outputTokens', 'output_tokens'),
+    totalTokens: nonNegativeInteger(value, 'totalTokens', 'total_tokens'),
+    failureKind: normalizeRunFailureKind(value.failureKind ?? value.failure_kind),
+    retryable: optionalBoolean(value, 'retryable', 'failureRetryable', 'failure_retryable'),
+    retryAfterSeconds: nonNegativeInteger(value, 'retryAfterSeconds', 'retry_after_seconds', 'failureRetryAfterSeconds', 'failure_retry_after_seconds'),
     failure,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     steps: sortSteps(steps),
@@ -662,7 +708,7 @@ export function normalizeRunTrace(value: unknown, fallbackIndex = 0): RunTrace |
  */
 export type ChatTimelineEntry =
   | { kind: 'message'; key: string; time: number; priority: number; message: ChatMessage }
-  | { kind: 'trace'; key: string; time: number; priority: number; trace: RunTrace }
+  | { kind: 'trace'; key: string; time: number; priority: number; trace: RunTrace; showRecovery?: boolean; recoveryMessageId?: string }
 
 function timelineTime(value: string | undefined): number {
   const parsed = Date.parse(value ?? '')
@@ -699,7 +745,34 @@ export function buildChatTimeline(messages: ChatMessage[], traces?: RunTrace[]):
     for (const fragment of splitRunTraceForTimeline(trace)) entries.push(traceTimelineEntry(fragment))
   }
   entries.sort(compareTimelineEntries)
-  return entries
+  const lastTraceKeyByRun = new Map<string, string>()
+  const recoveryMessageByRun = new Map<string, string>()
+  const latestUserMessageId = [...entries].reverse().find((entry) => entry.kind === 'message' && entry.message.role === 'user')
+  let previousUserMessageId: string | undefined
+  for (const entry of entries) {
+    if (entry.kind === 'message' && entry.message.role === 'user') {
+      previousUserMessageId = entry.message.id
+      continue
+    }
+    if (entry.kind === 'trace') {
+      lastTraceKeyByRun.set(entry.trace.runId, entry.key)
+      if (previousUserMessageId && !recoveryMessageByRun.has(entry.trace.runId)) {
+        recoveryMessageByRun.set(entry.trace.runId, previousUserMessageId)
+      }
+    }
+  }
+  return entries.map((entry) => {
+    if (entry.kind !== 'trace' || lastTraceKeyByRun.get(entry.trace.runId) !== entry.key) return entry
+    const anchor = recoveryMessageByRun.get(entry.trace.runId)
+    return {
+      ...entry,
+      showRecovery: true,
+      // retryLast must never reinterpret an older branch against the newer
+      // transcript. Route-repair actions remain useful on historical errors,
+      // but retry is offered only for the conversation's latest user turn.
+      recoveryMessageId: latestUserMessageId?.kind === 'message' && anchor === latestUserMessageId.message.id ? anchor : undefined,
+    }
+  })
 }
 
 /**

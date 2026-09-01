@@ -57,6 +57,7 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 	if strings.TrimSpace(input.ModelRequest.Model) == "" && strings.TrimSpace(r.DefaultModel) != "" {
 		input.ModelRequest.Model = r.DefaultModel
 	}
+	input.ModelRequest.Tools = r.Tools.Descriptors()
 	if err := input.ModelRequest.Valid(); err != nil {
 		return RunResult{}, err
 	}
@@ -81,6 +82,8 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 	seenCalls := make(map[string]ToolResult)
 	seenCallArgs := make(map[string]string)
 	toolCallsUsed := 0
+	requiredChoicePending := input.ModelRequest.ToolChoice.Mode == ToolChoiceRequired
+	requiredChoiceMisses := 0
 
 	for step := 1; step <= budget.MaxSteps; step++ {
 		if err := contextErr(runCtx); err != nil {
@@ -89,9 +92,12 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 		request := input.ModelRequest
 		request.Messages = append([]Message(nil), messages...)
 		request.Tools = r.Tools.Descriptors()
+		if !requiredChoicePending && request.ToolChoice.Mode == ToolChoiceRequired {
+			request.ToolChoice = ToolChoice{Mode: ToolChoiceAuto}
+		}
 		stream, err := r.Backend.Start(runCtx, request)
 		if err != nil {
-			return r.fail(runCtx, input, result, fmt.Errorf("%w: %v", ErrBackend, redactRuntimeError(err)))
+			return r.fail(runCtx, input, result, WrapInferenceError(err))
 		}
 		if interactive, ok := stream.(InteractiveToolStream); ok {
 			turnText, calls, usage, consumeErr := r.consumeInteractiveStream(
@@ -113,6 +119,17 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 			assistant := Message{Role: RoleAssistant, Content: turnText}
 			if !assistant.Valid() {
 				return r.fail(runCtx, input, result, fmt.Errorf("%w: backend returned no assistant output", ErrBackend))
+			}
+			if requiredChoicePending && !requiredToolSatisfied(input.ModelRequest.ToolChoice, calls) {
+				if len(calls) > 0 {
+					return r.fail(runCtx, input, result, fmt.Errorf("%w: provider emitted a different tool than the required one", ErrBackend))
+				}
+				requiredChoiceMisses++
+				if requiredChoiceMisses >= 2 {
+					return r.fail(runCtx, input, result, fmt.Errorf("%w: provider did not emit the required tool call", ErrBackend))
+				}
+				messages = append(messages, assistant, Message{Role: RoleDeveloper, Content: "The required action has not been performed. Emit the required tool call now. Do not answer with a promise, narration, or roleplay instead of the tool call."})
+				continue
 			}
 			result.Message = assistant
 			if err := emitTerminal(runCtx, input.Sink, Event{Type: EventRunCompleted, RunID: input.RunID, Step: step, Status: RunStatusCompleted, Text: turnText, Usage: result.Usage}); err != nil {
@@ -139,7 +156,18 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 			return r.fail(runCtx, input, result, fmt.Errorf("%w: backend returned no assistant output", ErrBackend))
 		}
 		messages = append(messages, assistant)
+		if requiredChoicePending && len(calls) > 0 && !requiredToolSatisfied(input.ModelRequest.ToolChoice, calls) {
+			return r.fail(runCtx, input, result, fmt.Errorf("%w: provider emitted a different tool than the required one", ErrBackend))
+		}
 		if len(calls) == 0 {
+			if requiredChoicePending {
+				requiredChoiceMisses++
+				if requiredChoiceMisses >= 2 {
+					return r.fail(runCtx, input, result, fmt.Errorf("%w: provider did not emit the required tool call", ErrBackend))
+				}
+				messages = append(messages, Message{Role: RoleDeveloper, Content: "The required action has not been performed. Emit the required tool call now. Do not answer with a promise, narration, or roleplay instead of the tool call."})
+				continue
+			}
 			result.Message = assistant
 			if err := emitTerminal(runCtx, input.Sink, Event{Type: EventRunCompleted, RunID: input.RunID, Step: step, Status: RunStatusCompleted, Text: turnText, Usage: result.Usage}); err != nil {
 				return RunResult{}, err
@@ -149,6 +177,7 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 		if toolCallsUsed+len(calls) > budget.MaxToolCalls {
 			return r.fail(runCtx, input, result, fmt.Errorf("%w: tool call limit %d exceeded", ErrBudgetExceeded, budget.MaxToolCalls))
 		}
+		requiredChoicePending = false
 
 		for _, call := range calls {
 			toolCallsUsed++
@@ -169,6 +198,21 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 	}
 
 	return r.fail(runCtx, input, result, fmt.Errorf("%w: maximum steps %d reached", ErrBudgetExceeded, budget.MaxSteps))
+}
+
+func requiredToolSatisfied(choice ToolChoice, calls []ToolCall) bool {
+	if choice.Mode != ToolChoiceRequired || len(calls) == 0 {
+		return false
+	}
+	if strings.TrimSpace(choice.Name) == "" {
+		return true
+	}
+	for _, call := range calls {
+		if call.Name == choice.Name {
+			return true
+		}
+	}
+	return false
 }
 
 // consumeInteractiveStream handles transports where a tool request blocks the
@@ -203,7 +247,7 @@ func (r *Runtime) consumeInteractiveStream(
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return "", executed, usage, fmt.Errorf("%w: %v", ErrBackend, redactRuntimeError(err))
+			return "", executed, usage, WrapInferenceError(err)
 		}
 		usage = usage.Add(event.Usage)
 		if budget.MaxTokens > 0 && usage.TotalTokens > budget.MaxTokens {
@@ -304,7 +348,7 @@ func (r *Runtime) consumeStream(ctx context.Context, input RunRequest, stream Mo
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return "", nil, usage, fmt.Errorf("%w: %v", ErrBackend, redactRuntimeError(err))
+			return "", nil, usage, WrapInferenceError(err)
 		}
 		usage = usage.Add(event.Usage)
 		if maxTokens > 0 && usage.TotalTokens > maxTokens {
@@ -618,7 +662,7 @@ func (r *Runtime) fail(ctx context.Context, input RunRequest, result RunResult, 
 	}
 	if emitErr := emitTerminal(ctx, input.Sink, Event{
 		Type: EventRunFailed, RunID: input.RunID, Step: result.Steps,
-		Status: status, Error: message, Usage: result.Usage,
+		Status: status, Error: message, Usage: result.Usage, FailureInfo: DurableFailureInfo(err),
 	}); emitErr != nil {
 		return result, emitErr
 	}
