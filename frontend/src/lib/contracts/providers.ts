@@ -51,6 +51,16 @@ export interface OpenAIModel {
   requestPrice?: string
   free: boolean
   supportsTools: boolean
+  supportsToolsKnown: boolean
+  /** The model can accept image input in the selected provider contract. */
+  supportsVision: boolean
+  supportsVisionKnown: boolean
+  /** The model can return a provider-supported structured response. */
+  supportsStructuredOutput: boolean
+  supportsStructuredOutputKnown: boolean
+  /** The model can enforce a JSON Schema response format. */
+  supportsJSONSchema: boolean
+  supportsJSONSchemaKnown: boolean
   inputModalities: string[]
   outputModalities: string[]
   created?: number

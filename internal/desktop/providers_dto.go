@@ -65,20 +65,27 @@ type OpenAIModelCatalogInput struct {
 }
 
 type OpenAIModelView struct {
-	ID                  string   `json:"id"`
-	Name                string   `json:"name"`
-	Description         string   `json:"description,omitempty"`
-	ContextLength       int      `json:"contextLength,omitempty"`
-	MaxCompletionTokens int      `json:"maxCompletionTokens,omitempty"`
-	PromptPrice         string   `json:"promptPrice,omitempty"`
-	CompletionPrice     string   `json:"completionPrice,omitempty"`
-	RequestPrice        string   `json:"requestPrice,omitempty"`
-	Free                bool     `json:"free"`
-	SupportsTools       bool     `json:"supportsTools"`
-	InputModalities     []string `json:"inputModalities,omitempty"`
-	OutputModalities    []string `json:"outputModalities,omitempty"`
-	Created             int64    `json:"created,omitempty"`
-	Favorite            bool     `json:"favorite"`
+	ID                            string   `json:"id"`
+	Name                          string   `json:"name"`
+	Description                   string   `json:"description,omitempty"`
+	ContextLength                 int      `json:"contextLength,omitempty"`
+	MaxCompletionTokens           int      `json:"maxCompletionTokens,omitempty"`
+	PromptPrice                   string   `json:"promptPrice,omitempty"`
+	CompletionPrice               string   `json:"completionPrice,omitempty"`
+	RequestPrice                  string   `json:"requestPrice,omitempty"`
+	Free                          bool     `json:"free"`
+	SupportsTools                 bool     `json:"supportsTools"`
+	SupportsToolsKnown            bool     `json:"supportsToolsKnown"`
+	SupportsStructuredOutput      bool     `json:"supportsStructuredOutput"`
+	SupportsStructuredOutputKnown bool     `json:"supportsStructuredOutputKnown"`
+	SupportsJSONSchema            bool     `json:"supportsJSONSchema"`
+	SupportsJSONSchemaKnown       bool     `json:"supportsJSONSchemaKnown"`
+	InputModalities               []string `json:"inputModalities,omitempty"`
+	OutputModalities              []string `json:"outputModalities,omitempty"`
+	SupportsVision                bool     `json:"supportsVision"`
+	SupportsVisionKnown           bool     `json:"supportsVisionKnown"`
+	Created                       int64    `json:"created,omitempty"`
+	Favorite                      bool     `json:"favorite"`
 }
 
 type SetProviderModelFavoriteInput struct {

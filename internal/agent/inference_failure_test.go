@@ -33,3 +33,14 @@ func TestInferenceFailureBoundsHintsAndClassifiesRuntimeBudgets(t *testing.T) {
 		t.Fatalf("budget failure = %#v", got)
 	}
 }
+
+func TestModelCapabilityFailureIsProviderNeutralInvalidRequest(t *testing.T) {
+	err := &ModelCapabilityError{Model: "vendor/text-only", Capability: "tools"}
+	if !errors.Is(err, ErrModelCapabilityUnsupported) {
+		t.Fatalf("capability error identity = %v", err)
+	}
+	failure, ok := InferenceFailureFromError(WrapInferenceError(err))
+	if !ok || failure.Kind != domain.RunFailureInvalidRequest || failure.Retryable {
+		t.Fatalf("failure = %#v, ok=%v", failure, ok)
+	}
+}

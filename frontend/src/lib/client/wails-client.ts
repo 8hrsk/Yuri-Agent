@@ -951,6 +951,30 @@ function normalizeOpenAIModels(value: unknown): OpenAIModel[] {
     if (!id) return []
     const inputModalities = source.inputModalities ?? source.input_modalities
     const outputModalities = source.outputModalities ?? source.output_modalities
+    const supportedParameters = normalizeCapabilityList(source.supportedParameters ?? source.supported_parameters)
+    const capabilities = source.capabilities && typeof source.capabilities === 'object' && !Array.isArray(source.capabilities)
+      ? source.capabilities as UnknownRecord
+      : undefined
+    const supportsTools = capabilityFlag(source, capabilities, ['supportsTools', 'supports_tools', 'tools'])
+      ?? hasCapability(supportedParameters, ['tools'])
+      ?? false
+    const supportsToolsKnown = capabilityFlag(source, capabilities, ['supportsToolsKnown', 'supports_tools_known'])
+      ?? (capabilityFlag(source, capabilities, ['supportsTools', 'supports_tools', 'tools']) !== undefined || supportedParameters.length > 0)
+    const normalizedInputModalities = Array.isArray(inputModalities) ? inputModalities.map(String) : []
+    const supportsVision = capabilityFlag(source, capabilities, ['supportsVision', 'supports_vision', 'vision', 'supportsImageInput', 'supports_image_input', 'imageInput', 'image_input'])
+      ?? hasCapability(supportedParameters, ['vision', 'image', 'image_input', 'image_url'])
+      ?? hasImageInput(normalizedInputModalities)
+    const supportsVisionKnown = capabilityFlag(source, capabilities, ['supportsVisionKnown', 'supports_vision_known'])
+      ?? (capabilityFlag(source, capabilities, ['supportsVision', 'supports_vision', 'vision']) !== undefined || normalizedInputModalities.length > 0)
+    const supportsJSONSchema = capabilityFlag(source, capabilities, ['supportsJSONSchema', 'supports_json_schema', 'supportsJsonSchema', 'jsonSchema', 'json_schema'])
+      ?? hasCapability(supportedParameters, ['json_schema', 'structured_outputs'])
+      ?? false
+    const supportsJSONSchemaKnown = capabilityFlag(source, capabilities, ['supportsJSONSchemaKnown', 'supports_json_schema_known'])
+      ?? (capabilityFlag(source, capabilities, ['supportsJSONSchema', 'supports_json_schema', 'supportsJsonSchema']) !== undefined || supportedParameters.length > 0)
+    const supportsStructuredOutput = capabilityFlag(source, capabilities, ['supportsStructuredOutput', 'supports_structured_output', 'supportsStructuredOutputs', 'supports_structured_outputs', 'structuredOutput', 'structured_output'])
+      ?? (supportsJSONSchema || Boolean(hasCapability(supportedParameters, ['structured_output', 'structured_outputs', 'response_format', 'json_object'])))
+    const supportsStructuredOutputKnown = capabilityFlag(source, capabilities, ['supportsStructuredOutputKnown', 'supports_structured_output_known'])
+      ?? (capabilityFlag(source, capabilities, ['supportsStructuredOutput', 'supports_structured_output', 'supportsStructuredOutputs']) !== undefined || supportedParameters.length > 0)
     return [{
       id,
       name: optionalString(source, 'name', 'displayName', 'display_name') ?? id,
@@ -961,12 +985,56 @@ function normalizeOpenAIModels(value: unknown): OpenAIModel[] {
       completionPrice: optionalString(source, 'completionPrice', 'completion_price'),
       requestPrice: optionalString(source, 'requestPrice', 'request_price'),
       free: normalizeBoolean(source.free, false),
-      supportsTools: normalizeBoolean(source.supportsTools ?? source.supports_tools, false),
-      inputModalities: Array.isArray(inputModalities) ? inputModalities.map(String) : [],
+      supportsTools,
+      supportsToolsKnown,
+      supportsVision,
+      supportsVisionKnown,
+      supportsStructuredOutput,
+      supportsStructuredOutputKnown,
+      supportsJSONSchema,
+      supportsJSONSchemaKnown,
+      inputModalities: normalizedInputModalities,
       outputModalities: Array.isArray(outputModalities) ? outputModalities.map(String) : [],
       created: optionalNumber(source, 'created'),
       favorite: normalizeBoolean(source.favorite, false),
     }]
+  })
+}
+
+/**
+ * Capability fields have existed under several names across provider catalog
+ * projections. Keep the renderer tolerant at this boundary, but preserve an
+ * explicit false: a provider saying "no vision" must win over a broad
+ * modality hint.
+ */
+function capabilityFlag(source: UnknownRecord, nested: UnknownRecord | undefined, keys: string[]): boolean | undefined {
+  const direct = optionalBoolean(source, ...keys)
+  if (direct !== undefined) return direct
+  return nested ? optionalBoolean(nested, ...keys) : undefined
+}
+
+function optionalBoolean(source: UnknownRecord, ...keys: string[]): boolean | undefined {
+  for (const key of keys) {
+    if (!(key in source) || source[key] === undefined || source[key] === null) continue
+    return normalizeBoolean(source[key], false)
+  }
+  return undefined
+}
+
+function normalizeCapabilityList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map(String).map((item) => item.trim().toLocaleLowerCase('en-US').replace(/[\s-]+/g, '_')).filter(Boolean)
+}
+
+function hasCapability(values: string[], candidates: string[]): boolean | undefined {
+  if (values.length === 0) return undefined
+  return candidates.some((candidate) => values.includes(candidate))
+}
+
+function hasImageInput(modalities: string[]): boolean {
+  return modalities.some((modality) => {
+    const normalized = modality.trim().toLocaleLowerCase('en-US').replace(/[\s-]+/g, '_')
+    return normalized === 'image' || normalized === 'image_url' || normalized === 'vision'
   })
 }
 

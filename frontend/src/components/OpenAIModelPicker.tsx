@@ -45,6 +45,10 @@ export function OpenAIModelPicker({ models, value, loading, sort, onReload, onSe
   const [freeOnly, setFreeOnly] = useState(false)
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [toolsOnly, setToolsOnly] = useState(false)
+  const [visionOnly, setVisionOnly] = useState(false)
+  const [structuredOnly, setStructuredOnly] = useState(false)
+  const [jsonSchemaOnly, setJSONSchemaOnly] = useState(false)
+  const [minimumContext, setMinimumContext] = useState(0)
 
   const visibleModels = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('ru-RU')
@@ -52,10 +56,14 @@ export function OpenAIModelPicker({ models, value, loading, sort, onReload, onSe
       if (freeOnly && !model.free) return false
       if (favoritesOnly && !model.favorite) return false
       if (toolsOnly && !model.supportsTools) return false
+      if (visionOnly && !model.supportsVision) return false
+      if (structuredOnly && !model.supportsStructuredOutput) return false
+      if (jsonSchemaOnly && !model.supportsJSONSchema) return false
+      if (minimumContext > 0 && model.contextLength < minimumContext) return false
       if (!needle) return true
       return `${model.name} ${model.id} ${model.description ?? ''}`.toLocaleLowerCase('ru-RU').includes(needle)
     })
-  }, [favoritesOnly, freeOnly, models, query, toolsOnly])
+  }, [favoritesOnly, freeOnly, jsonSchemaOnly, minimumContext, models, query, structuredOnly, toolsOnly, visionOnly])
 
   return (
     <section aria-label="Каталог моделей" className="model-catalog">
@@ -71,12 +79,26 @@ export function OpenAIModelPicker({ models, value, loading, sort, onReload, onSe
             {sortOptions.map((option) => <option key={option.value || 'default'} value={option.value}>{option.label}</option>)}
           </select>
         </label>
+        <label className="model-catalog__context">
+          <span className="sr-only">Минимальный размер контекста</span>
+          <select aria-label="Минимальный размер контекста" onChange={(event) => setMinimumContext(Number(event.target.value))} value={minimumContext}>
+            <option value={0}>Любой контекст</option>
+            <option value={32_000}>Контекст от 32K</option>
+            <option value={64_000}>Контекст от 64K</option>
+            <option value={128_000}>Контекст от 128K</option>
+            <option value={200_000}>Контекст от 200K</option>
+            <option value={1_000_000}>Контекст от 1M</option>
+          </select>
+        </label>
         <button aria-label="Обновить список моделей" className="model-catalog__reload" disabled={loading} onClick={() => onReload(sort)} type="button"><Icon name="refresh" width={13} height={13} /></button>
       </div>
       <div className="model-catalog__filters" aria-label="Фильтры моделей">
         <button aria-pressed={favoritesOnly} className={favoritesOnly ? 'model-filter model-filter--active' : 'model-filter'} onClick={() => setFavoritesOnly((current) => !current)} type="button">★ Избранное</button>
         <button aria-pressed={freeOnly} className={freeOnly ? 'model-filter model-filter--active' : 'model-filter'} onClick={() => setFreeOnly((current) => !current)} type="button">Бесплатные</button>
         <button aria-pressed={toolsOnly} className={toolsOnly ? 'model-filter model-filter--active' : 'model-filter'} onClick={() => setToolsOnly((current) => !current)} type="button">Tools</button>
+        <button aria-pressed={visionOnly} className={visionOnly ? 'model-filter model-filter--active' : 'model-filter'} onClick={() => setVisionOnly((current) => !current)} type="button">Vision</button>
+        <button aria-pressed={structuredOnly} className={structuredOnly ? 'model-filter model-filter--active' : 'model-filter'} onClick={() => setStructuredOnly((current) => !current)} type="button">Structured</button>
+        <button aria-pressed={jsonSchemaOnly} className={jsonSchemaOnly ? 'model-filter model-filter--active' : 'model-filter'} onClick={() => setJSONSchemaOnly((current) => !current)} type="button">JSON schema</button>
         <span>{visibleModels.length} / {models.length}</span>
       </div>
       <div className="model-catalog__list" role="listbox" aria-busy={loading} aria-label="Модели OpenRouter">
@@ -90,8 +112,10 @@ export function OpenAIModelPicker({ models, value, loading, sort, onReload, onSe
                 <span className="model-option__title"><strong>{model.name}</strong><code>{model.id}</code></span>
                 <span className="model-option__badges">
                   {model.free && <i className="model-badge model-badge--free">FREE</i>}
-                  {model.supportsTools && <i className="model-badge">TOOLS</i>}
-                  {model.inputModalities.includes('image') && <i className="model-badge">VISION</i>}
+                  {model.supportsTools ? <i className="model-badge model-badge--tools" title="Модель заявляет поддержку вызова tools">TOOLS</i> : model.supportsToolsKnown ? <i className="model-badge model-badge--unsupported" title="Модель явно не поддерживает вызов tools">NO TOOLS</i> : <i className="model-badge" title="Provider не сообщил поддержку tools">TOOLS ?</i>}
+                  {model.supportsVision && <i className="model-badge model-badge--vision" title="Модель принимает изображения">VISION</i>}
+                  {model.supportsStructuredOutput && <i className="model-badge model-badge--structured" title="Модель поддерживает structured output">STRUCTURED</i>}
+                  {model.supportsJSONSchema && <i className="model-badge model-badge--schema" title="Модель поддерживает JSON Schema">JSON SCHEMA</i>}
                 </span>
                 <span className="model-option__meta">
                   <span>Context <strong>{compactTokens(model.contextLength)}</strong></span>

@@ -22,6 +22,9 @@ export function AgentModelRouteEditor({ providerId, model, disabled, onChange }:
   const [loadingModels, setLoadingModels] = useState(false)
   const [error, setError] = useState<string>()
   const selected = providers.find((provider) => provider.id === providerId)
+  const selectedOpenAIModel = selected?.kind === 'openai-compatible'
+    ? openAIModels.find((candidate) => candidate.id === model)
+    : undefined
 
   useEffect(() => {
     let mounted = true
@@ -84,6 +87,9 @@ export function AgentModelRouteEditor({ providerId, model, disabled, onChange }:
     {selected?.kind === 'openai-compatible' && <>
       <OpenAIModelPicker loading={loadingModels} models={openAIModels} onReload={(nextSort) => void loadModels(selected, nextSort)} onSelect={(nextModel) => onChange(selected.id, nextModel)} onToggleFavorite={(item) => void toggleFavorite(item)} sort={sort} value={model} />
       <label><span>Model ID <small>· можно ввести вручную</small></span><input disabled={disabled} onChange={(event) => onChange(selected.id, event.target.value)} placeholder={selected.model || 'provider/model'} spellCheck={false} value={model} /></label>
+      {selectedOpenAIModel?.supportsToolsKnown && !selectedOpenAIModel.supportsTools && <div className="agent-model-route__warning" role="alert"><Icon name="warning" width={13} height={13} /><span><strong>У этой модели нет поддержки tools</strong><small>Агент сможет отвечать текстом, но обязательные вызовы инструментов будут остановлены до отправки provider. Выберите модель с бейджем TOOLS для задач с файлами, web и субагентами.</small></span></div>}
+      {selectedOpenAIModel && !selectedOpenAIModel.supportsToolsKnown && <div className="agent-model-route__hint" role="status"><Icon name="spark" width={13} height={13} /><span>Provider не сообщил capability tools для этой модели. Текстовые ответы разрешены; обязательный tool-вызов будет проверен консервативно.</span></div>}
+      {model && !loadingModels && openAIModels.length > 0 && !selectedOpenAIModel && <div className="agent-model-route__hint" role="status"><Icon name="spark" width={13} height={13} /><span>Capabilities для введённой вручную модели неизвестны. Проверьте поддержку tools, vision и structured output у provider.</span></div>}
     </>}
     {selected?.kind === 'codex-app-server' && <label><span>Codex model</span><select disabled={disabled || loadingModels} onChange={(event) => onChange(selected.id, event.target.value)} value={model}>
       <option value="">Автоматически · provider default</option>

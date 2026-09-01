@@ -309,6 +309,7 @@
 }
 
 .model-catalog__sort select,
+.model-catalog__context select,
 .model-catalog__reload {
   min-height: 34px;
   border: 1px solid var(--line);
@@ -319,6 +320,13 @@
 
 .model-catalog__sort select {
   padding: 7px 28px 7px 9px;
+  outline: none;
+  font-size: 9px;
+}
+
+.model-catalog__context select {
+  max-width: 132px;
+  padding: 7px 24px 7px 9px;
   outline: none;
   font-size: 9px;
 }
@@ -445,6 +453,27 @@
 .model-badge--free {
   border-color: rgba(100, 217, 169, 0.3);
   color: var(--mint);
+}
+
+.model-badge--tools {
+  border-color: rgba(100, 217, 169, 0.3);
+  color: #8cdab9;
+}
+
+.model-badge--vision {
+  border-color: rgba(185, 166, 255, 0.38);
+  color: var(--accent-light);
+}
+
+.model-badge--structured,
+.model-badge--schema {
+  border-color: rgba(224, 190, 114, 0.34);
+  color: #e3be72;
+}
+
+.model-badge--unsupported {
+  border-color: rgba(var(--pink-rgb), 0.35);
+  color: var(--pink);
 }
 
 .model-option__meta {

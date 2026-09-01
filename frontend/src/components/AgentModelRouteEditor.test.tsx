@@ -50,4 +50,26 @@ describe('AgentModelRouteEditor', () => {
     expect(await screen.findByRole('option', { name: /fallback/ })).toHaveValue('')
     expect(screen.getByText(/наследует глобальную настройку/)).toBeInTheDocument()
   })
+
+  it('warns when the selected catalog model does not support tools', async () => {
+    ;(window as typeof window & { go?: unknown }).go = {
+      main: {
+        Bridge: {
+          ListConversations: () => [],
+          ListProviders: () => [
+            { id: 'openrouter', kind: 'openai-compatible', displayName: 'OpenRouter', model: 'vendor/text-only', enabled: true, hasSecret: true },
+          ],
+          ListOpenAIModels: () => [
+            { id: 'vendor/text-only', name: 'Text Only', context_length: 32_000, supports_tools: false, input_modalities: ['text'], output_modalities: ['text'] },
+          ],
+        },
+      },
+    }
+    resetYuriClientForTests()
+
+    render(<AgentModelRouteEditor model="vendor/text-only" onChange={vi.fn()} providerId="openrouter" />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/нет поддержки tools/)
+    expect(screen.getByText(/обязательные вызовы инструментов будут остановлены/)).toBeInTheDocument()
+  })
 })

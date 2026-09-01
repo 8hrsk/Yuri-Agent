@@ -82,6 +82,9 @@ func (c *Client) Start(ctx context.Context, request agent.ModelRequest) (agent.M
 	if err := request.Valid(); err != nil {
 		return nil, providerError(ErrorKindRequest, "start", 0, err.Error(), false, 0)
 	}
+	if err := c.validateRequiredCapabilities(ctx, request); err != nil {
+		return nil, err
+	}
 	body, style, err := c.marshalRequest(request)
 	if err != nil {
 		return nil, err

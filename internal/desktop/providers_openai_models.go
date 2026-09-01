@@ -61,8 +61,11 @@ func (b *Bridge) ListOpenAIModels(input OpenAIModelCatalogInput) ([]OpenAIModelV
 			ID: model.ID, Name: model.Name, Description: model.Description,
 			ContextLength: model.ContextLength, MaxCompletionTokens: model.MaxCompletionTokens,
 			PromptPrice: model.PromptPrice, CompletionPrice: model.CompletionPrice, RequestPrice: model.RequestPrice,
-			Free: model.Free, SupportsTools: containsCatalogValue(model.SupportedParameters, "tools"),
+			Free: model.Free, SupportsTools: model.SupportsTools, SupportsToolsKnown: model.SupportsToolsKnown,
+			SupportsStructuredOutput: model.SupportsStructuredOutput, SupportsStructuredOutputKnown: model.SupportsStructuredOutputKnown,
+			SupportsJSONSchema: model.SupportsJSONSchema, SupportsJSONSchemaKnown: model.SupportsJSONSchemaKnown,
 			InputModalities: model.InputModalities, OutputModalities: model.OutputModalities,
+			SupportsVision: model.SupportsVision, SupportsVisionKnown: model.SupportsVisionKnown,
 			Created: model.Created, Favorite: favorite,
 		})
 	}
@@ -105,13 +108,4 @@ func (b *Bridge) SetProviderModelFavorite(input SetProviderModelFavoriteInput) (
 	}
 	b.config = candidate
 	return providerView(provider), nil
-}
-
-func containsCatalogValue(values []string, expected string) bool {
-	for _, value := range values {
-		if strings.EqualFold(strings.TrimSpace(value), expected) {
-			return true
-		}
-	}
-	return false
 }

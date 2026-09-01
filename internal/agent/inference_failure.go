@@ -76,6 +76,9 @@ func InferenceFailureFromError(err error) (InferenceFailure, bool) {
 	if errors.As(err, &carrier) {
 		return normalizeInferenceFailure(carrier.InferenceFailure()), true
 	}
+	if errors.Is(err, ErrModelCapabilityUnsupported) {
+		return InferenceFailure{Kind: domain.RunFailureInvalidRequest}, true
+	}
 	if errors.Is(err, ErrBudgetExceeded) {
 		return InferenceFailure{Kind: domain.RunFailureBudgetExceeded}, true
 	}

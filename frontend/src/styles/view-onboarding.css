@@ -707,6 +707,45 @@
   font-size: 11px;
 }
 
+.agent-model-route__warning,
+.agent-model-route__hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 12px;
+  border-radius: 9px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.agent-model-route__warning {
+  border: 1px solid rgba(var(--pink-rgb), 0.28);
+  color: var(--pink);
+  background: rgba(var(--pink-rgb), 0.06);
+}
+
+.agent-model-route__warning span,
+.agent-model-route__hint span {
+  display: grid;
+  gap: 3px;
+}
+
+.agent-model-route__warning strong {
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.agent-model-route__warning small {
+  color: #c18b9c;
+  font-size: 9px;
+}
+
+.agent-model-route__hint {
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
+  color: var(--accent-light);
+  background: rgba(var(--accent-rgb), 0.05);
+}
+
 .agent-profile-grid--identity {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }

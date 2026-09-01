@@ -340,7 +340,8 @@ describe('Yuri client contract', () => {
         return [{
           id: 'openrouter/free', name: 'Free Router', context_length: 200000,
           max_completion_tokens: 16384, prompt_price: '0', completion_price: '0',
-          free: true, supports_tools: true, input_modalities: ['text'], output_modalities: ['text'], favorite: false,
+          free: true, supports_tools: true, supports_vision: false, supports_structured_output: true, supports_json_schema: true,
+          input_modalities: ['text'], output_modalities: ['text'], favorite: false,
         }]
       },
       SetProviderModelFavorite: (input: unknown) => { calls.push({ name: 'favorite', input }); return { id: 'openrouter' } },
@@ -356,7 +357,7 @@ describe('Yuri client contract', () => {
         providerId: 'openrouter', displayName: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: '',
         apiStyle: 'chat_completions' as const, apiKeyConfigured: false, favoriteModels: [], timeoutSeconds: 90, streamResponses: true,
       }
-      await expect(client.connectOpenAIProvider(settings, 'sk-or-secret')).resolves.toEqual([expect.objectContaining({ id: 'openrouter/free', contextLength: 200000, free: true, supportsTools: true })])
+      await expect(client.connectOpenAIProvider(settings, 'sk-or-secret')).resolves.toEqual([expect.objectContaining({ id: 'openrouter/free', contextLength: 200000, free: true, supportsTools: true, supportsVision: false, supportsStructuredOutput: true, supportsJSONSchema: true })])
       await client.getOpenAIModels('openrouter', 'throughput-high-to-low')
       await client.setOpenAIModelFavorite('openrouter', 'openrouter/free', true)
 
