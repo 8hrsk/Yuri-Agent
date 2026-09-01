@@ -36,6 +36,38 @@ let clientStub: YuriClient
 vi.mock('../lib/client', () => ({ createYuriClient: () => clientStub }))
 
 describe('Collaboration peer relationships', () => {
+  it('starts an owner-initiated exchange with an explicit narrowing budget', async () => {
+    const startPeerDialogue = vi.fn(async () => ({ id: 'manual-1', minTurns: 1, maxTurns: 1, maxTokens: 2000, maxDurationSeconds: 30 }))
+    clientStub = {
+      mode: 'mock',
+      listAgents: async () => [
+        { id: 'agent-yuri', name: 'Юри', gender: 'female', preferences: '', backstory: '', traits: {}, active: true, executionBudget: 'balanced', createdAt: '2026-08-30T09:00:00Z', updatedAt: '2026-08-30T09:00:00Z' },
+        { id: 'agent-mira', name: 'Мира', gender: 'female', preferences: '', backstory: '', traits: {}, active: false, executionBudget: 'efficient', createdAt: '2026-08-30T09:00:00Z', updatedAt: '2026-08-30T09:00:00Z' },
+      ],
+      listPeerDialogues: async () => [],
+      listPeerRelationships: async () => [],
+      startPeerDialogue,
+    } as unknown as YuriClient
+    const user = userEvent.setup()
+    render(<CollaborationView activeAgentId="agent-yuri" />)
+
+    await user.type(await screen.findByRole('textbox', { name: 'Цель' }), 'Проверить план')
+    await user.type(screen.getByRole('textbox', { name: 'Первое сообщение' }), 'Посмотри архитектуру.')
+    await user.clear(screen.getByRole('spinbutton', { name: 'Макс. ходов' }))
+    await user.type(screen.getByRole('spinbutton', { name: 'Макс. ходов' }), '1')
+    await user.clear(screen.getByRole('spinbutton', { name: 'Макс. токенов' }))
+    await user.type(screen.getByRole('spinbutton', { name: 'Макс. токенов' }), '2000')
+    await user.clear(screen.getByRole('spinbutton', { name: 'Макс. время, сек.' }))
+    await user.type(screen.getByRole('spinbutton', { name: 'Макс. время, сек.' }), '30')
+    await user.click(screen.getByRole('button', { name: 'Начать bounded-диалог' }))
+
+    await waitFor(() => expect(startPeerDialogue).toHaveBeenCalledWith({
+      peerAgentId: 'agent-mira', purpose: 'Проверить план', message: 'Посмотри архитектуру.',
+      maxTurns: 1, maxTokens: 2000, maxDurationSeconds: 30,
+    }))
+    expect(await screen.findByText(/1–1 ходов, до 2 000 токенов и 30 с/)).toBeInTheDocument()
+  })
+
   it('marks opinions as subjective and exposes append-only recovery controls', async () => {
     const reset = vi.fn(async () => detail)
     const rollback = vi.fn(async () => detail)

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
-import type { PeerDialogue, PeerDialogueCompletionReason, PeerDialogueStatus, PeerRelationship, PeerRelationshipDetail, PeerRelationshipVersion } from '../lib/contracts'
+import type { AgentProfile, ManualPeerDialogueInput, PeerDialogue, PeerDialogueCompletionReason, PeerDialogueStatus, PeerRelationship, PeerRelationshipDetail, PeerRelationshipVersion } from '../lib/contracts'
 import { modelRouteLabel } from '../lib/agents'
 import {
   inferenceFailureGuidance,
@@ -69,6 +69,12 @@ function durationLabel(seconds: number): string {
 
 function limitLabel(value: number): string {
   return value > 0 ? value.toLocaleString('ru-RU') : '—'
+}
+
+function peerBudgetDefaults(agent?: AgentProfile): Pick<ManualPeerDialogueInput, 'maxTurns' | 'maxTokens' | 'maxDurationSeconds'> {
+  if (agent?.executionBudget === 'efficient') return { maxTurns: 2, maxTokens: 4_000, maxDurationSeconds: 45 }
+  if (agent?.executionBudget === 'extended') return { maxTurns: 6, maxTokens: 12_000, maxDurationSeconds: 180 }
+  return { maxTurns: 4, maxTokens: 8_000, maxDurationSeconds: 90 }
 }
 
 const relationshipDimensionLabels: Record<string, string> = {
@@ -168,7 +174,7 @@ function PeerDialogueCard({ dialogue, busy, onCancel, onOpenAgentPersonality, on
     </header>
 
     <p className="collaboration-card__purpose">{dialogue.purpose}</p>
-    <div className={`collaboration-card__trigger collaboration-card__trigger--${dialogue.triggerKind}`}><span>{dialogue.triggerKind === 'autonomous' ? 'автономный триггер' : dialogue.triggerKind === 'agent_tool' ? 'tool intent' : 'неизвестный триггер'}</span><p>{dialogue.triggerReason}</p></div>
+    <div className={`collaboration-card__trigger collaboration-card__trigger--${dialogue.triggerKind}`}><span>{dialogue.triggerReason.startsWith('Владелец вручную') ? 'ручной запуск владельца' : dialogue.triggerKind === 'autonomous' ? 'автономный триггер' : dialogue.triggerKind === 'agent_tool' ? 'tool intent' : 'неизвестный триггер'}</span><p>{dialogue.triggerReason}</p></div>
     <div aria-label="Текущие маршруты моделей участников" className="collaboration-card__routes">
       <span><small>{dialogue.initiatorName}</small><strong>{modelRouteLabel(dialogue.initiatorProviderId, dialogue.initiatorModel)}</strong></span>
       <Icon name="chevron-right" width={12} height={12} />
@@ -227,23 +233,28 @@ type CollaborationViewProps = {
 export function CollaborationView({ activeAgentId, onOpenAgentPersonality, onOpenSettings }: CollaborationViewProps) {
   const client = useMemo(() => createYuriClient(), [])
   const [dialogues, setDialogues] = useState<PeerDialogue[]>([])
+  const [agents, setAgents] = useState<AgentProfile[]>([])
   const [relationships, setRelationships] = useState<PeerRelationship[]>([])
   const [relationshipDetails, setRelationshipDetails] = useState<Record<string, PeerRelationshipDetail>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [feedback, setFeedback] = useState<Feedback>()
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set())
+  const [starting, setStarting] = useState(false)
+  const [manualDraft, setManualDraft] = useState<ManualPeerDialogueInput>({ peerAgentId: '', purpose: '', message: '', maxTurns: 4, maxTokens: 8_000, maxDurationSeconds: 90 })
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(undefined)
     try {
-      const [nextDialogues, nextRelationships] = await Promise.all([
+      const [nextDialogues, nextRelationships, nextAgents] = await Promise.all([
         client.listPeerDialogues({ limit: 50 }),
         client.listPeerRelationships({ limit: 50 }),
+        typeof client.listAgents === 'function' ? client.listAgents() : Promise.resolve([]),
       ])
       setDialogues(nextDialogues)
       setRelationships(nextRelationships)
+      setAgents(nextAgents)
       setRelationshipDetails({})
     } catch (cause) {
       setDialogues([])
@@ -255,6 +266,19 @@ export function CollaborationView({ activeAgentId, onOpenAgentPersonality, onOpe
   }, [client])
 
   useEffect(() => { void load() }, [load, activeAgentId])
+
+  const activeAgent = useMemo(() => agents.find((agent) => agent.id === activeAgentId && agent.active) ?? agents.find((agent) => agent.id === activeAgentId) ?? agents.find((agent) => agent.active), [activeAgentId, agents])
+  const peerAgents = useMemo(() => agents.filter((agent) => agent.id !== activeAgent?.id), [activeAgent?.id, agents])
+
+  useEffect(() => {
+    if (!activeAgent) return
+    const defaults = peerBudgetDefaults(activeAgent)
+    setManualDraft((current) => ({
+      ...current,
+      peerAgentId: peerAgents.some((peer) => peer.id === current.peerAgentId) ? current.peerAgentId : peerAgents[0]?.id ?? '',
+      ...defaults,
+    }))
+  }, [activeAgent, peerAgents])
 
   const visibleDialogues = useMemo(() => {
     if (!activeAgentId) return dialogues
@@ -281,6 +305,25 @@ export function CollaborationView({ activeAgentId, onOpenAgentPersonality, onOpe
       setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось остановить диалог.' })
     } finally {
       markBusy(dialogue.id, false)
+    }
+  }
+
+  const startManualDialogue = async () => {
+    if (!manualDraft.peerAgentId || !manualDraft.purpose.trim() || !manualDraft.message.trim()) {
+      setFeedback({ kind: 'error', text: 'Выберите peer, укажите цель и первое сообщение.' })
+      return
+    }
+    setStarting(true)
+    setFeedback(undefined)
+    try {
+      const started = await client.startPeerDialogue({ ...manualDraft, purpose: manualDraft.purpose.trim(), message: manualDraft.message.trim() })
+      await load()
+      setManualDraft((current) => ({ ...current, purpose: '', message: '' }))
+      setFeedback({ kind: 'success', text: `Диалог запущен: ${started.minTurns}–${started.maxTurns} ходов, до ${started.maxTokens.toLocaleString('ru-RU')} токенов и ${durationLabel(started.maxDurationSeconds)}.` })
+    } catch (cause) {
+      setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Не удалось запустить внутренний диалог.' })
+    } finally {
+      setStarting(false)
     }
   }
 
@@ -332,11 +375,28 @@ export function CollaborationView({ activeAgentId, onOpenAgentPersonality, onOpe
       relationship={relationship}
     />)}</div>}
 
+    {!loading && !error && activeAgent && <section className="peer-dialogue-composer" aria-labelledby="peer-dialogue-composer-title">
+      <div className="peer-dialogue-composer__heading"><div><span className="section-heading__overline">OWNER-INITIATED EXCHANGE</span><h2 id="peer-dialogue-composer-title">Начать внутренний диалог</h2></div><small>{activeAgent.name} · {activeAgent.executionBudget ?? 'balanced'}</small></div>
+      <p>Выбранные значения — потолок только этого exchange. Backend пересечёт их с preset инициатора и известными лимитами модели; расширить ресурсы через эту форму нельзя.</p>
+      <div className="peer-dialogue-composer__main">
+        <label><span>Peer</span><select disabled={starting || peerAgents.length === 0} onChange={(event) => setManualDraft((current) => ({ ...current, peerAgentId: event.target.value }))} value={manualDraft.peerAgentId}><option value="">Выберите агента</option>{peerAgents.map((peer) => <option key={peer.id} value={peer.id}>{peer.name} · {modelRouteLabel(peer.providerId, peer.model)}</option>)}</select></label>
+        <label><span>Цель</span><input disabled={starting} maxLength={256} onChange={(event) => setManualDraft((current) => ({ ...current, purpose: event.target.value }))} placeholder="Например: обсудить план реализации" value={manualDraft.purpose} /></label>
+      </div>
+      <label><span>Первое сообщение</span><textarea disabled={starting} maxLength={4000} onChange={(event) => setManualDraft((current) => ({ ...current, message: event.target.value }))} placeholder="Что активный агент хочет передать peer…" rows={3} value={manualDraft.message} /></label>
+      <div className="peer-dialogue-composer__budget" aria-label="Лимиты ручного peer-диалога">
+        <label><span>Макс. ходов</span><input disabled={starting} max={peerBudgetDefaults(activeAgent).maxTurns} min={1} onChange={(event) => setManualDraft((current) => ({ ...current, maxTurns: Number(event.target.value) }))} type="number" value={manualDraft.maxTurns} /></label>
+        <label><span>Макс. токенов</span><input disabled={starting} max={peerBudgetDefaults(activeAgent).maxTokens} min={1} onChange={(event) => setManualDraft((current) => ({ ...current, maxTokens: Number(event.target.value) }))} step={500} type="number" value={manualDraft.maxTokens} /></label>
+        <label><span>Макс. время, сек.</span><input disabled={starting} max={peerBudgetDefaults(activeAgent).maxDurationSeconds} min={5} onChange={(event) => setManualDraft((current) => ({ ...current, maxDurationSeconds: Number(event.target.value) }))} step={5} type="number" value={manualDraft.maxDurationSeconds} /></label>
+      </div>
+      <button className="button button--accent" disabled={starting || peerAgents.length === 0 || !manualDraft.peerAgentId || !manualDraft.purpose.trim() || !manualDraft.message.trim()} onClick={() => void startManualDialogue()} type="button"><Icon name="spark" width={14} height={14} /> {starting ? 'Запускаю…' : 'Начать bounded-диалог'}</button>
+      {peerAgents.length === 0 && <small>Создайте второго именованного агента, чтобы открыть peer channel.</small>}
+    </section>}
+
     <section className="collaboration-toolbar collaboration-toolbar--dialogues"><div><span className="section-heading__overline">BACKGROUND PEER RUNS</span><h2>Последние внутренние диалоги</h2></div><button aria-label="Обновить данные агентов" className="icon-button" disabled={loading} onClick={() => void load()} type="button"><Icon name="refresh" width={15} height={15} /></button></section>
 
     {loading && <div className="collaboration-state" role="status"><span className="memory-spinner" /> Загружаю фоновые диалоги…</div>}
     {error && <div className="tasks-feedback tasks-feedback--error" role="alert"><Icon name="warning" width={14} height={14} /> {error}</div>}
-    {!loading && !error && visibleDialogues.length === 0 && <div className="collaboration-state collaboration-state--empty"><Icon name="relationship" width={23} height={23} /><strong>Внутренних диалогов пока нет</strong><span>Агенты начинают их сами, когда задача требует совета. Ручной запуск не предусмотрен.</span></div>}
+    {!loading && !error && visibleDialogues.length === 0 && <div className="collaboration-state collaboration-state--empty"><Icon name="relationship" width={23} height={23} /><strong>Внутренних диалогов пока нет</strong><span>Агент может вызвать peer сам, либо владелец запускает bounded exchange формой выше.</span></div>}
     {!loading && !error && visibleDialogues.length > 0 && <div className="collaboration-list">{visibleDialogues.map((dialogue) => <PeerDialogueCard
       busy={busyIds.has(dialogue.id)}
       dialogue={dialogue}

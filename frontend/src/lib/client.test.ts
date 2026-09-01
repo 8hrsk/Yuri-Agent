@@ -1550,6 +1550,10 @@ describe('Yuri client contract', () => {
           }],
         }
       },
+      StartPeerDialogue: (input: unknown) => {
+        calls.push({ name: 'StartPeerDialogue', args: [input] })
+        return { id: 'peer-manual', minTurns: 1, maxTurns: 2, maxTokens: 2000, maxDurationSeconds: 30 }
+      },
       CancelPeerDialogue: (input: unknown) => { calls.push({ name: 'CancelPeerDialogue', args: [input] }) },
     }
     const previousWindow = (globalThis as { window?: unknown }).window
@@ -1571,9 +1575,13 @@ describe('Yuri client contract', () => {
           recipientAgentId: 'agent-mira', recipientName: 'Мира', content: 'Готова?', createdAt: '2026-08-29T09:00:00.000Z',
         }],
       }])
+      await expect(client.startPeerDialogue({ peerAgentId: 'agent-mira', purpose: 'Проверить', message: 'Привет', maxTurns: 2, maxTokens: 2000, maxDurationSeconds: 30 })).resolves.toEqual({
+        id: 'peer-manual', minTurns: 1, maxTurns: 2, maxTokens: 2000, maxDurationSeconds: 30,
+      })
       await client.cancelPeerDialogue('peer-1')
       expect(calls).toEqual([
         { name: 'ListPeerDialogues', args: [{ limit: 17 }] },
+        { name: 'StartPeerDialogue', args: [{ peerAgentId: 'agent-mira', purpose: 'Проверить', message: 'Привет', maxTurns: 2, maxTokens: 2000, maxDurationSeconds: 30 }] },
         { name: 'CancelPeerDialogue', args: [{ id: 'peer-1' }] },
       ])
     } finally {

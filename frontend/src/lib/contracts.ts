@@ -96,6 +96,8 @@ export type {
   PeerDialogueCompletionReason,
   PeerDialogueMessage,
   PeerDialogue,
+  ManualPeerDialogueInput,
+  PeerDialogueStart,
   PeerDialogueListOptions,
   PeerRelationship,
   PeerRelationshipOperation,

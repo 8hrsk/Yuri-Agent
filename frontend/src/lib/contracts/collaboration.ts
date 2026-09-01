@@ -65,6 +65,23 @@ export interface PeerDialogueListOptions {
   limit?: number
 }
 
+export interface ManualPeerDialogueInput {
+  peerAgentId: string
+  purpose: string
+  message: string
+  maxTurns?: number
+  maxTokens?: number
+  maxDurationSeconds?: number
+}
+
+export interface PeerDialogueStart {
+  id: string
+  minTurns: number
+  maxTurns: number
+  maxTokens: number
+  maxDurationSeconds: number
+}
+
 /** The active agent's directional, subjective relationship to one peer. */
 export interface PeerRelationship {
   observerAgentId: string

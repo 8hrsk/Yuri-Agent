@@ -38,6 +38,8 @@ import type {
   OnboardingState,
   PeerDialogue,
   PeerDialogueListOptions,
+  ManualPeerDialogueInput,
+  PeerDialogueStart,
   PeerRelationship,
   PeerRelationshipDetail,
   PeerRelationshipListOptions,
@@ -779,6 +781,21 @@ class WailsYuriClient implements YuriClient {
 
   async listPeerDialogues(options: PeerDialogueListOptions = {}): Promise<PeerDialogue[]> {
     return normalizePeerDialogueList(await callBridge<unknown>(['ListPeerDialogues'], [options]))
+  }
+
+  async startPeerDialogue(input: ManualPeerDialogueInput): Promise<PeerDialogueStart> {
+    const raw = await callBridge<unknown>(['StartPeerDialogue'], [input])
+    if (!raw || typeof raw !== 'object') throw new Error('Backend не подтвердил запуск peer-диалога.')
+    const value = raw as Record<string, unknown>
+    const id = String(value.id ?? '')
+    if (!id) throw new Error('Backend не вернул ID peer-диалога.')
+    return {
+      id,
+      minTurns: Math.max(1, Math.round(Number(value.minTurns ?? 1))),
+      maxTurns: Math.max(1, Math.round(Number(value.maxTurns ?? 1))),
+      maxTokens: Math.max(1, Math.round(Number(value.maxTokens ?? 1))),
+      maxDurationSeconds: Math.max(5, Math.round(Number(value.maxDurationSeconds ?? 5))),
+    }
   }
 
   async cancelPeerDialogue(dialogueId: string): Promise<void> {

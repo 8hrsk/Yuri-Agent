@@ -39,6 +39,8 @@ import type {
   OnboardingState,
   PeerDialogue,
   PeerDialogueListOptions,
+  ManualPeerDialogueInput,
+  PeerDialogueStart,
   PeerRelationship,
   PeerRelationshipDetail,
   PeerRelationshipListOptions,
@@ -909,6 +911,37 @@ class MockYuriClient implements YuriClient {
       }
     })
     return dialogues.slice(0, limit).map(clonePeerDialogue)
+  }
+
+  async startPeerDialogue(input: ManualPeerDialogueInput): Promise<PeerDialogueStart> {
+    const initiator = this.activeAgentId ? this.agents.get(this.activeAgentId) : undefined
+    const peer = this.agents.get(input.peerAgentId)
+    if (!initiator || !peer || initiator.id === peer.id) throw new Error('Выберите другого агента из roster.')
+    const defaults = initiator.executionBudget === 'efficient'
+      ? { minTurns: 1, maxTurns: 2, maxTokens: 4_000, maxDurationSeconds: 45 }
+      : initiator.executionBudget === 'extended'
+        ? { minTurns: 2, maxTurns: 6, maxTokens: 12_000, maxDurationSeconds: 180 }
+        : { minTurns: 2, maxTurns: 4, maxTokens: 8_000, maxDurationSeconds: 90 }
+    const requestedTurns = input.maxTurns && input.maxTurns > 0 ? input.maxTurns : defaults.maxTurns
+    const requestedTokens = input.maxTokens && input.maxTokens > 0 ? input.maxTokens : defaults.maxTokens
+    const requestedDuration = input.maxDurationSeconds && input.maxDurationSeconds > 0 ? input.maxDurationSeconds : defaults.maxDurationSeconds
+    const budget = {
+      minTurns: Math.min(defaults.minTurns, requestedTurns),
+      maxTurns: Math.min(defaults.maxTurns, requestedTurns),
+      maxTokens: Math.min(defaults.maxTokens, requestedTokens),
+      maxDurationSeconds: Math.min(defaults.maxDurationSeconds, requestedDuration),
+    }
+    const id = `peer-manual-${Date.now()}`
+    this.peerDialogues = [{
+      id, initiatorAgentId: initiator.id, initiatorName: initiator.name, peerAgentId: peer.id, peerName: peer.name,
+      triggerKind: 'agent_tool', triggerReason: 'Владелец вручную запустил внутренний диалог из Collaboration.',
+      purpose: input.purpose, status: 'queued', turnCount: 0, tokensUsed: 0, cooldownSeconds: 300,
+      ...budget, createdAt: nowIso(), messages: [{
+        id: `${id}-message-0`, sequence: 0, senderAgentId: initiator.id, senderName: initiator.name,
+        recipientAgentId: peer.id, recipientName: peer.name, content: input.message, createdAt: nowIso(),
+      }],
+    }, ...this.peerDialogues]
+    return { id, ...budget }
   }
 
   async cancelPeerDialogue(dialogueId: string): Promise<void> {
