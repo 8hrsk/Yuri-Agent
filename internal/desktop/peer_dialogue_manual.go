@@ -21,6 +21,7 @@ type StartPeerDialogueInput struct {
 	MaxTurns           int    `json:"maxTurns,omitempty"`
 	MaxTokens          int64  `json:"maxTokens,omitempty"`
 	MaxDurationSeconds int    `json:"maxDurationSeconds,omitempty"`
+	BudgetSource       string `json:"budgetSource,omitempty"`
 }
 
 type StartPeerDialogueView struct {
@@ -32,6 +33,7 @@ type StartPeerDialogueView struct {
 }
 
 func (b *Bridge) StartPeerDialogue(input StartPeerDialogueInput) (StartPeerDialogueView, error) {
+	input.BudgetSource = strings.TrimSpace(input.BudgetSource)
 	if err := validateManualPeerBudget(input); err != nil {
 		return StartPeerDialogueView{}, err
 	}
@@ -43,7 +45,8 @@ func (b *Bridge) StartPeerDialogue(input StartPeerDialogueInput) (StartPeerDialo
 	if err != nil {
 		return StartPeerDialogueView{}, err
 	}
-	if _, err := decodePeerDialogueInput(arguments); err != nil {
+	decoded, err := decodePeerDialogueInput(arguments)
+	if err != nil {
 		return StartPeerDialogueView{}, err
 	}
 
@@ -57,6 +60,28 @@ func (b *Bridge) StartPeerDialogue(input StartPeerDialogueInput) (StartPeerDialo
 	backend, model, err := b.chatBackendForAgent(ctx, initiatorID)
 	if err != nil {
 		return StartPeerDialogueView{}, err
+	}
+	budgetOrigin := domain.PeerDialogueBudgetOwnerCustom
+	var recommendationSnapshot domain.PeerBudgetRecommendationSnapshot
+	if input.BudgetSource == "recommendation" {
+		peer, err := (peerDialogueAgentTool{bridge: b}).resolvePeerAgent(ctx, decoded.PeerAgentID)
+		if err != nil {
+			return StartPeerDialogueView{}, err
+		}
+		recommendation, ceiling, err := b.resolvePeerDialogueBudgetRecommendation(ctx, profile, peer, backend, model, decoded.Purpose)
+		if err != nil {
+			return StartPeerDialogueView{}, err
+		}
+		requested := executionbudget.NarrowPeer(ceiling, executionbudget.PeerOverride{
+			MaxTurns: input.MaxTurns, MaxTokens: input.MaxTokens, MaxDurationSeconds: input.MaxDurationSeconds,
+		})
+		if requested != recommendation.Budget {
+			return StartPeerDialogueView{}, fmt.Errorf("%w: peer budget recommendation is stale or was modified; request a fresh recommendation", domain.ErrConflict)
+		}
+		budgetOrigin = domain.PeerDialogueBudgetOwnerRecommendation
+		recommendationSnapshot = domain.PeerBudgetRecommendationSnapshot{
+			Budget: recommendation.Budget, Basis: recommendation.Basis, SampleCount: recommendation.SampleCount,
+		}
 	}
 	route, err := b.resolveInferenceRoute(profile.ProviderID, model)
 	if err != nil {
@@ -89,7 +114,8 @@ func (b *Bridge) StartPeerDialogue(input StartPeerDialogueInput) (StartPeerDialo
 	tool := peerDialogueAgentTool{
 		bridge: b, backend: backend, model: model, initiatorAgentID: initiatorID, triggerRunID: runID,
 		budgetOverride: executionbudget.PeerOverride{MaxTurns: input.MaxTurns, MaxTokens: input.MaxTokens, MaxDurationSeconds: input.MaxDurationSeconds},
-		triggerReason:  "Владелец вручную запустил внутренний диалог из Collaboration.",
+		budgetOrigin:   budgetOrigin, recommendation: recommendationSnapshot,
+		triggerReason: "Владелец вручную запустил внутренний диалог из Collaboration.",
 	}
 	if _, err := tool.Execute(ctx, agent.ToolCall{ID: string(callID), Name: peerDialogueToolID, Arguments: arguments}); err != nil {
 		return StartPeerDialogueView{}, b.failPeerTurn(run, err)
@@ -108,6 +134,9 @@ func (b *Bridge) StartPeerDialogue(input StartPeerDialogueInput) (StartPeerDialo
 }
 
 func validateManualPeerBudget(input StartPeerDialogueInput) error {
+	if input.BudgetSource != "" && input.BudgetSource != "custom" && input.BudgetSource != "recommendation" {
+		return fmt.Errorf("%w: budget source must be custom or recommendation", domain.ErrInvalidArgument)
+	}
 	if input.MaxTurns < 0 || input.MaxTurns > domain.PeerDialogueMaxTurns {
 		return fmt.Errorf("%w: max turns must be zero or between 1 and %d", domain.ErrInvalidArgument, domain.PeerDialogueMaxTurns)
 	}

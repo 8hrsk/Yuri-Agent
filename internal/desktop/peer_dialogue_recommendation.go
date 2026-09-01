@@ -1,10 +1,12 @@
 package desktop
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strings"
 
+	"github.com/OrdoAI/yuri-agent/internal/agent"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 	"github.com/OrdoAI/yuri-agent/internal/executionbudget"
 )
@@ -59,13 +61,25 @@ func (b *Bridge) RecommendPeerDialogueBudget(input RecommendPeerDialogueBudgetIn
 	if err != nil {
 		return PeerDialogueBudgetRecommendationView{}, err
 	}
-	ceiling := executionbudget.ResolvePeer(initiator.ExecutionBudget, modelExecutionLimits(backend, model))
-
-	dialogues, err := b.repositories.PeerDialogues.ListByParticipant(ctx, initiatorID, 50)
+	recommendation, ceiling, err := b.resolvePeerDialogueBudgetRecommendation(ctx, initiator, peer, backend, model, input.Purpose)
 	if err != nil {
 		return PeerDialogueBudgetRecommendationView{}, err
 	}
-	pairKey := domain.AgentPairKey(initiatorID, peer.ID)
+	return PeerDialogueBudgetRecommendationView{
+		Recommended: peerBudgetView(recommendation.Budget), Ceiling: peerBudgetView(ceiling),
+		Basis: string(recommendation.Basis), SampleCount: recommendation.SampleCount,
+		Confidence: recommendationConfidence(recommendation.SampleCount),
+		Rationale:  recommendationRationale(recommendation.Basis, recommendation.SampleCount),
+	}, nil
+}
+
+func (b *Bridge) resolvePeerDialogueBudgetRecommendation(ctx context.Context, initiator, peer domain.AgentProfile, backend agent.ModelBackend, model, purpose string) (executionbudget.PeerRecommendation, domain.PeerDialogueBudget, error) {
+	ceiling := executionbudget.ResolvePeer(initiator.ExecutionBudget, modelExecutionLimits(backend, model))
+	dialogues, err := b.repositories.PeerDialogues.ListByParticipant(ctx, initiator.ID, 50)
+	if err != nil {
+		return executionbudget.PeerRecommendation{}, domain.PeerDialogueBudget{}, err
+	}
+	pairKey := domain.AgentPairKey(initiator.ID, peer.ID)
 	history := make([]executionbudget.PeerHistorySample, 0, 8)
 	for _, dialogue := range dialogues {
 		if dialogue.PairKey != pairKey || dialogue.Status != domain.PeerDialogueCompleted {
@@ -83,16 +97,11 @@ func (b *Bridge) RecommendPeerDialogueBudget(input RecommendPeerDialogueBudgetIn
 			break
 		}
 	}
-	recommendation, err := executionbudget.RecommendPeer(ceiling, input.Purpose, history)
+	recommendation, err := executionbudget.RecommendPeer(ceiling, purpose, history)
 	if err != nil {
-		return PeerDialogueBudgetRecommendationView{}, err
+		return executionbudget.PeerRecommendation{}, domain.PeerDialogueBudget{}, err
 	}
-	return PeerDialogueBudgetRecommendationView{
-		Recommended: peerBudgetView(recommendation.Budget), Ceiling: peerBudgetView(ceiling),
-		Basis: recommendation.Basis, SampleCount: recommendation.SampleCount,
-		Confidence: recommendationConfidence(recommendation.SampleCount),
-		Rationale:  recommendationRationale(recommendation.Basis, recommendation.SampleCount),
-	}, nil
+	return recommendation, ceiling, nil
 }
 
 func peerBudgetView(budget domain.PeerDialogueBudget) PeerDialogueBudgetView {
@@ -111,7 +120,7 @@ func recommendationConfidence(samples int) string {
 	return "low"
 }
 
-func recommendationRationale(basis string, samples int) string {
+func recommendationRationale(basis domain.PeerBudgetRecommendationBasis, samples int) string {
 	switch basis {
 	case executionbudget.PeerRecommendationSimilarHistory:
 		return fmt.Sprintf("Учтены похожие завершённые диалоги этой пары: %d. Добавлен ограниченный запас к наблюдаемым затратам.", samples)

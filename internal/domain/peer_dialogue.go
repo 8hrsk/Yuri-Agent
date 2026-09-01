@@ -83,6 +83,44 @@ type PeerDialogueBudget struct {
 	CooldownSeconds    int   `json:"cooldown_seconds"`
 }
 
+type PeerDialogueBudgetOrigin string
+
+const (
+	PeerDialogueBudgetAgentDefault        PeerDialogueBudgetOrigin = "agent_default"
+	PeerDialogueBudgetOwnerCustom         PeerDialogueBudgetOrigin = "owner_custom"
+	PeerDialogueBudgetOwnerRecommendation PeerDialogueBudgetOrigin = "owner_recommendation"
+)
+
+func (origin PeerDialogueBudgetOrigin) Valid() bool {
+	return origin == PeerDialogueBudgetAgentDefault || origin == PeerDialogueBudgetOwnerCustom || origin == PeerDialogueBudgetOwnerRecommendation
+}
+
+type PeerBudgetRecommendationBasis string
+
+const (
+	PeerBudgetRecommendationPurposeOnly    PeerBudgetRecommendationBasis = "purpose_only"
+	PeerBudgetRecommendationPairHistory    PeerBudgetRecommendationBasis = "pair_history"
+	PeerBudgetRecommendationSimilarHistory PeerBudgetRecommendationBasis = "similar_history"
+)
+
+func (basis PeerBudgetRecommendationBasis) Valid() bool {
+	return basis == PeerBudgetRecommendationPurposeOnly || basis == PeerBudgetRecommendationPairHistory || basis == PeerBudgetRecommendationSimilarHistory
+}
+
+type PeerBudgetRecommendationSnapshot struct {
+	Budget      PeerDialogueBudget
+	Basis       PeerBudgetRecommendationBasis
+	SampleCount int
+}
+
+func (snapshot PeerBudgetRecommendationSnapshot) Valid() bool {
+	return snapshot.Budget.Valid() && snapshot.Basis.Valid() && snapshot.SampleCount >= 0 && snapshot.SampleCount <= 8
+}
+
+func (snapshot PeerBudgetRecommendationSnapshot) Empty() bool {
+	return snapshot == (PeerBudgetRecommendationSnapshot{})
+}
+
 func (b PeerDialogueBudget) Valid() bool {
 	return b.MinTurns >= 1 && b.MinTurns <= b.MaxTurns && b.MaxTurns <= PeerDialogueMaxTurns &&
 		b.MaxTokens >= 1 && b.MaxTokens <= 16_000 &&
@@ -91,29 +129,31 @@ func (b PeerDialogueBudget) Valid() bool {
 }
 
 type PeerDialogue struct {
-	ID               ID                           `json:"id"`
-	InitiatorAgentID ID                           `json:"initiator_agent_id"`
-	PeerAgentID      ID                           `json:"peer_agent_id"`
-	TriggerRunID     ID                           `json:"trigger_run_id"`
-	TriggerKind      PeerDialogueTriggerKind      `json:"trigger_kind"`
-	TriggerReason    string                       `json:"trigger_reason"`
-	PairKey          string                       `json:"pair_key"`
-	Purpose          string                       `json:"purpose"`
-	Status           PeerDialogueStatus           `json:"status"`
-	Budget           PeerDialogueBudget           `json:"budget"`
-	CompletionReason PeerDialogueCompletionReason `json:"completion_reason,omitempty"`
-	TurnCount        int                          `json:"turn_count"`
-	TokensUsed       int64                        `json:"tokens_used"`
-	IdempotencyKey   string                       `json:"idempotency_key"`
-	RequestHash      string                       `json:"request_hash"`
-	Failure          string                       `json:"failure,omitempty"`
-	FailureInfo      RunFailureInfo               `json:"failure_info,omitempty"`
-	Version          uint64                       `json:"version"`
-	CreatedAt        time.Time                    `json:"created_at"`
-	UpdatedAt        time.Time                    `json:"updated_at"`
-	StartedAt        time.Time                    `json:"started_at,omitempty"`
-	FinishedAt       time.Time                    `json:"finished_at,omitempty"`
-	ExpiresAt        time.Time                    `json:"expires_at"`
+	ID               ID                               `json:"id"`
+	InitiatorAgentID ID                               `json:"initiator_agent_id"`
+	PeerAgentID      ID                               `json:"peer_agent_id"`
+	TriggerRunID     ID                               `json:"trigger_run_id"`
+	TriggerKind      PeerDialogueTriggerKind          `json:"trigger_kind"`
+	TriggerReason    string                           `json:"trigger_reason"`
+	PairKey          string                           `json:"pair_key"`
+	Purpose          string                           `json:"purpose"`
+	Status           PeerDialogueStatus               `json:"status"`
+	Budget           PeerDialogueBudget               `json:"budget"`
+	BudgetOrigin     PeerDialogueBudgetOrigin         `json:"budget_origin"`
+	Recommendation   PeerBudgetRecommendationSnapshot `json:"recommendation,omitempty"`
+	CompletionReason PeerDialogueCompletionReason     `json:"completion_reason,omitempty"`
+	TurnCount        int                              `json:"turn_count"`
+	TokensUsed       int64                            `json:"tokens_used"`
+	IdempotencyKey   string                           `json:"idempotency_key"`
+	RequestHash      string                           `json:"request_hash"`
+	Failure          string                           `json:"failure,omitempty"`
+	FailureInfo      RunFailureInfo                   `json:"failure_info,omitempty"`
+	Version          uint64                           `json:"version"`
+	CreatedAt        time.Time                        `json:"created_at"`
+	UpdatedAt        time.Time                        `json:"updated_at"`
+	StartedAt        time.Time                        `json:"started_at,omitempty"`
+	FinishedAt       time.Time                        `json:"finished_at,omitempty"`
+	ExpiresAt        time.Time                        `json:"expires_at"`
 }
 
 func NewPeerDialogue(id, initiatorAgentID, peerAgentID, triggerRunID ID, purpose, idempotencyKey, requestHash string, budget PeerDialogueBudget, now time.Time) (PeerDialogue, error) {
@@ -128,7 +168,8 @@ func NewPeerDialogue(id, initiatorAgentID, peerAgentID, triggerRunID ID, purpose
 		ID: id, InitiatorAgentID: initiatorAgentID, PeerAgentID: peerAgentID, TriggerRunID: triggerRunID,
 		TriggerKind: PeerDialogueTriggerAgentTool, TriggerReason: "Агент явно запросил консультацию peer через tool.",
 		PairKey: AgentPairKey(initiatorAgentID, peerAgentID), Purpose: strings.TrimSpace(purpose),
-		Status: PeerDialogueQueued, Budget: budget, IdempotencyKey: strings.TrimSpace(idempotencyKey), RequestHash: strings.TrimSpace(requestHash),
+		Status: PeerDialogueQueued, Budget: budget, BudgetOrigin: PeerDialogueBudgetAgentDefault,
+		IdempotencyKey: strings.TrimSpace(idempotencyKey), RequestHash: strings.TrimSpace(requestHash),
 		Version: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Duration(budget.MaxDurationSeconds) * time.Second),
 	}
 	if err := dialogue.Validate(); err != nil {
@@ -152,6 +193,10 @@ func (d PeerDialogue) Validate() error {
 	}
 	if !d.Status.Valid() || !d.Budget.Valid() || d.Version == 0 || d.TurnCount < 0 || d.TurnCount > d.Budget.MaxTurns || d.TokensUsed < 0 || d.TokensUsed > d.Budget.MaxTokens {
 		return fmt.Errorf("%w: invalid dialogue lifecycle or budget", ErrInvalidArgument)
+	}
+	if !d.BudgetOrigin.Valid() || d.BudgetOrigin == PeerDialogueBudgetOwnerRecommendation && (!d.Recommendation.Valid() || d.Recommendation.Budget != d.Budget) ||
+		d.BudgetOrigin != PeerDialogueBudgetOwnerRecommendation && !d.Recommendation.Empty() {
+		return fmt.Errorf("%w: invalid peer dialogue budget provenance", ErrInvalidArgument)
 	}
 	if !d.CompletionReason.Valid() || (d.Status != PeerDialogueCompleted && d.CompletionReason != "") {
 		return fmt.Errorf("%w: invalid peer dialogue completion metadata", ErrInvalidArgument)
@@ -181,6 +226,25 @@ func (d PeerDialogue) Validate() error {
 		return fmt.Errorf("%w: invalid dialogue timestamps", ErrInvalidArgument)
 	}
 	return nil
+}
+
+func (d *PeerDialogue) SetOwnerBudgetProvenance(origin PeerDialogueBudgetOrigin, recommendation PeerBudgetRecommendationSnapshot) error {
+	if d == nil || d.Status != PeerDialogueQueued || d.Version != 1 || d.TurnCount != 0 {
+		return fmt.Errorf("%w: budget provenance is immutable after queueing", ErrInvalidArgument)
+	}
+	if origin != PeerDialogueBudgetOwnerCustom && origin != PeerDialogueBudgetOwnerRecommendation {
+		return fmt.Errorf("%w: owner budget origin is invalid", ErrInvalidArgument)
+	}
+	if origin == PeerDialogueBudgetOwnerRecommendation {
+		if !recommendation.Valid() || recommendation.Budget != d.Budget {
+			return fmt.Errorf("%w: recommendation must match the effective dialogue budget", ErrInvalidArgument)
+		}
+	} else if !recommendation.Empty() {
+		return fmt.Errorf("%w: custom budget cannot carry recommendation provenance", ErrInvalidArgument)
+	}
+	d.BudgetOrigin = origin
+	d.Recommendation = recommendation
+	return d.Validate()
 }
 
 func (d *PeerDialogue) MarkAutonomous(reason string) error {

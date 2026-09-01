@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/OrdoAI/yuri-agent/internal/domain"
@@ -52,5 +53,38 @@ func TestPeerBudgetRecommendationRejectsSelf(t *testing.T) {
 	}
 	if _, err := bridge.repositories.PeerDialogues.Get(context.Background(), domain.ID("missing")); err == nil {
 		t.Fatal("unexpected dialogue created for rejected preview")
+	}
+}
+
+func TestRecommendedPeerBudgetRejectsModifiedDraftAtStart(t *testing.T) {
+	bridge := newOpenAIBridgeSmoke(t, "http://127.0.0.1:9/v1", "sk-peer-recommendation-stale-test")
+	agents, err := bridge.repositories.Agents.List(context.Background())
+	if err != nil || len(agents) != 1 {
+		t.Fatalf("initial roster = %#v err=%v", agents, err)
+	}
+	initiator := agents[0]
+	peer, err := bridge.CreateAgent(CreateAgentInput{Name: "Мира", Gender: "female"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bridge.SetActiveAgent(SelectAgentInput{ID: initiator.ID.String()}); err != nil {
+		t.Fatal(err)
+	}
+	purpose := "Сверить план"
+	recommendation, err := bridge.RecommendPeerDialogueBudget(RecommendPeerDialogueBudgetInput{PeerAgentID: peer.ID, Purpose: purpose})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = bridge.StartPeerDialogue(StartPeerDialogueInput{
+		PeerAgentID: peer.ID, Purpose: purpose, Message: "Проверь.", BudgetSource: "recommendation",
+		MaxTurns: recommendation.Recommended.MaxTurns, MaxTokens: recommendation.Recommended.MaxTokens - 1,
+		MaxDurationSeconds: recommendation.Recommended.MaxDurationSeconds,
+	})
+	if !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("modified recommendation error = %v", err)
+	}
+	runs, err := bridge.repositories.Runs.ListByAgent(context.Background(), initiator.ID)
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("rejected recommendation created runs = %#v err=%v", runs, err)
 	}
 }

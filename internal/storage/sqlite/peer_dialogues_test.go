@@ -88,6 +88,27 @@ func (f *peerDialogueFixture) newDialogue(t *testing.T, id string, initiator, pe
 	return dialogue, initial
 }
 
+func TestPeerDialoguePersistsOwnerRecommendationProvenance(t *testing.T) {
+	fixture := newPeerDialogueFixture(t, "agent-a", "agent-b")
+	dialogue, initial := fixture.newDialogue(t, "dialogue-recommended", "agent-a", "agent-b", fixture.runs["agent-a"].ID, "request-recommended", fixture.now)
+	snapshot := domain.PeerBudgetRecommendationSnapshot{
+		Budget: dialogue.Budget, Basis: domain.PeerBudgetRecommendationSimilarHistory, SampleCount: 3,
+	}
+	if err := dialogue.SetOwnerBudgetProvenance(domain.PeerDialogueBudgetOwnerRecommendation, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.repos.CreatePeerDialogueWithMessage(fixture.ctx, dialogue, initial); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := fixture.repos.PeerDialogues.Get(fixture.ctx, dialogue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.BudgetOrigin != domain.PeerDialogueBudgetOwnerRecommendation || loaded.Recommendation != snapshot {
+		t.Fatalf("stored recommendation provenance = %#v", loaded)
+	}
+}
+
 func TestPeerDialogueAggregateScopesParticipantsAndAppendsAlternatingTurns(t *testing.T) {
 	fixture := newPeerDialogueFixture(t, "agent-a", "agent-b", "agent-c")
 	dialogue, initial := fixture.newDialogue(t, "dialogue-1", "agent-a", "agent-b", fixture.runs["agent-a"].ID, "request-1", fixture.now)

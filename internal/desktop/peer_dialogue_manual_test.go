@@ -60,17 +60,50 @@ func TestOwnerCanStartPeerDialogueWithNarrowedBudget(t *testing.T) {
 		t.Fatalf("start view = %#v", started)
 	}
 	dialogue := waitForPeerDialogue(t, bridge, domain.ID(started.ID), domain.PeerDialogueCompleted)
-	if dialogue.TriggerReason != "Владелец вручную запустил внутренний диалог из Collaboration." || dialogue.CompletionReason != domain.PeerDialogueCompletionMaxTurns {
+	if dialogue.TriggerReason != "Владелец вручную запустил внутренний диалог из Collaboration." || dialogue.CompletionReason != domain.PeerDialogueCompletionMaxTurns || dialogue.BudgetOrigin != domain.PeerDialogueBudgetOwnerCustom {
 		t.Fatalf("manual dialogue = %#v", dialogue)
 	}
 	triggerRun, err := bridge.repositories.Runs.Get(context.Background(), dialogue.TriggerRunID)
 	if err != nil || triggerRun.AgentID != initiator.ID || triggerRun.State != domain.RunStateCompleted || triggerRun.Kind != domain.RunKindBackground {
 		t.Fatalf("manual trigger run = %#v err=%v", triggerRun, err)
 	}
+
+	secondPeer, err := bridge.CreateAgent(CreateAgentInput{Name: "Аки", Gender: "female"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bridge.SetActiveAgent(SelectAgentInput{ID: initiator.ID.String()}); err != nil {
+		t.Fatal(err)
+	}
+	purpose := "Подробно сравнить архитектурные варианты, риски миграции и план проверки результата"
+	recommended, err := bridge.RecommendPeerDialogueBudget(RecommendPeerDialogueBudgetInput{PeerAgentID: secondPeer.ID, Purpose: purpose})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recommendedStart, err := bridge.StartPeerDialogue(StartPeerDialogueInput{
+		PeerAgentID: secondPeer.ID, Purpose: purpose, Message: "Проведи независимую проверку.", BudgetSource: "recommendation",
+		MaxTurns: recommended.Recommended.MaxTurns, MaxTokens: recommended.Recommended.MaxTokens, MaxDurationSeconds: recommended.Recommended.MaxDurationSeconds,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recommendedDialogue := waitForPeerDialogue(t, bridge, domain.ID(recommendedStart.ID), domain.PeerDialogueCompleted)
+	if recommendedDialogue.BudgetOrigin != domain.PeerDialogueBudgetOwnerRecommendation ||
+		recommendedDialogue.Recommendation.Budget != recommendedDialogue.Budget ||
+		recommendedDialogue.Recommendation.Basis != domain.PeerBudgetRecommendationPurposeOnly ||
+		recommendedDialogue.CompletionReason != domain.PeerDialogueCompletionSemantic {
+		t.Fatalf("recommended dialogue provenance = %#v", recommendedDialogue)
+	}
 }
 
 func TestManualPeerBudgetInputRejectsInvalidDuration(t *testing.T) {
 	if err := validateManualPeerBudget(StartPeerDialogueInput{PeerAgentID: "peer", MaxDurationSeconds: 4}); err == nil {
 		t.Fatal("expected invalid duration")
+	}
+}
+
+func TestManualPeerBudgetRejectsUnknownSource(t *testing.T) {
+	if err := validateManualPeerBudget(StartPeerDialogueInput{PeerAgentID: "peer", BudgetSource: "automatic"}); err == nil {
+		t.Fatal("expected invalid budget source")
 	}
 }

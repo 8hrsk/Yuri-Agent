@@ -13,9 +13,9 @@ import (
 const peerRecommendationHistoryLimit = 8
 
 const (
-	PeerRecommendationPurposeOnly    = "purpose_only"
-	PeerRecommendationPairHistory    = "pair_history"
-	PeerRecommendationSimilarHistory = "similar_history"
+	PeerRecommendationPurposeOnly    = domain.PeerBudgetRecommendationPurposeOnly
+	PeerRecommendationPairHistory    = domain.PeerBudgetRecommendationPairHistory
+	PeerRecommendationSimilarHistory = domain.PeerBudgetRecommendationSimilarHistory
 )
 
 // PeerHistorySample is the small, content-minimized projection used to tune a
@@ -31,7 +31,7 @@ type PeerHistorySample struct {
 
 type PeerRecommendation struct {
 	Budget      domain.PeerDialogueBudget
-	Basis       string
+	Basis       domain.PeerBudgetRecommendationBasis
 	SampleCount int
 }
 
@@ -85,7 +85,7 @@ func purposeBudget(ceiling domain.PeerDialogueBudget, purpose string) domain.Pee
 	return NarrowPeer(ceiling, PeerOverride{MaxTurns: turns, MaxTokens: tokens, MaxDurationSeconds: duration})
 }
 
-func recommendationSamples(purpose string, history []PeerHistorySample) ([]PeerHistorySample, string) {
+func recommendationSamples(purpose string, history []PeerHistorySample) ([]PeerHistorySample, domain.PeerBudgetRecommendationBasis) {
 	valid := make([]PeerHistorySample, 0, min(len(history), peerRecommendationHistoryLimit))
 	similar := make([]PeerHistorySample, 0, min(len(history), peerRecommendationHistoryLimit))
 	for _, sample := range history {

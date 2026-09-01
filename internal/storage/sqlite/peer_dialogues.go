@@ -115,17 +115,22 @@ func insertPeerDialogueTx(ctx context.Context, tx *sql.Tx, dialogue domain.PeerD
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO peer_dialogues(
 			id, initiator_agent_id, peer_agent_id, trigger_run_id, trigger_kind, trigger_reason, pair_key, purpose, status,
-			min_turns, max_turns, max_tokens, max_duration_seconds, cooldown_seconds, turn_count, tokens_used,
+			min_turns, max_turns, max_tokens, max_duration_seconds, cooldown_seconds,
+			budget_origin, recommendation_basis, recommendation_sample_count,
+			recommended_min_turns, recommended_max_turns, recommended_max_tokens, recommended_max_duration_seconds,
+			turn_count, tokens_used,
 			completion_reason,
 			idempotency_key, request_hash, failure, failure_kind, failure_retryable, failure_retry_after_seconds,
 			version, created_at, updated_at, started_at, finished_at, expires_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?)`,
 		string(dialogue.ID), string(dialogue.InitiatorAgentID), string(dialogue.PeerAgentID), string(dialogue.TriggerRunID),
 		string(dialogue.TriggerKind), strings.TrimSpace(dialogue.TriggerReason), dialogue.PairKey, strings.TrimSpace(dialogue.Purpose), string(dialogue.Status),
 		dialogue.Budget.MinTurns, dialogue.Budget.MaxTurns, dialogue.Budget.MaxTokens, dialogue.Budget.MaxDurationSeconds, dialogue.Budget.CooldownSeconds,
+		string(dialogue.BudgetOrigin), string(dialogue.Recommendation.Basis), dialogue.Recommendation.SampleCount,
+		dialogue.Recommendation.Budget.MinTurns, dialogue.Recommendation.Budget.MaxTurns, dialogue.Recommendation.Budget.MaxTokens, dialogue.Recommendation.Budget.MaxDurationSeconds,
 		dialogue.TurnCount, dialogue.TokensUsed, string(dialogue.CompletionReason), strings.TrimSpace(dialogue.IdempotencyKey), strings.TrimSpace(dialogue.RequestHash),
 		dialogue.Failure, string(dialogue.FailureInfo.Kind), dialogue.FailureInfo.Retryable, dialogue.FailureInfo.RetryAfterSeconds,
 		dialogue.Version, createdAt, updatedAt, nullableTimeValue(dialogue.StartedAt), nullableTimeValue(dialogue.FinishedAt), expiresAt)
@@ -504,6 +509,8 @@ func samePeerDialogueIdentity(left, right domain.PeerDialogue) bool {
 		left.PeerAgentID == right.PeerAgentID &&
 		left.TriggerRunID == right.TriggerRunID &&
 		left.PairKey == right.PairKey &&
+		left.BudgetOrigin == right.BudgetOrigin &&
+		left.Recommendation == right.Recommendation &&
 		left.IdempotencyKey == right.IdempotencyKey &&
 		left.RequestHash == right.RequestHash
 }
@@ -649,7 +656,10 @@ func updatePeerDialogueTx(ctx context.Context, tx *sql.Tx, dialogue domain.PeerD
 // ListByParticipant share one scanner and one round-trip per query.
 const peerDialogueSelect = `
 	SELECT id, initiator_agent_id, peer_agent_id, trigger_run_id, trigger_kind, trigger_reason, pair_key, purpose, status,
-	       min_turns, max_turns, max_tokens, max_duration_seconds, cooldown_seconds, turn_count, tokens_used,
+	       min_turns, max_turns, max_tokens, max_duration_seconds, cooldown_seconds,
+	       budget_origin, recommendation_basis, recommendation_sample_count,
+	       recommended_min_turns, recommended_max_turns, recommended_max_tokens, recommended_max_duration_seconds,
+	       turn_count, tokens_used,
 	       completion_reason,
 	       idempotency_key, request_hash, failure, failure_kind, failure_retryable, failure_retry_after_seconds,
 	       version, created_at, updated_at, started_at, finished_at, expires_at
@@ -670,14 +680,16 @@ type peerDialogueScanner interface {
 func scanPeerDialogue(scanner peerDialogueScanner) (domain.PeerDialogue, error) {
 	var dialogue domain.PeerDialogue
 	var (
-		id, initiatorID, peerID, triggerRunID, triggerKind, status string
-		createdAt, updatedAt, expiresAt                            string
-		startedAt, finishedAt                                      sql.NullString
-		completionReason                                           string
+		id, initiatorID, peerID, triggerRunID, triggerKind, status, budgetOrigin, recommendationBasis string
+		createdAt, updatedAt, expiresAt                                                               string
+		startedAt, finishedAt                                                                         sql.NullString
+		completionReason                                                                              string
 	)
 	if err := scanner.Scan(
 		&id, &initiatorID, &peerID, &triggerRunID, &triggerKind, &dialogue.TriggerReason, &dialogue.PairKey, &dialogue.Purpose, &status,
 		&dialogue.Budget.MinTurns, &dialogue.Budget.MaxTurns, &dialogue.Budget.MaxTokens, &dialogue.Budget.MaxDurationSeconds, &dialogue.Budget.CooldownSeconds,
+		&budgetOrigin, &recommendationBasis, &dialogue.Recommendation.SampleCount,
+		&dialogue.Recommendation.Budget.MinTurns, &dialogue.Recommendation.Budget.MaxTurns, &dialogue.Recommendation.Budget.MaxTokens, &dialogue.Recommendation.Budget.MaxDurationSeconds,
 		&dialogue.TurnCount, &dialogue.TokensUsed, &completionReason, &dialogue.IdempotencyKey, &dialogue.RequestHash, &dialogue.Failure,
 		&dialogue.FailureInfo.Kind, &dialogue.FailureInfo.Retryable, &dialogue.FailureInfo.RetryAfterSeconds,
 		&dialogue.Version, &createdAt, &updatedAt, &startedAt, &finishedAt, &expiresAt); err != nil {
@@ -689,6 +701,11 @@ func scanPeerDialogue(scanner peerDialogueScanner) (domain.PeerDialogue, error) 
 	dialogue.TriggerRunID = domain.ID(triggerRunID)
 	dialogue.TriggerKind = domain.PeerDialogueTriggerKind(triggerKind)
 	dialogue.Status = domain.PeerDialogueStatus(status)
+	dialogue.BudgetOrigin = domain.PeerDialogueBudgetOrigin(budgetOrigin)
+	dialogue.Recommendation.Basis = domain.PeerBudgetRecommendationBasis(recommendationBasis)
+	if dialogue.BudgetOrigin == domain.PeerDialogueBudgetOwnerRecommendation {
+		dialogue.Recommendation.Budget.CooldownSeconds = dialogue.Budget.CooldownSeconds
+	}
 	dialogue.CompletionReason = domain.PeerDialogueCompletionReason(completionReason)
 	var err error
 	if dialogue.CreatedAt, err = scanTime(createdAt); err != nil {

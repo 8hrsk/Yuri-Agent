@@ -55,6 +55,31 @@ func TestPeerDialogueBudgetHasBoundedSemanticMinimum(t *testing.T) {
 	}
 }
 
+func TestPeerDialogueOwnerRecommendationProvenanceIsImmutableAndExact(t *testing.T) {
+	now := time.Now().UTC()
+	budget := PeerDialogueBudget{MinTurns: 2, MaxTurns: 3, MaxTokens: 7000, MaxDurationSeconds: 70, CooldownSeconds: 300}
+	dialogue, err := NewPeerDialogue("dialogue-recommended", "agent-a", "agent-b", "run-root", "Проверить архитектуру", "call", "hash", budget, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := PeerBudgetRecommendationSnapshot{Budget: budget, Basis: PeerBudgetRecommendationSimilarHistory, SampleCount: 3}
+	if err := dialogue.SetOwnerBudgetProvenance(PeerDialogueBudgetOwnerRecommendation, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if dialogue.BudgetOrigin != PeerDialogueBudgetOwnerRecommendation || dialogue.Recommendation != snapshot {
+		t.Fatalf("recommendation provenance = %#v", dialogue)
+	}
+	if err := dialogue.SetOwnerBudgetProvenance(PeerDialogueBudgetOwnerRecommendation, PeerBudgetRecommendationSnapshot{Budget: PeerDialogueBudget{MinTurns: 1, MaxTurns: 1, MaxTokens: 1000, MaxDurationSeconds: 10}}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("mismatched recommendation error = %v", err)
+	}
+	if err := dialogue.Transition(PeerDialogueRunning, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := dialogue.SetOwnerBudgetProvenance(PeerDialogueBudgetOwnerCustom, PeerBudgetRecommendationSnapshot{}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("mutable provenance error = %v", err)
+	}
+}
+
 func TestPeerDialogueCompleteRequiresMinimumAndPersistsReason(t *testing.T) {
 	now := time.Date(2026, 8, 29, 18, 0, 0, 0, time.UTC)
 	dialogue, err := NewPeerDialogue("dialogue-semantic", "agent-a", "agent-b", "run-root", "Обсудить план", "call-semantic", "sha256:semantic", PeerDialogueBudget{

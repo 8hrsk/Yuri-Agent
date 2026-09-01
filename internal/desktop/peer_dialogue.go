@@ -48,6 +48,8 @@ type peerDialogueAgentTool struct {
 	initiatorAgentID domain.ID
 	triggerRunID     domain.ID
 	budgetOverride   executionbudget.PeerOverride
+	budgetOrigin     domain.PeerDialogueBudgetOrigin
+	recommendation   domain.PeerBudgetRecommendationSnapshot
 	triggerReason    string
 }
 
@@ -83,34 +85,47 @@ type PeerDialogueMessageView struct {
 }
 
 type PeerDialogueView struct {
-	ID                  string                    `json:"id"`
-	InitiatorAgentID    string                    `json:"initiatorAgentId"`
-	InitiatorName       string                    `json:"initiatorName"`
-	InitiatorProviderID string                    `json:"initiatorProviderId,omitempty"`
-	InitiatorModel      string                    `json:"initiatorModel,omitempty"`
-	PeerAgentID         string                    `json:"peerAgentId"`
-	PeerName            string                    `json:"peerName"`
-	PeerProviderID      string                    `json:"peerProviderId,omitempty"`
-	PeerModel           string                    `json:"peerModel,omitempty"`
-	TriggerKind         string                    `json:"triggerKind"`
-	TriggerReason       string                    `json:"triggerReason"`
-	Purpose             string                    `json:"purpose"`
-	Status              string                    `json:"status"`
-	TurnCount           int                       `json:"turnCount"`
-	MinTurns            int                       `json:"minTurns"`
-	MaxTurns            int                       `json:"maxTurns"`
-	TokensUsed          int64                     `json:"tokensUsed"`
-	MaxTokens           int64                     `json:"maxTokens"`
-	MaxDurationSeconds  int                       `json:"maxDurationSeconds"`
-	CooldownSeconds     int                       `json:"cooldownSeconds"`
-	CreatedAt           string                    `json:"createdAt"`
-	FinishedAt          string                    `json:"finishedAt,omitempty"`
-	Failure             string                    `json:"failure,omitempty"`
-	FailureKind         string                    `json:"failureKind,omitempty"`
-	Retryable           bool                      `json:"retryable,omitempty"`
-	RetryAfterSeconds   int64                     `json:"retryAfterSeconds,omitempty"`
-	CompletionReason    string                    `json:"completionReason,omitempty"`
-	Messages            []PeerDialogueMessageView `json:"messages"`
+	ID                  string                               `json:"id"`
+	InitiatorAgentID    string                               `json:"initiatorAgentId"`
+	InitiatorName       string                               `json:"initiatorName"`
+	InitiatorProviderID string                               `json:"initiatorProviderId,omitempty"`
+	InitiatorModel      string                               `json:"initiatorModel,omitempty"`
+	PeerAgentID         string                               `json:"peerAgentId"`
+	PeerName            string                               `json:"peerName"`
+	PeerProviderID      string                               `json:"peerProviderId,omitempty"`
+	PeerModel           string                               `json:"peerModel,omitempty"`
+	TriggerKind         string                               `json:"triggerKind"`
+	TriggerReason       string                               `json:"triggerReason"`
+	Purpose             string                               `json:"purpose"`
+	Status              string                               `json:"status"`
+	TurnCount           int                                  `json:"turnCount"`
+	MinTurns            int                                  `json:"minTurns"`
+	MaxTurns            int                                  `json:"maxTurns"`
+	TokensUsed          int64                                `json:"tokensUsed"`
+	MaxTokens           int64                                `json:"maxTokens"`
+	MaxDurationSeconds  int                                  `json:"maxDurationSeconds"`
+	DurationUsedSeconds int                                  `json:"durationUsedSeconds,omitempty"`
+	CooldownSeconds     int                                  `json:"cooldownSeconds"`
+	BudgetOrigin        string                               `json:"budgetOrigin"`
+	Recommendation      *AppliedPeerBudgetRecommendationView `json:"recommendation,omitempty"`
+	CreatedAt           string                               `json:"createdAt"`
+	FinishedAt          string                               `json:"finishedAt,omitempty"`
+	Failure             string                               `json:"failure,omitempty"`
+	FailureKind         string                               `json:"failureKind,omitempty"`
+	Retryable           bool                                 `json:"retryable,omitempty"`
+	RetryAfterSeconds   int64                                `json:"retryAfterSeconds,omitempty"`
+	CompletionReason    string                               `json:"completionReason,omitempty"`
+	Messages            []PeerDialogueMessageView            `json:"messages"`
+}
+
+type AppliedPeerBudgetRecommendationView struct {
+	MinTurns           int    `json:"minTurns"`
+	MaxTurns           int    `json:"maxTurns"`
+	MaxTokens          int64  `json:"maxTokens"`
+	MaxDurationSeconds int    `json:"maxDurationSeconds"`
+	Basis              string `json:"basis"`
+	SampleCount        int    `json:"sampleCount"`
+	Confidence         string `json:"confidence"`
 }
 
 func (tool peerDialogueAgentTool) Descriptor() agent.ToolDescriptor {
@@ -174,6 +189,11 @@ func (tool peerDialogueAgentTool) Execute(ctx context.Context, call agent.ToolCa
 	dialogue, err := domain.NewPeerDialogue(dialogueID, tool.initiatorAgentID, peerID, tool.triggerRunID, input.Purpose, call.ID, requestHash, dialogueBudget, now)
 	if err != nil {
 		return agent.ToolResult{}, err
+	}
+	if tool.budgetOrigin != "" {
+		if err := dialogue.SetOwnerBudgetProvenance(tool.budgetOrigin, tool.recommendation); err != nil {
+			return agent.ToolResult{}, err
+		}
 	}
 	if reason := strings.TrimSpace(tool.triggerReason); reason != "" {
 		dialogue.TriggerReason = reason
@@ -767,6 +787,7 @@ func peerDialogueView(dialogue domain.PeerDialogue, agents map[domain.ID]domain.
 		TurnCount: dialogue.TurnCount, MinTurns: dialogue.Budget.MinTurns, MaxTurns: dialogue.Budget.MaxTurns,
 		TokensUsed: dialogue.TokensUsed, MaxTokens: dialogue.Budget.MaxTokens,
 		MaxDurationSeconds: dialogue.Budget.MaxDurationSeconds, CooldownSeconds: dialogue.Budget.CooldownSeconds,
+		BudgetOrigin:     string(dialogue.BudgetOrigin),
 		CompletionReason: string(dialogue.CompletionReason),
 		CreatedAt:        dialogue.CreatedAt.Format(time.RFC3339Nano), Failure: dialogue.Failure,
 		FailureKind: string(dialogue.FailureInfo.Kind), Retryable: dialogue.FailureInfo.Retryable, RetryAfterSeconds: dialogue.FailureInfo.RetryAfterSeconds,
@@ -774,6 +795,17 @@ func peerDialogueView(dialogue domain.PeerDialogue, agents map[domain.ID]domain.
 	}
 	if !dialogue.FinishedAt.IsZero() {
 		view.FinishedAt = dialogue.FinishedAt.Format(time.RFC3339Nano)
+		if !dialogue.StartedAt.IsZero() && dialogue.FinishedAt.After(dialogue.StartedAt) {
+			view.DurationUsedSeconds = int((dialogue.FinishedAt.Sub(dialogue.StartedAt) + time.Second - 1) / time.Second)
+		}
+	}
+	if dialogue.BudgetOrigin == domain.PeerDialogueBudgetOwnerRecommendation {
+		view.Recommendation = &AppliedPeerBudgetRecommendationView{
+			MinTurns: dialogue.Recommendation.Budget.MinTurns, MaxTurns: dialogue.Recommendation.Budget.MaxTurns,
+			MaxTokens: dialogue.Recommendation.Budget.MaxTokens, MaxDurationSeconds: dialogue.Recommendation.Budget.MaxDurationSeconds,
+			Basis: string(dialogue.Recommendation.Basis), SampleCount: dialogue.Recommendation.SampleCount,
+			Confidence: recommendationConfidence(dialogue.Recommendation.SampleCount),
+		}
 	}
 	for _, message := range messages {
 		sourceRun := runs[message.SourceRunID]
@@ -799,7 +831,9 @@ func (b *Bridge) appendPeerDialogueAudit(ctx context.Context, dialogue domain.Pe
 		"trigger_run_id": string(dialogue.TriggerRunID), "trigger_kind": string(dialogue.TriggerKind), "trigger_reason": dialogue.TriggerReason,
 		"status": string(dialogue.Status), "turn_count": fmt.Sprint(dialogue.TurnCount),
 		"completion_reason": string(dialogue.CompletionReason),
-		"purpose_sha256":    hex.EncodeToString(purposeHash[:]),
+		"budget_origin":     string(dialogue.BudgetOrigin), "recommendation_basis": string(dialogue.Recommendation.Basis),
+		"recommendation_sample_count": fmt.Sprint(dialogue.Recommendation.SampleCount),
+		"purpose_sha256":              hex.EncodeToString(purposeHash[:]),
 	})
 	return b.repositories.Audit.Append(ctx, storage.AuditEvent{
 		ID: id, RunID: dialogue.TriggerRunID, Actor: domain.ActorSystem, Action: action, Target: string(dialogue.ID),
