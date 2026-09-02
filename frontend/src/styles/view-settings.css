@@ -1076,7 +1076,7 @@
     padding: 0 8px 10px;
   }
 
-  .conversation-item {
+  .conversation-row {
     width: 220px;
     flex: 0 0 220px;
   }

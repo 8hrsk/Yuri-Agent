@@ -11,6 +11,7 @@ type ConversationPanelProps = {
   loading: boolean
   /** True while the next page of the sidebar is in flight. */
   loadingMore: boolean
+  onDelete: (conversation: Conversation) => void
   onFilterChange: (value: string) => void
   onLoadMore: () => void
   onNewConversation: () => void
@@ -26,6 +27,7 @@ export function ConversationPanel({
   hasMoreConversations,
   loading,
   loadingMore,
+  onDelete,
   onFilterChange,
   onLoadMore,
   onNewConversation,
@@ -50,6 +52,7 @@ export function ConversationPanel({
       <ConversationList
         conversations={conversations}
         loading={loading}
+        onDelete={onDelete}
         onSelect={onSelect}
         selectedId={selectedId}
       />

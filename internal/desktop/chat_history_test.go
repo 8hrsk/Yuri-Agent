@@ -216,16 +216,26 @@ func TestListMessagesRefusesAnotherAgentsConversation(t *testing.T) {
 	}
 }
 
-func TestDeleteConversationRemovesTranscript(t *testing.T) {
+func TestDeleteConversationHidesAndPreservesTranscript(t *testing.T) {
 	bridge, conversationID := newConversationBridge(t)
 	seeded := seedBridgeTranscript(t, bridge, conversationID, 2)
 	if err := bridge.DeleteConversation(DeleteConversationInput{ConversationID: conversationID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bridge.repositories.Conversations.Get(context.Background(), domain.ID(conversationID)); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("conversation survived delete: %v", err)
+	conversation, err := bridge.repositories.Conversations.Get(context.Background(), domain.ID(conversationID))
+	if err != nil || conversation.ArchivedAt == nil {
+		t.Fatalf("conversation was not archived: %#v, %v", conversation, err)
 	}
-	if _, err := bridge.repositories.Messages.Get(context.Background(), domain.ID(seeded[0])); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("message survived delete: %v", err)
+	if _, err := bridge.repositories.Messages.Get(context.Background(), domain.ID(seeded[0])); err != nil {
+		t.Fatalf("message was removed by soft delete: %v", err)
+	}
+	listed, err := bridge.ListConversations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range listed {
+		if item.ID == conversationID {
+			t.Fatalf("archived conversation remained visible: %#v", item)
+		}
 	}
 }

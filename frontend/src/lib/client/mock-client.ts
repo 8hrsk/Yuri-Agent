@@ -134,6 +134,7 @@ function clonePeerRelationshipDetail(value: PeerRelationshipDetail): PeerRelatio
 class MockYuriClient implements YuriClient {
   readonly mode = 'mock' as const
   private readonly conversations = new Map<string, Conversation>([[starterConversation().id, starterConversation()]])
+  private readonly hiddenConversationIds = new Set<string>()
   private readonly cancelledRuns = new Set<string>()
   private readonly pendingApprovals = new Map<string, (decision: ApprovalDecision) => void>()
   private provider: ProviderSnapshot = {
@@ -161,7 +162,9 @@ class MockYuriClient implements YuriClient {
   private readonly personalitySeed: PersonalitySnapshot = createStarterPersonalitySnapshot()
 
   async listConversations(options: ConversationPageOptions = {}): Promise<Conversation[]> {
-    const ordered = [...this.conversations.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    const ordered = [...this.conversations.values()]
+      .filter((conversation) => !this.hiddenConversationIds.has(conversation.id))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     const offset = Math.max(0, options.offset ?? 0)
     const limit = options.limit && options.limit > 0 ? options.limit : ordered.length
     return ordered.slice(offset, offset + limit).map(cloneConversation)
@@ -223,7 +226,8 @@ class MockYuriClient implements YuriClient {
   }
 
   async deleteConversation(conversationId: string): Promise<void> {
-    if (!this.conversations.delete(conversationId)) throw new Error('Диалог не найден.')
+    if (!this.conversations.has(conversationId) || this.hiddenConversationIds.has(conversationId)) throw new Error('Диалог не найден.')
+    this.hiddenConversationIds.add(conversationId)
   }
 
   async listChatTools(): Promise<ChatTool[]> {

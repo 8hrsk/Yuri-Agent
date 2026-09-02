@@ -109,15 +109,6 @@
   opacity: 0;
 }
 
-.chat-title-row__delete {
-  color: #9d7180;
-}
-
-.chat-title-row__delete:hover {
-  border-color: rgba(var(--rose-rgb), 0.25);
-  color: var(--rose);
-}
-
 .chat-title-row:hover .chat-title-row__edit,
 .chat-title-row__edit:focus-visible {
   opacity: 1;
@@ -202,6 +193,17 @@
   line-height: 1.5;
 }
 
+.conversation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: stretch;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
 .conversation-item {
   display: grid;
   grid-template-columns: 21px minmax(0, 1fr) auto;
@@ -210,7 +212,7 @@
   width: 100%;
   min-width: 0;
   padding: 10px 8px;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: 10px;
   color: #a9a5ba;
   cursor: pointer;
@@ -219,14 +221,34 @@
   transition: border-color 150ms ease, background 150ms ease;
 }
 
-.conversation-item:hover {
+.conversation-row:hover {
   border-color: var(--line);
   background: rgba(255, 255, 255, 0.035);
 }
 
-.conversation-item--active {
+.conversation-row--active {
   border-color: rgba(var(--accent-rgb), 0.17);
   background: linear-gradient(100deg, rgba(156, 131, 236, 0.14), rgba(156, 131, 236, 0.025));
+}
+
+.conversation-item__delete {
+  display: grid;
+  width: 28px;
+  min-width: 0;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #777482;
+  cursor: pointer;
+  background: transparent;
+}
+
+.conversation-item__delete:hover,
+.conversation-item__delete:focus-visible {
+  border-color: rgba(143, 139, 151, 0.22);
+  color: #aaa6b2;
+  background: rgba(255, 255, 255, 0.045);
 }
 
 .conversation-item__mark {
@@ -246,12 +268,12 @@
   background: #7c6eb9;
 }
 
-.conversation-item--active .conversation-item__mark {
+.conversation-row--active .conversation-item__mark {
   border-color: rgba(var(--accent-rgb), 0.38);
   background: rgba(var(--accent-rgb), 0.14);
 }
 
-.conversation-item--active .conversation-item__mark span {
+.conversation-row--active .conversation-item__mark span {
   background: var(--mint);
   box-shadow: 0 0 7px var(--mint);
 }
@@ -275,7 +297,7 @@
   font-weight: 620;
 }
 
-.conversation-item--active .conversation-item__copy strong {
+.conversation-row--active .conversation-item__copy strong {
   color: #efecf7;
 }
 

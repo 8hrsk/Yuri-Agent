@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 
 import type { BackendConnection } from '../lib/backend'
 import { createYuriClient } from '../lib/client'
@@ -22,6 +23,7 @@ import { useTTS } from '../hooks/useVoice'
 import { type ApprovalDecision } from './ApprovalDialog'
 import { ApprovalPortal } from './ApprovalPortal'
 import { ChatComposer } from './ChatComposer'
+import { ConversationDeleteDialog } from './ConversationDeleteDialog'
 import { ChatHeader } from './ChatHeader'
 import { ChatStarters } from './ChatStarters'
 import {
@@ -86,6 +88,9 @@ export function ChatView({ agentId, agentName, backend, hidden = false, model, o
   const [approvalBusy, setApprovalBusy] = useState(false)
   const [approvalError, setApprovalError] = useState<string>()
   const [error, setError] = useState<string>()
+  const [conversationToDelete, setConversationToDelete] = useState<Conversation>()
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState<string>()
   const [loading, setLoading] = useState(true)
   /**
    * The sidebar holds every conversation the backend has.
@@ -885,31 +890,43 @@ export function ChatView({ agentId, agentName, backend, hidden = false, model, o
     })))
   }, [client, selectedId])
 
+  const requestDeleteConversation = useCallback((conversation: Conversation) => {
+    setDeleteError(undefined)
+    setConversationToDelete(conversation)
+  }, [])
+
   const handleDeleteConversation = useCallback(async () => {
-    const conversationId = selectedId
-    const conversation = conversations.find((candidate) => candidate.id === conversationId)
-    if (!conversationId || !conversation) return
-    if (!window.confirm(`Удалить диалог «${conversation.title}»? Сообщения и вложения будут удалены без возможности восстановления.`)) return
+    const conversationId = conversationToDelete?.id
+    if (!conversationId || deleteBusy) return
+    setDeleteBusy(true)
+    setDeleteError(undefined)
     setError(undefined)
     try {
       await client.deleteConversation(conversationId)
       hydratedRef.current.delete(conversationId)
-      const remaining = conversations.filter((candidate) => candidate.id !== conversationId)
+      const current = latestRef.current.conversations
+      const currentSelectedId = latestRef.current.selectedId
+      const remaining = current.filter((candidate) => candidate.id !== conversationId)
       if (remaining.length > 0) {
         setConversations(remaining)
-        setSelectedId(remaining[0].id)
+        if (currentSelectedId === conversationId) setSelectedId(remaining[0].id)
       } else {
         const replacement = await client.createConversation('Новый диалог')
         hydratedRef.current.add(replacement.id)
         setConversations([replacement])
         setSelectedId(replacement.id)
       }
-      setDraft('')
-      setAttachments([])
+      if (currentSelectedId === conversationId) {
+        setDraft('')
+        setAttachments([])
+      }
+      setConversationToDelete(undefined)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Не удалось удалить диалог.')
+      setDeleteError(cause instanceof Error ? cause.message : 'Не удалось удалить диалог.')
+    } finally {
+      setDeleteBusy(false)
     }
-  }, [client, conversations, selectedId])
+  }, [client, conversationToDelete, deleteBusy])
 
   useEffect(() => {
     latestRef.current = { conversations, selectedId, startRun }
@@ -1046,6 +1063,7 @@ export function ChatView({ agentId, agentName, backend, hidden = false, model, o
           hasMoreConversations={!conversationsExhausted}
           loading={loading}
           loadingMore={loadingMoreConversations}
+          onDelete={requestDeleteConversation}
           onFilterChange={setConversationFilter}
           onLoadMore={handleLoadMoreConversations}
           onNewConversation={handleNewConversation}
@@ -1061,7 +1079,6 @@ export function ChatView({ agentId, agentName, backend, hidden = false, model, o
             avatarState={avatarState}
             key={selectedId}
             model={model}
-            onDelete={handleDeleteConversation}
             onRename={handleRenameConversation}
             providerId={providerId}
             runLabel={runLabel}
@@ -1149,6 +1166,16 @@ export function ChatView({ agentId, agentName, backend, hidden = false, model, o
           />
         </section>
       </div>
+      {conversationToDelete && createPortal(
+        <ConversationDeleteDialog
+          busy={deleteBusy}
+          conversation={conversationToDelete}
+          error={deleteError}
+          onCancel={() => { setConversationToDelete(undefined); setDeleteError(undefined) }}
+          onConfirm={handleDeleteConversation}
+        />,
+        document.body,
+      )}
       <ChatStarters agentName={agentName} onSelect={setDraft} />
       <ApprovalPortal
         approval={pendingApproval}

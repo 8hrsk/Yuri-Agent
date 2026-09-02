@@ -262,8 +262,9 @@ func (r *ConversationRepository) Unarchive(ctx context.Context, id domain.ID, at
 	return r.Save(ctx, conversation)
 }
 
-// Delete permanently removes one owner-scoped transcript. Durable run/audit
-// rows remain with a NULL conversation reference, while messages cascade.
+// Delete hides one owner-scoped transcript from the active conversation list.
+// The name is kept for desktop API compatibility, but this is deliberately a
+// soft delete: messages, runs, attachments and memory provenance remain durable.
 func (r *ConversationRepository) Delete(ctx context.Context, id, agentID domain.ID) error {
 	if err := requireDatabase(r.db); err != nil {
 		return err
@@ -287,7 +288,15 @@ func (r *ConversationRepository) Delete(ctx context.Context, id, agentID domain.
 	if live == 1 {
 		return fmt.Errorf("%w: finish or cancel the active conversation run before deletion", domain.ErrConflict)
 	}
-	result, err := tx.ExecContext(ctx, `DELETE FROM conversations WHERE id = ? AND agent_id = ?`, string(id), string(agentID))
+	archivedAt, err := timeValue(time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE conversations
+		SET archived_at = ?, updated_at = ?
+		WHERE id = ? AND agent_id = ? AND archived_at IS NULL`,
+		archivedAt, archivedAt, string(id), string(agentID))
 	if err != nil {
 		return wrappedSQLError("delete conversation", err)
 	}

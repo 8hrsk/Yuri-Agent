@@ -3,8 +3,6 @@ package desktop
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -211,25 +209,8 @@ func (b *Bridge) DeleteConversation(input DeleteConversationInput) error {
 	}
 	ctx, cancel := b.context()
 	defer cancel()
-	metadata, err := b.repositories.Messages.AttachmentMetadataByConversation(ctx, conversationID)
-	if err != nil {
-		return err
-	}
 	if err := b.repositories.Conversations.Delete(ctx, conversationID, b.personaProfileID()); err != nil {
 		return err
-	}
-	for _, encoded := range metadata {
-		for _, attachment := range storedAttachments(encoded) {
-			referenced, referenceErr := b.repositories.Messages.AttachmentBlobReferenced(ctx, attachment.BlobKey)
-			if referenceErr != nil || referenced {
-				continue
-			}
-			path := filepath.Join(b.paths.BlobDirectory, filepath.FromSlash(attachment.BlobKey))
-			root := filepath.Clean(b.paths.BlobDirectory) + string(os.PathSeparator)
-			if strings.HasPrefix(filepath.Clean(path), root) {
-				_ = os.Remove(path)
-			}
-		}
 	}
 	b.emitConversationUpdated(conversationID)
 	return nil

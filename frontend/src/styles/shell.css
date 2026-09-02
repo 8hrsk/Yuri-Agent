@@ -214,6 +214,7 @@
   display: grid;
   width: 29px;
   height: 29px;
+  flex: 0 0 29px;
   place-items: center;
   border-radius: 10px;
   color: #f8f3ff;
@@ -225,6 +226,7 @@
 
 .profile-copy {
   display: grid;
+  flex: 1 1 0;
   min-width: 0;
   gap: 3px;
 }
@@ -250,6 +252,7 @@
 .profile-status {
   width: 6px;
   height: 6px;
+  flex: 0 0 6px;
   margin-left: auto;
   border-radius: 50%;
   background: var(--mint);

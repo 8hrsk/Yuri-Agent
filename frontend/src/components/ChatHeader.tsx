@@ -15,11 +15,10 @@ type ChatHeaderProps = {
   runLabel: string
   runStatus: RunStatus
   title: string
-  onDelete: () => Promise<void>
   onRename: (title: string) => Promise<void>
 }
 
-export function ChatHeader({ affect, agentName, avatarState, model, onDelete, onRename, providerId, runLabel, runStatus, title }: ChatHeaderProps) {
+export function ChatHeader({ affect, agentName, avatarState, model, onRename, providerId, runLabel, runStatus, title }: ChatHeaderProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(title)
   const [saving, setSaving] = useState(false)
@@ -99,9 +98,6 @@ export function ChatHeader({ affect, agentName, avatarState, model, onDelete, on
               <h2>{title}</h2>
               <button aria-label="Переименовать диалог" className="icon-button icon-button--small chat-title-row__edit" onClick={beginEditing} type="button">
                 <Icon name="edit" width={13} height={13} />
-              </button>
-              <button aria-label="Удалить диалог" className="icon-button icon-button--small chat-title-row__delete" onClick={() => void onDelete()} type="button">
-                <Icon name="trash" width={13} height={13} />
               </button>
             </div>
           )}

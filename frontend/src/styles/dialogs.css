@@ -154,3 +154,8 @@
   gap: 8px;
   margin-top: 22px;
 }
+
+.conversation-delete-dialog__mark {
+  color: #9b98a3;
+  background: rgba(155, 152, 163, 0.1);
+}

@@ -1,61 +1,111 @@
-# Yuri
+[Русская версия](docs/README.ru.md)
 
-Yuri — локальный desktop-first AI-агент для одного владельца. Текущий OSS CI-артефакт ориентирован на macOS; архитектура остаётся переносимой на Windows и Linux.
+<p align="center">
+  <img src="frontend/src/assets/yuri-app-icon.png" width="128" alt="Yuri Agent icon">
+</p>
 
-Yuri core и Plugin SDK распространяются по [Apache License 2.0](LICENSE). Лицензии сторонних зависимостей сохраняются согласно их собственным notices.
+<h1 align="center">Yuri Agent</h1>
 
-Engineering foundation, conversational vertical slice, storage/memory, plugin runtime, scheduler/proactivity и reflection/personality vertical slice реализованы. Основные решения и границы находятся в следующих документах:
+<p align="center">
+  A local-first desktop AI companion with persistent memory, evolving personality, explicit permissions, and multi-agent collaboration.
+</p>
 
-- [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — техническое задание и roadmap;
-- [`docs/PERSONALIZATION_ROADMAP.md`](docs/PERSONALIZATION_ROADMAP.md) — последовательный план развития personality, affect, relationships и creation flow;
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — компоненты, context assembly, storage и trust boundaries;
-- [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — модель угроз и security invariants;
-- [`docs/adr/`](docs/adr/) — принятые архитектурные решения;
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — правила разработки и проверки.
+Yuri is a personal AI workspace designed for a single owner. It combines a desktop chat experience with durable local memory, configurable agent identities, background tasks, voice interaction, plugins, and controlled collaboration between multiple named agents.
 
-Что уже работает:
+The project is macOS-first. Its domain and application layers are kept portable so Windows and Linux support can be added later.
 
-- один локальный профиль Yuri без multi-user/server mode;
-- SQLite как authoritative store, Pebble и индексы как производные;
-- immutable security policy отдельно от mutable persona и affect;
-- потоковый текстовый chat через OpenAI-compatible Responses/Chat Completions;
-- официальный Codex App Server adapter с ChatGPT OAuth, явным login/logout и чтением work/rate limits без доступа Yuri к OAuth-токенам;
-- Antigravity явно остаётся недоступным с typed `unsupported_auth_mode`: Yuri не импортирует чужой OAuth/token cache и предлагает API-key fallback до появления официального integration contract;
-- agent loop с cancellation, budgets, structured tool calls и idempotency;
-- filesystem tools только внутри явно разрешённых директорий: low-risk чтение и bounded `create`/`replace` с точечным approval, атомарным commit, проверкой текущего SHA-256 и redacted audit;
-- credential-free `web.fetch` для bounded чтения публичных HTTP(S)-страниц с защитой от SSRF/DNS rebinding, блокировкой LAN/metadata targets и отдельным trace;
-- provider-independent `web.search` с первым SearXNG JSON adapter, проверкой endpoint из Settings, 3–10 нормализованными результатами и отдельным `web.fetch` для чтения выбранной страницы;
-- push-to-talk с OpenAI-compatible STT и прерываемое системное TTS;
-- offline fake-Wails smoke проверяет цепочку STT → streaming chat → системный TTS и barge-in без сети и реальных credentials;
-- Wails UI для диалогов, состояний запуска, approvals и provider settings;
-- общий неизменяемый архив всех диалогов с SQLite FTS5 и provenance;
-- автономное post-turn извлечение памяти без обязательного подтверждения;
-- append-only версии памяти, редактирование, pin, soft delete и lifecycle `active → dormant → active`;
-- bounded core snapshot, hybrid lexical/vector-ready retrieval и межсессионная сборка контекста;
-- Wails UI для просмотра памяти и целенаправленного поиска по прошлым сессиям.
-- versioned `yuri.plugin.v1` JSON Lines protocol и out-of-process supervisor с handshake, health, bounded messages, cancellation, restart и process-group termination;
-- JSON Schema manifest/RPC contracts, dependency-free Go Plugin SDK и реально исполняемый reference echo plugin;
-- локальная проверка и атомарная установка plugin package, checksum/platform/core compatibility, explicit dev mode и установка в выключенном состоянии;
-- durable plugin metadata/capability grants в SQLite, deny-by-default tool mediation, runtime status/audit и UI управления lifecycle.
-- durable one-shot/interval/5-field CRON scheduler с IANA timezone, misfire policy, leases, bounded retry, no-overlap и recovery после restart;
-- фоновые agent runs с отдельным lifecycle и budgets, ручной запуск/пауза/редактирование/остановка, история запусков и Tasks UI;
-- scheduled runs автоматически используют только low-risk read tools; изменяющие и внешние действия остаются интерактивными до появления durable idempotency contract у tools;
-- explainable proactivity policy с global switch, overnight/DST-aware quiet hours, durable daily/idempotency ledger, per-type cooldown и дедуплицированной отложенной доставкой;
-- in-app/macOS notification flow, append-only Activity UI и medium-risk `scheduler.create` tool с обязательным подтверждением.
-- отдельные versioned mutable persona, relationship opinions и affect snapshots с evidence, optimistic concurrency, atomic multi-state commit, rollback/reset и закреплением traits;
-- bounded post-turn reflection без tools: строгий JSON contract, cooldown, max-delta/range guards, запрет внешнего неподтверждённого evidence и последовательный запуск для единственного локального профиля;
-- provider-independent Personality Compiler превращает owner seed + mutable persona + relationship/affect в bounded качественные правила; обычный и peer dialogue получают их отдельным untrusted data layer ниже immutable policy и identity seed;
-- Personality/Relationship UI с историей версий и простым 2D-аватаром; push-to-talk поддерживает barge-in, автоозвучка является явным opt-in и не включает микрофон.
-- first-run onboarding с OpenAI-compatible и Codex OAuth вариантами; durable completion устанавливается backend только после успешного provider probe.
+## Project idea
 
-CI проверяет core, scheduler/proactivity, reflection/persona storage, Plugin SDK/reference plugin, frontend, macOS universal OSS artifact/checksum и отдельный Wails app launch/clean-shutdown smoke. Подробности упаковки находятся в [`docs/MACOS_RELEASE.md`](docs/MACOS_RELEASE.md).
+Most AI chat applications treat every conversation as an isolated session or keep the important state on a remote service. Yuri takes a different approach:
 
-Для проверки каждого push в `dev` на собственной Windows-машине без GitHub
-Actions доступен polling runner: [`docs/WINDOWS_OFFLINE_RUNNER.md`](docs/WINDOWS_OFFLINE_RUNNER.md).
+- SQLite is the authoritative local store for conversations, memories, agent state, schedules, and audit history.
+- Each named agent has its own model route, identity seed, mutable personality, emotional state, relationships, and private memories.
+- The model cannot silently grant itself permissions or rewrite the owner's identity and security rules.
+- File changes and other sensitive side effects pass through explicit policy and approval boundaries.
+- Conversations may produce durable memories, while hiding a conversation does not delete those memories or its transcript.
+- Agents can collaborate through bounded, auditable peer dialogues without exposing each other's private context.
 
-Важно: Этап 3 изолирует сбой плагина отдельным процессом, но ещё не превращает сторонний executable в полностью недоверенный код. До OS sandbox и process hardening устанавливать следует только проверенные пакеты; unsigned package требует явного dev mode.
+Yuri is built with Go, Wails, React, TypeScript, and SQLite.
 
-## Локальная проверка
+## Current capabilities
+
+- Streaming chat through OpenAI-compatible providers and the Codex App Server.
+- Per-agent provider, model, fallback route, and execution budget.
+- Persistent multi-agent memory with private and explicitly shared scopes.
+- Versioned personality, relationship, affect, and owner-authored personalization data.
+- Voice input through compatible speech-to-text providers and interruptible system text-to-speech.
+- Permission-gated filesystem tools, bounded web access, and redacted audit records.
+- Durable schedules, background runs, proactive activity, and notifications.
+- Out-of-process plugins with manifest validation, capability grants, checksums, and lifecycle management.
+- Local archive search and encrypted portable agent export/import.
+
+See the [product specification](docs/PRODUCT_SPEC.md), [architecture](docs/ARCHITECTURE.md), and [threat model](docs/THREAT_MODEL.md) for the complete design and security boundaries.
+
+## Install from Releases
+
+Prebuilt packages, when available, are published on the [GitHub Releases page](https://github.com/8hrsk/Yuri-Agent/releases).
+
+1. Download the latest macOS archive and its `.sha256` file.
+2. Verify the archive before opening it:
+
+   ```bash
+   shasum -a 256 -c yuri-<version>-macos-universal.zip.sha256
+   ```
+
+3. Unzip the archive and move `yuri.app` to `Applications`.
+4. Open Yuri and complete the onboarding flow to create an agent and connect a supported model provider.
+
+The current open-source macOS build targets macOS 11 or newer and contains both Apple Silicon and Intel architectures. Unless a release explicitly says otherwise, community artifacts are not signed or notarized. Review the release notes and checksum before running them. More details are available in the [macOS release guide](docs/MACOS_RELEASE.md).
+
+## Build from source
+
+### Requirements
+
+- macOS 11 or newer
+- Xcode Command Line Tools
+- Go 1.25
+- Node.js 22 and npm
+- GNU Make
+
+Clone and verify the project:
+
+```bash
+git clone https://github.com/8hrsk/Yuri-Agent.git
+cd Yuri-Agent
+npm --prefix frontend ci
+make check
+```
+
+Build the desktop application:
+
+```bash
+make macos-build
+open cmd/yuri/build/bin/yuri.app
+```
+
+`make macos-build` installs the pinned Wails CLI into the repository-local `.tools` directory and produces a universal macOS application. To create and verify the distributable archive as well, run:
+
+```bash
+make macos-smoke YURI_VERSION=0.7.0
+```
+
+The archive and checksum are written to `dist/macos/`.
+
+For development with hot reload:
+
+```bash
+make wails-install
+cd cmd/yuri
+../../.tools/wails dev
+```
+
+## Provider setup
+
+On first launch, create an agent and configure one of the supported routes in the onboarding flow or Settings. Provider credentials are handled by the backend and must not be committed to the repository. On macOS, secrets are stored through the system keyring boundary rather than in the main SQLite database.
+
+## Development and testing
+
+Run the standard checks with:
 
 ```bash
 npm --prefix frontend ci
@@ -63,17 +113,12 @@ make check
 make mvp-smoke
 ```
 
-Воспроизводимая offline-проверка формата personality dogfood:
+Architecture decisions are recorded under [`docs/adr/`](docs/adr/). Implementation-oriented documentation starts at [`docs/implementation/README.md`](docs/implementation/README.md).
 
-```bash
-go run ./cmd/yuri-personality-eval -input docs/dogfood/personality-suite.fixture.json
-```
+## Contributing
 
-Реальные provider/model прогоны и правила безопасного capture описаны в [`docs/PERSONALITY_DOGFOOD.md`](docs/PERSONALITY_DOGFOOD.md).
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue or pull request. Changes affecting storage, security policy, permissions, providers, plugins, or context assembly should include appropriate tests and an architecture decision when a trust boundary changes.
 
-Wails-команды запускаются из каталога desktop entrypoint, где находится конфигурация проекта:
+## License
 
-```bash
-cd cmd/yuri
-wails dev
-```
+Yuri core and the Plugin SDK are available under the [Apache License 2.0](LICENSE). Third-party dependencies remain subject to their respective licenses and notices.
