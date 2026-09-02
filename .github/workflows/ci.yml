@@ -139,15 +139,25 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Refresh checkout with repository line endings
-        shell: powershell
-        run: git -c core.autocrlf=false checkout-index --force --all
-
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Normalize and verify Go formatting
+        shell: powershell
+        run: |
+          $goFiles = Get-ChildItem -Path cmd, internal, sdk, plugins -Filter "*.go" -File -Recurse |
+            ForEach-Object { $_.FullName }
+          for ($offset = 0; $offset -lt $goFiles.Count; $offset += 50) {
+            $last = [Math]::Min($offset + 49, $goFiles.Count - 1)
+            $batch = $goFiles[$offset..$last]
+            & gofmt.exe -w @batch
+            if ($LASTEXITCODE -ne 0) { throw "gofmt failed with exit code $LASTEXITCODE." }
+          }
+          git diff --exit-code -- "*.go"
+          if ($LASTEXITCODE -ne 0) { throw "Go files require formatting." }
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
