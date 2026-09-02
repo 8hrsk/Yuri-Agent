@@ -27,4 +27,3 @@ FROM persona_heads AS ph;
 
 INSERT OR IGNORE INTO app_metadata(key, value)
 VALUES ('agent_profile_schema_generation', 'named-agents-v1');
-

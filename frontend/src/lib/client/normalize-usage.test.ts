@@ -41,4 +41,3 @@ describe('normalizeRunUsageStats', () => {
     expect(normalizeRunUsageStats(undefined, { from: 'from', to: 'to' })).toEqual({ from: 'from', to: 'to', groups: [] })
   })
 })
-

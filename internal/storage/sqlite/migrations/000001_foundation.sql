@@ -5,4 +5,3 @@ CREATE TABLE IF NOT EXISTS app_metadata (
 );
 
 INSERT OR IGNORE INTO app_metadata(key, value) VALUES ('schema_generation', 'foundation-v1');
-

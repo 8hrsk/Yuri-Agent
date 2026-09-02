@@ -40,4 +40,3 @@ domain change → SQLite transaction → publish event → update derived projec
 - миграции и транзакции требуют явной схемы и тестов;
 - rebuild больших индексов может занимать время после обновления;
 - Pebble нельзя использовать для shortcuts, которые меняют semantics durable state.
-

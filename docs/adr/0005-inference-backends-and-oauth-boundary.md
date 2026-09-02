@@ -37,4 +37,3 @@ OpenAI subscription mode подключается только через офи
 - два семейства contract tests и UI states;
 - rate limits/plan metadata harness могут быть недоступны или измениться vendor-ом;
 - без разрешённого Antigravity contract пользователь получает понятную недоступность, а не скрытую несовместимую интеграцию.
-

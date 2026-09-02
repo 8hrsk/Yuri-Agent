@@ -40,4 +40,3 @@ Persona/affect не могут:
 - state model сложнее обычного статического system prompt;
 - нужен version log и UI для просмотра/reset;
 - subjective opinion может оставаться неверным, даже если он безопасен.
-
