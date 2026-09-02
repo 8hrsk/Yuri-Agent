@@ -24,14 +24,6 @@ export function Topbar({ activeItem, connectionStatus, connectionLabel, onReconn
         <button className="topbar__connection" onClick={onReconnect} title="Проверить подключение заново" type="button">
           <ConnectionBadge compact label={connectionLabel} status={connectionStatus} />
         </button>
-        {/* The icon already is the ⌘ glyph, so the shortcut spells out only the key. */}
-        <button aria-label="Открыть командную палитру" className="icon-button" type="button">
-          <Icon name="command" width={17} height={17} />
-          <kbd>K</kbd>
-        </button>
-        <div className="topbar__avatar" aria-label="Профиль пользователя">
-          <span>U</span>
-        </div>
       </div>
     </header>
   )

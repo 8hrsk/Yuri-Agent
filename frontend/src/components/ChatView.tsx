@@ -885,6 +885,32 @@ export function ChatView({ agentId, agentName, backend, hidden = false, model, o
     })))
   }, [client, selectedId])
 
+  const handleDeleteConversation = useCallback(async () => {
+    const conversationId = selectedId
+    const conversation = conversations.find((candidate) => candidate.id === conversationId)
+    if (!conversationId || !conversation) return
+    if (!window.confirm(`Удалить диалог «${conversation.title}»? Сообщения и вложения будут удалены без возможности восстановления.`)) return
+    setError(undefined)
+    try {
+      await client.deleteConversation(conversationId)
+      hydratedRef.current.delete(conversationId)
+      const remaining = conversations.filter((candidate) => candidate.id !== conversationId)
+      if (remaining.length > 0) {
+        setConversations(remaining)
+        setSelectedId(remaining[0].id)
+      } else {
+        const replacement = await client.createConversation('Новый диалог')
+        hydratedRef.current.add(replacement.id)
+        setConversations([replacement])
+        setSelectedId(replacement.id)
+      }
+      setDraft('')
+      setAttachments([])
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Не удалось удалить диалог.')
+    }
+  }, [client, conversations, selectedId])
+
   useEffect(() => {
     latestRef.current = { conversations, selectedId, startRun }
   })
@@ -1035,6 +1061,7 @@ export function ChatView({ agentId, agentName, backend, hidden = false, model, o
             avatarState={avatarState}
             key={selectedId}
             model={model}
+            onDelete={handleDeleteConversation}
             onRename={handleRenameConversation}
             providerId={providerId}
             runLabel={runLabel}

@@ -215,3 +215,17 @@ func TestListMessagesRefusesAnotherAgentsConversation(t *testing.T) {
 		t.Fatal("another agent read a foreign transcript through ListMessages")
 	}
 }
+
+func TestDeleteConversationRemovesTranscript(t *testing.T) {
+	bridge, conversationID := newConversationBridge(t)
+	seeded := seedBridgeTranscript(t, bridge, conversationID, 2)
+	if err := bridge.DeleteConversation(DeleteConversationInput{ConversationID: conversationID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bridge.repositories.Conversations.Get(context.Background(), domain.ID(conversationID)); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("conversation survived delete: %v", err)
+	}
+	if _, err := bridge.repositories.Messages.Get(context.Background(), domain.ID(seeded[0])); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("message survived delete: %v", err)
+	}
+}

@@ -38,3 +38,13 @@
   background: #e5ddff;
 }
 
+.button--danger {
+  border-color: rgba(var(--rose-rgb), 0.38);
+  color: #fff2f5;
+  background: rgba(var(--rose-rgb), 0.74);
+}
+
+.button--danger:hover:not(:disabled) {
+  border-color: rgba(var(--rose-rgb), 0.62);
+  background: rgba(var(--rose-rgb), 0.9);
+}

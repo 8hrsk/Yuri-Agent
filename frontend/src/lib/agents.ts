@@ -422,6 +422,8 @@ export function normalizeAgentProfile(value: unknown): AgentProfile | undefined 
     active: source.active === true || source.isActive === true || source.is_active === true,
     createdAt: text(source, 'createdAt', 'created_at') ?? new Date(0).toISOString(),
     updatedAt: text(source, 'updatedAt', 'updated_at') ?? text(source, 'createdAt', 'created_at') ?? new Date(0).toISOString(),
+    deleted: source.deleted === true,
+    deletedAt: text(source, 'deletedAt', 'deleted_at'),
   }
 }
 

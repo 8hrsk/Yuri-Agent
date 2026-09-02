@@ -41,6 +41,45 @@
   line-height: 1.45;
 }
 
+.agent-delete-dialog__mark {
+  border-color: rgba(var(--rose-rgb), 0.3);
+  color: var(--rose);
+  background: rgba(var(--rose-rgb), 0.08);
+}
+
+.agent-delete-dialog__field {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.agent-delete-dialog__field > span {
+  color: #a39db4;
+  font-size: 9px;
+}
+
+.agent-delete-dialog__field strong {
+  color: #f0edf8;
+  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+}
+
+.agent-delete-dialog__field input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid rgba(var(--rose-rgb), 0.3);
+  border-radius: 8px;
+  outline: none;
+  color: #f0edf8;
+  background: rgba(7, 7, 13, 0.45);
+  font: 10px 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+}
+
+.agent-delete-dialog__field input:focus {
+  border-color: var(--rose);
+  box-shadow: 0 0 0 3px rgba(var(--rose-rgb), 0.1);
+}
+
 .approval-dialog__mark {
   display: grid;
   width: 42px;

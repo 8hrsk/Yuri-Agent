@@ -270,12 +270,6 @@ func Load(paths Paths) (Config, error) {
 	if value.Proactivity.AutonomousPeerCooldownMinutes == 0 {
 		value.Proactivity.AutonomousPeerCooldownMinutes = Default(paths).Proactivity.AutonomousPeerCooldownMinutes
 	}
-	// Stage 4 and older config files have no persona object. An empty local
-	// profile ID is reserved as the migration signal so an explicit false
-	// AutoEvolution setting is preserved on subsequent loads.
-	if strings.TrimSpace(value.Persona.ProfileID) == "" {
-		value.Persona = Default(paths).Persona
-	}
 	// Stage 7 considered a successful provider probe sufficient to complete
 	// onboarding. Those installations already have the legacy owner persona,
 	// which the desktop bridge migrates to an AgentProfile on startup. Treat
@@ -283,6 +277,13 @@ func Load(paths Paths) (Config, error) {
 	// run or fail validation before the database migration can execute.
 	if value.Onboarding.Completed && value.Onboarding.ProviderTested && !value.Onboarding.AgentConfigured {
 		value.Onboarding.AgentConfigured = true
+	}
+	// A completed legacy installation may contain an explicitly empty persona
+	// object. Restore its historical owner ID, but preserve an empty ID for a
+	// current installation whose owner has not created an agent (or deleted the
+	// last one).
+	if strings.TrimSpace(value.Persona.ProfileID) == "" && value.Onboarding.AgentConfigured {
+		value.Persona = Default(paths).Persona
 	}
 	// Early Codex OAuth builds persisted model placeholders or copied the
 	// generic OpenAI-compatible default. Clear only those legacy values; models
@@ -428,6 +429,9 @@ func (c Config) Validate() error {
 	if err := c.Persona.Validate(); err != nil {
 		return err
 	}
+	if c.Onboarding.AgentConfigured && strings.TrimSpace(c.Persona.ProfileID) == "" {
+		return errors.New("configured agent requires a local persona profile id")
+	}
 	if err := c.Onboarding.Validate(); err != nil {
 		return err
 	}
@@ -467,7 +471,7 @@ func (c OnboardingConfig) Validate() error {
 
 func (c PersonaConfig) Validate() error {
 	profileID := strings.TrimSpace(c.ProfileID)
-	if profileID == "" || strings.ContainsAny(profileID, " /\\") {
+	if c.ProfileID != "" && (profileID == "" || strings.ContainsAny(profileID, " /\\")) {
 		return fmt.Errorf("invalid local persona profile id %q", c.ProfileID)
 	}
 	if c.ReflectionCooldownMinutes < 0 || c.ReflectionCooldownMinutes > 30*24*60 {

@@ -136,16 +136,11 @@ type PersonaVersionView struct {
 
 func (b *Bridge) ensurePersonaState(ctx context.Context) error {
 	profileID := b.personaProfileID()
-	if b != nil && b.repositories != nil && b.repositories.Agents != nil && !profileID.Empty() {
-		if _, err := b.repositories.Agents.Get(ctx, profileID); errors.Is(err, domain.ErrNotFound) {
-			profile, createErr := domain.NewAgentProfile(profileID, "Yuri", 0, "female", "", time.Now().UTC())
-			if createErr != nil {
-				return createErr
-			}
-			if createErr = b.repositories.Agents.Create(ctx, profile); createErr != nil && !errors.Is(createErr, domain.ErrConflict) {
-				return createErr
-			}
-		} else if err != nil {
+	if profileID.Empty() {
+		return domain.ErrNotFound
+	}
+	if b != nil && b.repositories != nil && b.repositories.Agents != nil {
+		if _, err := b.repositories.Agents.Get(ctx, profileID); err != nil {
 			return err
 		}
 	}

@@ -301,6 +301,10 @@ class WailsYuriClient implements YuriClient {
     return conversation
   }
 
+  async deleteConversation(conversationId: string): Promise<void> {
+    await callBridge(['DeleteConversation'], [{ conversationId }])
+  }
+
   async listChatTools(): Promise<ChatTool[]> {
     return normalizeChatToolList(await callBridgeSafe<unknown>(['ListChatTools', 'ListTools', 'GetChatTools']))
   }
@@ -329,6 +333,10 @@ class WailsYuriClient implements YuriClient {
     const result = normalizeAgentProfile(await callBridge<unknown>(['CreateAgent', 'CreateAgentProfile'], [input]))
     if (!result) throw new Error('Backend не вернул созданного агента.')
     return result
+  }
+
+  async deleteAgent(agentId: string): Promise<void> {
+    await callBridge(['DeleteAgent'], [{ id: agentId }])
   }
 
   async exportActiveAgentProfile(): Promise<PortableAgentProfile | undefined> {

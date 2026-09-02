@@ -109,6 +109,15 @@
   opacity: 0;
 }
 
+.chat-title-row__delete {
+  color: #9d7180;
+}
+
+.chat-title-row__delete:hover {
+  border-color: rgba(var(--rose-rgb), 0.25);
+  color: var(--rose);
+}
+
 .chat-title-row:hover .chat-title-row__edit,
 .chat-title-row__edit:focus-visible {
   opacity: 1;

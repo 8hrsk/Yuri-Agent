@@ -193,6 +193,13 @@ func newOpenAIBridgeSmoke(t *testing.T, baseURL, secret string) *Bridge {
 		backgroundCtx: backgroundCtx, backgroundCancel: backgroundCancel,
 		pluginSupervisors: make(map[string]*plugins.Supervisor), shuttingDown: true,
 	}
+	profile, err := domain.NewAgentProfile(domain.ID(value.Persona.ProfileID), "Yuri", 0, "female", "", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repositories.Agents.Create(context.Background(), profile); err != nil {
+		t.Fatal(err)
+	}
 	if err := bridge.ensurePersonaState(context.Background()); err != nil {
 		t.Fatal(err)
 	}

@@ -442,9 +442,7 @@
     min-height: 66px;
   }
 
-  .topbar__connection,
-  .topbar__actions kbd,
-  .topbar__avatar {
+  .topbar__connection {
     display: none;
   }
 
@@ -475,7 +473,4 @@
     padding: 0 18px;
   }
 
-  .statusbar__right {
-    display: none;
-  }
 }

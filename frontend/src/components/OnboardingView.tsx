@@ -52,7 +52,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
   const [modelSort, setModelSort] = useState<OpenAIModelSort>('')
   const [loadingModels, setLoadingModels] = useState(false)
   const [apiKey, setApiKey] = useState('')
-  const [agentDraft, setAgentDraft] = useState<AgentProfileInput>(() => loadAgentDraft(newAgentDraft()))
+  const [agentDraft, setAgentDraft] = useState<AgentProfileInput>(() => loadAgentDraft(newAgentDraft({ name: '', preferences: '' })))
   const [codex, setCodex] = useState<CodexAccount>({ connected: false })
   const [codexModels, setCodexModels] = useState<CodexModel[]>([])
   const [busy, setBusy] = useState<BusyState>('loading')
@@ -173,7 +173,9 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
       const agent = await client.createAgent(agentDraft)
       clearAgentDraft()
       setFeedback({ kind: 'success', text: `Агент ${agent.name} создан и выбран как активный.` })
-      setStep('provider')
+      const onboarding = await client.getOnboardingState()
+      if (isOnboardingComplete(onboarding)) onComplete()
+      else setStep('provider')
     } catch (cause) {
       setFeedback({ kind: 'error', text: errorMessage(cause, 'Не удалось создать агента.') })
     } finally {

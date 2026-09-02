@@ -14,12 +14,14 @@ const props: {
   runLabel: string
   runStatus: RunStatus
   title: string
+  onDelete: () => Promise<void>
 } = {
   agentName: 'Yuri',
   avatarState: 'idle',
   runLabel: 'Жду задачу',
   runStatus: 'idle',
   title: 'Новый диалог',
+  onDelete: vi.fn(async () => undefined),
 }
 
 describe('ChatHeader conversation title editor', () => {

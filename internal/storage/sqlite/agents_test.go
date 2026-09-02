@@ -113,6 +113,56 @@ func TestCreateAgentWithDefaultsRollsBackPartialProfile(t *testing.T) {
 	}
 }
 
+func TestAgentSoftDeleteKeepsHistoryAndRejectsNewRuns(t *testing.T) {
+	database, ctx := testDatabase(t)
+	repositories, err := NewRepositories(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	profile, err := domain.NewAgentProfile("agent_lifecycle", "Лира", 22, "female", "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repositories.Agents.Create(ctx, profile); err != nil {
+		t.Fatal(err)
+	}
+	run, err := domain.NewRunForAgent(profile.ID, "run_lifecycle", domain.RunKindBackground, "", now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repositories.Runs.Create(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repositories.Agents.SoftDelete(ctx, profile.ID, now.Add(2*time.Second)); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("SoftDelete() with live run error = %v, want ErrConflict", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE agent_runs SET state = 'cancelled' WHERE id = ?`, string(run.ID)); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := repositories.Agents.SoftDelete(ctx, profile.ID, now.Add(3*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deleted.Deleted() || deleted.DeletedAt == nil {
+		t.Fatalf("deleted profile = %#v", deleted)
+	}
+	if _, err := repositories.Agents.Get(ctx, profile.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("active Get() error = %v, want ErrNotFound", err)
+	}
+	all, err := repositories.Agents.ListIncludingDeleted(ctx)
+	if err != nil || len(all) != 1 || !all[0].Deleted() {
+		t.Fatalf("ListIncludingDeleted() = %#v, %v", all, err)
+	}
+	newRun, err := domain.NewRunForAgent(profile.ID, "run_after_delete", domain.RunKindBackground, "", now.Add(4*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repositories.Runs.Create(ctx, newRun); !errors.Is(err, domain.ErrNotPermitted) {
+		t.Fatalf("new run for deleted agent error = %v, want ErrNotPermitted", err)
+	}
+}
+
 func TestCreateAgentWithPersonalizationDefaultsIsAtomic(t *testing.T) {
 	database, ctx := testDatabase(t)
 	repositories, err := NewRepositories(database)

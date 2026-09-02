@@ -133,6 +133,8 @@ export interface AgentProfile {
   active: boolean
   createdAt: string
   updatedAt: string
+  deleted?: boolean
+  deletedAt?: string
 }
 
 export interface AgentProfileInput {

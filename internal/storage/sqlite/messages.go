@@ -121,6 +121,50 @@ func (r *MessageRepository) List(ctx context.Context, conversationID domain.ID, 
 	return r.ListByConversation(ctx, conversationID, window...)
 }
 
+func (r *MessageRepository) AttachmentMetadataByConversation(ctx context.Context, conversationID domain.ID) ([]string, error) {
+	if err := requireDatabase(r.db); err != nil {
+		return nil, err
+	}
+	if conversationID.Empty() {
+		return nil, fmt.Errorf("%w: conversation id is required", domain.ErrInvalidArgument)
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT provider_meta_json FROM messages
+		WHERE conversation_id = ? AND json_array_length(provider_meta_json, '$.attachments') > 0`, string(conversationID))
+	if err != nil {
+		return nil, wrappedSQLError("list conversation attachment metadata", err)
+	}
+	defer rows.Close()
+	result := make([]string, 0)
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return nil, wrappedSQLError("scan conversation attachment metadata", err)
+		}
+		result = append(result, value)
+	}
+	return result, rows.Err()
+}
+
+func (r *MessageRepository) AttachmentBlobReferenced(ctx context.Context, blobKey string) (bool, error) {
+	if err := requireDatabase(r.db); err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(blobKey) == "" {
+		return false, fmt.Errorf("%w: attachment blob key is required", domain.ErrInvalidArgument)
+	}
+	var exists int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM messages AS m, json_each(m.provider_meta_json, '$.attachments') AS attachment
+			WHERE json_extract(attachment.value, '$.blob_key') = ?
+		)`, blobKey).Scan(&exists)
+	if err != nil {
+		return false, wrappedSQLError("check attachment blob reference", err)
+	}
+	return exists == 1, nil
+}
+
 func scanMessage(row rowScanner) (Message, error) {
 	var (
 		message                         Message

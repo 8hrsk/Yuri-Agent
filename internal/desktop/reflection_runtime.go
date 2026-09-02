@@ -107,7 +107,7 @@ func (b *Bridge) reflectOnTurn(ctx context.Context, backend agent.ModelBackend, 
 		b.logReflectionFailure(ctx, turn.RunID, err)
 		return
 	}
-	roster, err := b.repositories.Agents.List(ctx)
+	roster, err := b.repositories.Agents.ListIncludingDeleted(ctx)
 	if err != nil {
 		b.logReflectionFailure(ctx, turn.RunID, err)
 		return

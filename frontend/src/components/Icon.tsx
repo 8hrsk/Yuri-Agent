@@ -25,6 +25,7 @@ export type IconName =
   | 'shield'
   | 'spark'
   | 'tasks'
+  | 'trash'
   | 'volume'
   | 'warning'
   | 'x'
@@ -64,6 +65,7 @@ const paths: Record<IconName, JSX.Element> = {
   shield: <><path d="M12 3 19 6v5c0 4.6-2.9 8.3-7 10-4.1-1.7-7-5.4-7-10V6l7-3Z" /><path d="m9 12 2 2 4-4" /></>,
   spark: <path d="m12 3 1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3ZM19 16l.7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7L19 16Z" />,
   tasks: <><rect x="4" y="4" width="16" height="16" rx="3" /><path d="m8 12 2.2 2.2L16 8.5M8 8h.01M8 16h.01" /></>,
+  trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" /></>,
   volume: <><path d="M4 10v4h4l5 4V6l-5 4H4Z" /><path d="M17 9a4 4 0 0 1 0 6M19.5 6.5a7.5 7.5 0 0 1 0 11" /></>,
   warning: <><path d="m12 4 9 16H3L12 4Z" /><path d="M12 9v5M12 17h.01" /></>,
   x: <path d="m6 6 12 12M18 6 6 18" />,

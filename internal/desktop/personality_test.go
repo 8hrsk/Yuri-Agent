@@ -32,6 +32,13 @@ func newPersonalityTestBridge(t *testing.T) *Bridge {
 		t.Fatal(err)
 	}
 	bridge := &Bridge{database: database, repositories: repositories, paths: paths, config: value}
+	profile, err := domain.NewAgentProfile(domain.ID(value.Persona.ProfileID), "Yuri", 0, "female", "", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repositories.Agents.Create(context.Background(), profile); err != nil {
+		t.Fatal(err)
+	}
 	if err := bridge.ensurePersonaState(context.Background()); err != nil {
 		t.Fatal(err)
 	}
