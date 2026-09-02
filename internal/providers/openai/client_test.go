@@ -201,6 +201,52 @@ func TestNamedRequiredToolChoiceUsesProviderSpecificShape(t *testing.T) {
 	}
 }
 
+func TestChatToolCallExtrasRoundTripOnlyWhenPresent(t *testing.T) {
+	client, err := New(Config{BaseURL: "https://example.invalid/v1", Style: APIStyleChatCompletions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := testRequest()
+	request.Messages = append(request.Messages,
+		agent.Message{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{{
+				ID: "signed-call", Name: "echo", Arguments: json.RawMessage(`{"value":"ok"}`),
+				ProviderExtras: json.RawMessage(`{"google":{"thought_signature":"opaque-signature"}}`),
+			}},
+		},
+		agent.Message{Role: agent.RoleTool, ToolCallID: "signed-call", Content: `{"ok":true}`},
+	)
+	body, _, err := client.marshalRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Messages []struct {
+			ToolCalls []struct {
+				ExtraContent json.RawMessage `json:"extra_content"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	got := payload.Messages[len(payload.Messages)-2].ToolCalls[0].ExtraContent
+	want := `{"google":{"thought_signature":"opaque-signature"}}`
+	if string(got) != want {
+		t.Fatalf("extra_content = %s, want %s", got, want)
+	}
+
+	request.Messages[len(request.Messages)-2].ToolCalls[0].ProviderExtras = nil
+	body, _, err = client.marshalRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `"extra_content"`) {
+		t.Fatalf("ordinary provider payload changed: %s", body)
+	}
+}
+
 func TestRetriesTransientResponsesBeforeReturningStream(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -34,6 +34,18 @@ describe('first-run onboarding rules', () => {
     expect(validateOnboardingProvider(codex, { connected: true })).toBeUndefined()
   })
 
+  it('accepts Google AI Studio only on the fixed documented endpoint', () => {
+    const google = {
+      ...openAISettings,
+      kind: 'google-ai-studio' as const,
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+      model: 'gemini-2.5-flash',
+      quotaMode: 'free-tier' as const,
+    }
+    expect(validateOnboardingProvider(google)).toBeUndefined()
+    expect(validateOnboardingProvider({ ...google, baseUrl: 'https://example.com/v1beta/openai/' })).toContain('фиксированный')
+  })
+
   it('keeps Antigravity disabled until an official integration contract exists', () => {
     const antigravity = { ...openAISettings, kind: 'antigravity' as const }
     expect(validateOnboardingProvider(antigravity)).toContain('официальный integration contract')

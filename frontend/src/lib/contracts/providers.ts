@@ -16,8 +16,19 @@ export interface UsageLimits {
   detail: string
 }
 
+export type ProviderQuotaMode = 'off' | 'free-tier' | 'custom'
+
+export interface ProviderQuotaProfile {
+  rpm?: number
+  tpm?: number
+  rpd?: number
+  maxConcurrent?: number
+  safetyPercent?: number
+  interactiveReservePercent?: number
+}
+
 export interface ProviderSettings {
-  kind: 'openai-compatible' | 'codex-app-server' | 'antigravity'
+  kind: 'openai-compatible' | 'codex-app-server' | 'antigravity' | 'google-ai-studio'
   providerId?: string
   displayName?: string
   baseUrl: string
@@ -27,6 +38,9 @@ export interface ProviderSettings {
   favoriteModels: string[]
   timeoutSeconds: number
   streamResponses: boolean
+  /** Optional on legacy renderer payloads; backend treats absence as off. */
+  quotaMode?: ProviderQuotaMode
+  quotaProfile?: ProviderQuotaProfile
 }
 
 export interface ProviderOption {
@@ -36,6 +50,8 @@ export interface ProviderOption {
   model: string
   enabled: boolean
   hasSecret: boolean
+  quotaMode?: ProviderQuotaMode
+  quotaProfile?: Partial<ProviderQuotaProfile>
 }
 
 export type OpenAIModelSort = '' | 'pricing-low-to-high' | 'pricing-high-to-low' | 'context-high-to-low' | 'throughput-high-to-low' | 'latency-low-to-high' | 'most-popular' | 'newest'
@@ -104,6 +120,7 @@ export interface ProviderSnapshot {
   settings: ProviderSettings
   openAI?: ProviderSettings
   codex: CodexAccount
+  googleAIStudio?: ProviderSettings
 }
 
 /**

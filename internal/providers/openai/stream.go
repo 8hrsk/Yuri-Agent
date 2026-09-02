@@ -284,9 +284,10 @@ type chatMessageBody struct {
 }
 
 type chatToolCallPayload struct {
-	Index    json.RawMessage `json:"index"`
-	ID       json.RawMessage `json:"id"`
-	Function struct {
+	Index        json.RawMessage `json:"index"`
+	ID           json.RawMessage `json:"id"`
+	ExtraContent json.RawMessage `json:"extra_content"`
+	Function     struct {
 		Name      json.RawMessage `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
 	} `json:"function"`
@@ -326,7 +327,7 @@ func (s *stream) chatToolCallEvents(calls []chatToolCallPayload, responseID stri
 		s.chatCallIDs[index] = callID
 		name := rawString(call.Function.Name)
 		if complete || name != "" {
-			events = append(events, agent.ModelEvent{Type: agent.ModelEventToolCallStarted, ResponseID: responseID, ToolCallID: callID, ToolName: name})
+			events = append(events, agent.ModelEvent{Type: agent.ModelEventToolCallStarted, ResponseID: responseID, ToolCallID: callID, ToolName: name, ToolCallProviderExtras: cloneRaw(call.ExtraContent)})
 		}
 		// An object-valued arguments field -- emitted by gateways that inline
 		// the decoded object instead of the JSON-encoded string the contract
@@ -335,11 +336,18 @@ func (s *stream) chatToolCallEvents(calls []chatToolCallPayload, responseID stri
 		// internal/desktop's redactedToolArguments unmarshals, so re-encoding
 		// preserves the tool call where rejecting it would lose a request that
 		// is otherwise fully specified.
-		if arguments := rawString(call.Function.Arguments); arguments != "" {
-			events = append(events, agent.ModelEvent{Type: agent.ModelEventToolCallDelta, ResponseID: responseID, ToolCallID: callID, ArgumentsDelta: arguments})
+		if arguments := rawString(call.Function.Arguments); arguments != "" || hasRaw(call.ExtraContent) {
+			events = append(events, agent.ModelEvent{Type: agent.ModelEventToolCallDelta, ResponseID: responseID, ToolCallID: callID, ArgumentsDelta: arguments, ToolCallProviderExtras: cloneRaw(call.ExtraContent)})
 		}
 	}
 	return events
+}
+
+func cloneRaw(raw json.RawMessage) json.RawMessage {
+	if !hasRaw(raw) {
+		return nil
+	}
+	return append(json.RawMessage(nil), raw...)
 }
 
 // parseChatJSON converts a non-streamed Chat Completions payload. The delta

@@ -11,6 +11,7 @@ import (
 	"github.com/OrdoAI/yuri-agent/internal/agent"
 	"github.com/OrdoAI/yuri-agent/internal/config"
 	"github.com/OrdoAI/yuri-agent/internal/providers/antigravity"
+	googleaistudio "github.com/OrdoAI/yuri-agent/internal/providers/googleaistudio"
 	openaiadapter "github.com/OrdoAI/yuri-agent/internal/providers/openai"
 )
 
@@ -34,6 +35,9 @@ func (b *Bridge) probeProvider(input ProviderSettingsInput) ProviderTestResult {
 			return b.providerProbeFailure(input.ProviderID, "Codex App Server отвечает, но ChatGPT OAuth ещё не завершён")
 		}
 		return b.providerProbeSuccess(ctx, input.ProviderID, "Codex App Server и ChatGPT OAuth доступны")
+	}
+	if input.Kind == config.ProviderGoogleAIStudio {
+		return b.probeGoogleAIStudio(ctx, input)
 	}
 	if input.Kind != "" && input.Kind != config.ProviderOpenAICompatible {
 		return b.providerProbeFailure(input.ProviderID, fmt.Sprintf("unsupported provider kind %q", input.Kind))
@@ -94,6 +98,55 @@ func (b *Bridge) probeProvider(input ProviderSettingsInput) ProviderTestResult {
 		}
 		if event.Type == agent.ModelEventTextDelta || event.Type == agent.ModelEventCompleted {
 			return b.providerProbeSuccess(ctx, providerID, "Endpoint отвечает и поддерживает модель")
+		}
+	}
+}
+
+func (b *Bridge) probeGoogleAIStudio(ctx context.Context, input ProviderSettingsInput) ProviderTestResult {
+	b.mu.RLock()
+	providers := append([]config.ProviderConfig(nil), b.config.Providers...)
+	b.mu.RUnlock()
+	var selected *config.ProviderConfig
+	for index := range providers {
+		if providers[index].Kind == config.ProviderGoogleAIStudio && providers[index].Enabled &&
+			(input.ProviderID == "" || providers[index].ID == strings.TrimSpace(input.ProviderID)) {
+			selected = &providers[index]
+			break
+		}
+	}
+	if selected == nil {
+		return b.providerProbeFailure(input.ProviderID, "Сначала сохраните Google AI Studio provider и API key")
+	}
+	if b.keyring == nil {
+		return b.providerProbeFailure(selected.ID, "API key недоступен в системном keyring")
+	}
+	secret, err := b.keyring.Get(ctx, selected.CredentialRef)
+	if err != nil {
+		return b.providerProbeFailure(selected.ID, "API key недоступен в системном keyring")
+	}
+	timeout := time.Duration(input.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	client, err := b.newGoogleAIStudioClient(googleaistudio.Config{APIKey: secret, Model: selected.Model, Timeout: timeout})
+	if err != nil {
+		return b.providerProbeFailure(selected.ID, safeError(err.Error()))
+	}
+	stream, err := client.Start(ctx, agent.ModelRequest{Model: selected.Model, Messages: []agent.Message{{Role: agent.RoleUser, Content: "OK"}}, MaxOutputTokens: 8})
+	if err != nil {
+		return b.providerProbeFailure(selected.ID, safeError(err.Error()))
+	}
+	defer stream.Close()
+	for {
+		event, receiveErr := stream.Recv(ctx)
+		if receiveErr != nil {
+			if errors.Is(receiveErr, io.EOF) {
+				return b.providerProbeSuccess(ctx, selected.ID, "Google AI Studio отвечает")
+			}
+			return b.providerProbeFailure(selected.ID, safeError(receiveErr.Error()))
+		}
+		if event.Type == agent.ModelEventTextDelta || event.Type == agent.ModelEventCompleted {
+			return b.providerProbeSuccess(ctx, selected.ID, "Google AI Studio отвечает и поддерживает модель")
 		}
 	}
 }

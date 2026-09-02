@@ -41,7 +41,7 @@ export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fall
   const [error, setError] = useState<string>()
   const selected = providers.find((provider) => provider.id === providerId)
   const fallbackSelected = providers.find((provider) => provider.id === fallbackProviderId)
-  const selectedOpenAIModel = selected?.kind === 'openai-compatible'
+  const selectedOpenAIModel = (selected?.kind === 'openai-compatible' || selected?.kind === 'google-ai-studio')
     ? openAIModels.find((candidate) => candidate.id === model)
     : undefined
 
@@ -62,7 +62,7 @@ export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fall
     setLoadingModels(true)
     setError(undefined)
     try {
-      if (provider.kind === 'openai-compatible') {
+      if (provider.kind === 'openai-compatible' || provider.kind === 'google-ai-studio') {
         setSort(nextSort)
         setOpenAIModels(await client.getOpenAIModels(provider.id, nextSort))
       } else if (provider.kind === 'codex-app-server') {
@@ -80,7 +80,7 @@ export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fall
     setLoadingFallbackModels(true)
     setError(undefined)
     try {
-      if (provider.kind === 'openai-compatible') setFallbackOpenAIModels(await client.getOpenAIModels(provider.id))
+      if (provider.kind === 'openai-compatible' || provider.kind === 'google-ai-studio') setFallbackOpenAIModels(await client.getOpenAIModels(provider.id))
       else if (provider.kind === 'codex-app-server') setFallbackCodexModels(await client.getCodexModels())
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Не удалось загрузить модели fallback provider.')
@@ -128,7 +128,7 @@ export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fall
       <option value="">Активный provider приложения · default</option>
       {providers.filter((provider) => provider.kind !== 'antigravity').map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}{provider.enabled ? ' · active default' : ''}</option>)}
     </select></label>
-    {selected?.kind === 'openai-compatible' && <>
+    {(selected?.kind === 'openai-compatible' || selected?.kind === 'google-ai-studio') && <>
       <OpenAIModelPicker loading={loadingModels} models={openAIModels} onReload={(nextSort) => void loadModels(selected, nextSort)} onSelect={(nextModel) => onChange(selected.id, nextModel)} onToggleFavorite={(item) => void toggleFavorite(item)} sort={sort} value={model} />
       <label><span>Model ID <small>· можно ввести вручную</small></span><input disabled={disabled} onChange={(event) => onChange(selected.id, event.target.value)} placeholder={selected.model || 'provider/model'} spellCheck={false} value={model} /></label>
       {selectedOpenAIModel?.supportsToolsKnown && !selectedOpenAIModel.supportsTools && <div className="agent-model-route__warning" role="alert"><Icon name="warning" width={13} height={13} /><span><strong>У этой модели нет поддержки tools</strong><small>Агент сможет отвечать текстом, но обязательные вызовы инструментов будут остановлены до отправки provider. Выберите модель с бейджем TOOLS для задач с файлами, web и субагентами.</small></span></div>}
@@ -159,7 +159,7 @@ export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fall
         <option value="">Выберите provider</option>
         {providers.filter((provider) => provider.kind !== 'antigravity').map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}
       </select></label>
-      {fallbackSelected?.kind === 'openai-compatible' && <>
+      {(fallbackSelected?.kind === 'openai-compatible' || fallbackSelected?.kind === 'google-ai-studio') && <>
         <label><span>Fallback model</span><select aria-label="Fallback model" disabled={disabled || loadingFallbackModels} onChange={(event) => onFallbackChange(fallbackEnabled, fallbackProviderId, event.target.value)} value={fallbackModel}>
           <option value="">Выберите модель</option>
           {fallbackOpenAIModels.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -170,7 +170,7 @@ export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fall
         <option value="">Автоматически · provider default</option>
         {fallbackCodexModels.map((item) => <option key={item.id} value={item.model}>{item.displayName}{item.isDefault ? ' · default' : ''}</option>)}
       </select></label>}
-      {fallbackProviderId && fallbackSelected?.kind !== 'openai-compatible' && fallbackSelected?.kind !== 'codex-app-server' && <label><span>Fallback model ID</span><input aria-label="Fallback model ID" disabled={disabled} onChange={(event) => onFallbackChange(fallbackEnabled, fallbackProviderId, event.target.value)} spellCheck={false} value={fallbackModel} /></label>}
+      {fallbackProviderId && fallbackSelected?.kind !== 'openai-compatible' && fallbackSelected?.kind !== 'google-ai-studio' && fallbackSelected?.kind !== 'codex-app-server' && <label><span>Fallback model ID</span><input aria-label="Fallback model ID" disabled={disabled} onChange={(event) => onFallbackChange(fallbackEnabled, fallbackProviderId, event.target.value)} spellCheck={false} value={fallbackModel} /></label>}
       {!fallbackProviderId && <small className="agent-model-route__fallback-hint">Сначала выберите отдельный fallback provider.</small>}
       {fallbackAction && <div className="agent-model-route__section-action">{fallbackAction}</div>}
     </section>

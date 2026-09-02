@@ -100,4 +100,29 @@ describe('AgentModelRouteEditor', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/нет поддержки tools/)
     expect(screen.getByText(/обязательные вызовы инструментов будут остановлены/)).toBeInTheDocument()
   })
+
+  it('loads Google AI Studio models for primary and fallback routes', async () => {
+    const onChange = vi.fn()
+    const onFallbackChange = vi.fn()
+    ;(window as typeof window & { go?: unknown }).go = {
+      main: {
+        Bridge: {
+          ListConversations: () => [],
+          ListProviders: () => [
+            { id: 'google-ai-studio', kind: 'google-ai-studio', displayName: 'Google AI Studio', model: 'gemini-2.5-flash', enabled: true, hasSecret: true },
+          ],
+          ListOpenAIModels: () => [
+            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', context_length: 1_048_576, input_modalities: ['text'], output_modalities: ['text'] },
+          ],
+        },
+      },
+    }
+    resetYuriClientForTests()
+
+    render(<AgentModelRouteEditor fallbackEnabled={false} fallbackModel="" fallbackProviderId="" model="gemini-2.5-flash" onChange={onChange} onFallbackChange={onFallbackChange} providerId="google-ai-studio" />)
+
+    expect(await screen.findByText('Gemini 2.5 Flash')).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Fallback provider' }), { target: { value: 'google-ai-studio' } })
+    expect(onFallbackChange).toHaveBeenCalledWith(false, 'google-ai-studio', 'gemini-2.5-flash')
+  })
 })

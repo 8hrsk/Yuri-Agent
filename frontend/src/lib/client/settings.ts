@@ -19,6 +19,8 @@ const defaultSettings: ProviderSettings = {
   favoriteModels: [],
   timeoutSeconds: 90,
   streamResponses: true,
+  quotaMode: 'off',
+  quotaProfile: { rpm: 0, tpm: 0, rpd: 0, maxConcurrent: 0, safetyPercent: 80, interactiveReservePercent: 25 },
 }
 
 const openRouterSettings: ProviderSettings = {
@@ -28,6 +30,18 @@ const openRouterSettings: ProviderSettings = {
   baseUrl: 'https://openrouter.ai/api/v1',
   model: '',
   apiStyle: 'chat_completions',
+}
+
+const googleAIStudioSettings: ProviderSettings = {
+  ...defaultSettings,
+  providerId: 'google-ai-studio',
+  displayName: 'Google AI Studio',
+  kind: 'google-ai-studio',
+  baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+  model: '',
+  apiStyle: 'chat_completions',
+  quotaMode: 'free-tier',
+  quotaProfile: { rpm: 0, tpm: 0, rpd: 0, maxConcurrent: 1, safetyPercent: 80, interactiveReservePercent: 25 },
 }
 
 const defaultOnboardingState: OnboardingState = {
@@ -146,12 +160,15 @@ function normalizeOnboardingResult(value: unknown, fallbackState: OnboardingStat
 function onboardingSettingsWire(settings: ProviderSettings): UnknownRecord {
   return {
     kind: settings.kind,
+    providerId: settings.providerId,
     baseUrl: settings.baseUrl,
     model: settings.model,
     apiStyle: settings.apiStyle,
     timeoutSeconds: settings.timeoutSeconds,
     streamResponses: settings.streamResponses,
     apiKeyConfigured: settings.apiKeyConfigured,
+    quotaMode: settings.quotaMode,
+    quotaProfile: settings.quotaProfile,
   }
 }
 
@@ -210,6 +227,7 @@ export {
   defaultProactivitySettings,
   defaultWebSearchSettings,
   defaultSettings,
+  googleAIStudioSettings,
   openRouterSettings,
   normalizeEncryptedBackup,
   normalizeOnboardingResult,

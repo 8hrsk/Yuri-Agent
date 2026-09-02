@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -178,6 +179,33 @@ func TestChatDecodeToleratesGatewayScalarTypes(t *testing.T) {
 			defer cleanup()
 			assertCollected(t, collectStream(t, stream), test.want)
 		})
+	}
+}
+
+func TestChatStreamPreservesOpaqueToolCallExtraContent(t *testing.T) {
+	body := sseChat(
+		`{"id":"c","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_signed","extra_content":{"google":{"thought_signature":"opaque-signature"}},"function":{"name":"echo","arguments":"{\"value\":\"ok\"}"}}]}}]}`,
+		`{"id":"c","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+	)
+	stream, cleanup := startAgainstBody(t, APIStyleChatCompletions, "text/event-stream", body)
+	defer cleanup()
+
+	var got json.RawMessage
+	for {
+		event, err := stream.Recv(context.Background())
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(event.ToolCallProviderExtras) > 0 {
+			got = event.ToolCallProviderExtras
+		}
+	}
+	want := `{"google":{"thought_signature":"opaque-signature"}}`
+	if string(got) != want {
+		t.Fatalf("provider extras = %s, want %s", got, want)
 	}
 }
 

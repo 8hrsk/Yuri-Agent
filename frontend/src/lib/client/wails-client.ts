@@ -84,7 +84,8 @@ import {
 import { blobToBase64, makeId, normalizeBoolean, nowIso, optionalNumber, optionalString } from './primitives'
 import type { UnknownRecord } from './primitives'
 import {
-  defaultSettings,
+	defaultSettings,
+	googleAIStudioSettings,
   normalizeEncryptedBackup,
   normalizeOnboardingResult,
   normalizeOnboardingState,
@@ -93,6 +94,33 @@ import {
   onboardingSettingsWire,
   proactivityWire,
 } from './settings'
+
+function normalizeQuotaProfile(value: unknown): ProviderSettings['quotaProfile'] {
+	if (!value || typeof value !== 'object') return { ...googleAIStudioSettings.quotaProfile }
+	const source = value as UnknownRecord
+	const number = (...keys: string[]) => {
+		for (const key of keys) {
+			const candidate = Number(source[key])
+			if (Number.isFinite(candidate)) return Math.max(0, Math.round(candidate))
+		}
+		return 0
+	}
+	return {
+		rpm: number('rpm'), tpm: number('tpm'), rpd: number('rpd'),
+		maxConcurrent: number('maxConcurrent', 'max_concurrent'),
+		safetyPercent: number('safetyPercent', 'safety_percent') || 80,
+		interactiveReservePercent: number('interactiveReservePercent', 'interactive_reserve_percent') || 25,
+	}
+}
+
+function quotaProfileWire(value: ProviderSettings['quotaProfile']): UnknownRecord {
+	const profile = normalizeQuotaProfile(value)
+	return {
+		rpm: profile?.rpm ?? 0, tpm: profile?.tpm ?? 0, rpd: profile?.rpd ?? 0,
+		maxConcurrent: profile?.maxConcurrent ?? 0, safetyPercent: profile?.safetyPercent ?? 80,
+		interactiveReservePercent: profile?.interactiveReservePercent ?? 25,
+	}
+}
 
 function normalizePortableAgentProfile(value: unknown): PortableAgentProfile | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
@@ -425,7 +453,7 @@ class WailsYuriClient implements YuriClient {
     const configuredOpenAI = openAIProviders.find((item) => optionalString(item, 'id') === 'openrouter') ?? openAIProviders[0]
     const selectedOpenAI = enabledProvider && (enabledProvider.kind === 'openai-compatible' || enabledProvider.type === 'openai-compatible') ? enabledProvider : configuredOpenAI
     const rawOpenAIFavorites = selectedOpenAI?.favoriteModels ?? selectedOpenAI?.favorite_models
-    const openAISettings: ProviderSettings | undefined = selectedOpenAI ? {
+		const openAISettings: ProviderSettings | undefined = selectedOpenAI ? {
       ...defaultSettings,
       providerId: optionalString(selectedOpenAI, 'id') ?? 'openai',
       displayName: optionalString(selectedOpenAI, 'displayName', 'display_name') ?? 'OpenAI-compatible',
@@ -433,16 +461,31 @@ class WailsYuriClient implements YuriClient {
       model: optionalString(selectedOpenAI, 'model') ?? '',
       apiStyle: selectedOpenAI.apiStyle === 'chat_completions' || selectedOpenAI.api_style === 'chat_completions' ? 'chat_completions' : 'responses',
       apiKeyConfigured: Boolean(selectedOpenAI.apiKeyConfigured ?? selectedOpenAI.api_key_configured ?? selectedOpenAI.hasSecret),
-      favoriteModels: Array.isArray(rawOpenAIFavorites) ? rawOpenAIFavorites.map(String) : [],
-    } : undefined
-    const settings: ProviderSettings = enabledProvider && (enabledProvider.kind === 'codex-app-server' || enabledProvider.type === 'codex-app-server')
+			favoriteModels: Array.isArray(rawOpenAIFavorites) ? rawOpenAIFavorites.map(String) : [],
+			quotaMode: selectedOpenAI.quotaMode === 'free-tier' || selectedOpenAI.quota_mode === 'free-tier' ? 'free-tier' : selectedOpenAI.quotaMode === 'custom' || selectedOpenAI.quota_mode === 'custom' ? 'custom' : 'off',
+			quotaProfile: normalizeQuotaProfile(selectedOpenAI.quotaProfile ?? selectedOpenAI.quota_profile),
+		} : undefined
+		const googleProvider = providerList.find((item): item is UnknownRecord => Boolean(item && typeof item === 'object' && ((item as UnknownRecord).kind === 'google-ai-studio' || (item as UnknownRecord).type === 'google-ai-studio')))
+		const googleAIStudio = googleProvider ? {
+			...googleAIStudioSettings,
+			providerId: optionalString(googleProvider, 'id') ?? googleAIStudioSettings.providerId,
+			displayName: optionalString(googleProvider, 'displayName', 'display_name') ?? googleAIStudioSettings.displayName,
+			model: optionalString(googleProvider, 'model') ?? '',
+			apiKeyConfigured: Boolean(googleProvider.apiKeyConfigured ?? googleProvider.api_key_configured ?? googleProvider.hasSecret),
+			quotaMode: googleProvider.quotaMode === 'custom' || googleProvider.quota_mode === 'custom' ? 'custom' : googleProvider.quotaMode === 'off' || googleProvider.quota_mode === 'off' ? 'off' : 'free-tier',
+			quotaProfile: normalizeQuotaProfile(googleProvider.quotaProfile ?? googleProvider.quota_profile),
+		} satisfies ProviderSettings : undefined
+	const settings: ProviderSettings = enabledProvider && (enabledProvider.kind === 'google-ai-studio' || enabledProvider.type === 'google-ai-studio') && googleAIStudio
+		? googleAIStudio
+		: enabledProvider && (enabledProvider.kind === 'codex-app-server' || enabledProvider.type === 'codex-app-server')
       ? { ...defaultSettings, kind: 'codex-app-server', model: String(enabledProvider.model ?? '') }
       : selectedOpenAI && openAISettings
       ? openAISettings
       : defaultSettings
     return {
       settings,
-      openAI: openAISettings,
+		openAI: openAISettings,
+		googleAIStudio,
       codex: {
         ...(account ?? { connected: false }),
         limits: limits ?? account?.limits,
@@ -458,15 +501,20 @@ class WailsYuriClient implements YuriClient {
       const source = item as UnknownRecord
       const id = optionalString(source, 'id')
       const kind = optionalString(source, 'kind', 'type')
-      if (!id || (kind !== 'openai-compatible' && kind !== 'codex-app-server' && kind !== 'antigravity')) return []
-      return [{
+      if (!id || (kind !== 'openai-compatible' && kind !== 'codex-app-server' && kind !== 'antigravity' && kind !== 'google-ai-studio')) return []
+      const option: ProviderOption = {
         id,
         kind,
         displayName: optionalString(source, 'displayName', 'display_name') ?? id,
         model: optionalString(source, 'model') ?? '',
         enabled: Boolean(source.enabled),
         hasSecret: Boolean(source.hasSecret ?? source.has_secret),
-      } satisfies ProviderOption]
+      }
+      if (kind === 'google-ai-studio') {
+        option.quotaMode = source.quotaMode === 'custom' || source.quota_mode === 'custom' ? 'custom' : source.quotaMode === 'off' || source.quota_mode === 'off' ? 'off' : 'free-tier'
+        option.quotaProfile = normalizeQuotaProfile(source.quotaProfile ?? source.quota_profile)
+      }
+      return [option]
     })
   }
 
@@ -486,6 +534,14 @@ class WailsYuriClient implements YuriClient {
       }])
       return
     }
+    if (settings.kind === 'google-ai-studio') {
+      await callBridge(['SaveGoogleAIStudioProvider'], [{
+        id: settings.providerId ?? 'google-ai-studio', displayName: settings.displayName ?? 'Google AI Studio',
+        baseUrl: settings.baseUrl, model: settings.model, apiKey, enabled: true,
+        quotaMode: settings.quotaMode ?? 'free-tier', quotaProfile: quotaProfileWire(settings.quotaProfile),
+      }])
+      return
+    }
     await callBridge(['SaveCodexProvider', 'SaveProviderSettings', 'SetProviderSettings'], [{
       id: 'codex',
       displayName: 'Codex App Server',
@@ -497,6 +553,13 @@ class WailsYuriClient implements YuriClient {
 
   async connectOpenAIProvider(settings: ProviderSettings, apiKey?: string): Promise<OpenAIModel[]> {
     const providerId = settings.providerId ?? 'openai'
+    if (settings.kind === 'google-ai-studio') {
+      await callBridge(['SaveGoogleAIStudioProviderCredential'], [{
+        id: providerId, displayName: settings.displayName ?? 'Google AI Studio', baseUrl: settings.baseUrl,
+        apiKey, quotaMode: settings.quotaMode ?? 'free-tier', quotaProfile: quotaProfileWire(settings.quotaProfile),
+      }])
+      return this.getOpenAIModels(providerId)
+    }
     await callBridge(['SaveOpenAIProviderCredential'], [{
       id: providerId,
       displayName: settings.displayName ?? 'OpenAI-compatible',

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -49,6 +50,24 @@ func (s *scriptedStream) Recv(ctx context.Context) (ModelEvent, error) {
 }
 
 func (s *scriptedStream) Close() error { return nil }
+
+type partialUsageBackend struct{}
+
+func (partialUsageBackend) Start(context.Context, ModelRequest) (ModelStream, error) {
+	return &partialUsageStream{}, nil
+}
+
+type partialUsageStream struct{ delivered bool }
+
+func (stream *partialUsageStream) Recv(context.Context) (ModelEvent, error) {
+	if !stream.delivered {
+		stream.delivered = true
+		return ModelEvent{Type: ModelEventTextDelta, Delta: "partial", Usage: Usage{InputTokens: 10, OutputTokens: 2, TotalTokens: 12}}, nil
+	}
+	return ModelEvent{}, errors.New("upstream stream failed")
+}
+
+func (*partialUsageStream) Close() error { return nil }
 
 type interactiveBackend struct {
 	request ModelRequest
@@ -181,6 +200,73 @@ func TestRuntimeRunsToolLoopAndKeepsToolResultsInNextRequest(t *testing.T) {
 	}
 	if events[len(events)-1].Type != EventRunCompleted {
 		t.Fatalf("last event = %s, want %s", events[len(events)-1].Type, EventRunCompleted)
+	}
+}
+
+func TestRuntimeKeepsOpaqueToolCallExtrasInNextRequest(t *testing.T) {
+	signature := json.RawMessage(`{"google":{"thought_signature":"opaque-signature"}}`)
+	backend := &scriptedBackend{streams: [][]ModelEvent{
+		{
+			{Type: ModelEventToolCallStarted, ToolCallID: "call_signed", ToolName: "echo", ToolCallProviderExtras: signature},
+			{Type: ModelEventToolCallDelta, ToolCallID: "call_signed", ArgumentsDelta: `{"value":"hello"}`},
+			{Type: ModelEventCompleted},
+		},
+		{{Type: ModelEventTextDelta, Delta: "Done."}, {Type: ModelEventCompleted}},
+	}}
+	registry := NewToolRegistry()
+	if err := registry.Register(&echoTool{}); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := NewRuntime(backend, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.Run(context.Background(), RunRequest{
+		RunID:        "signed-tool-run",
+		ModelRequest: ModelRequest{Model: "test-model", Messages: []Message{{Role: RoleUser, Content: "use a tool"}}},
+		Budget:       domain.RunBudget{MaxSteps: 2, MaxTokens: 100, MaxToolCalls: 1, MaxToolOutputBytes: 1000, MaxDurationSeconds: 2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(backend.requests) != 2 || len(backend.requests[1].Messages) != 3 {
+		t.Fatalf("requests = %#v", backend.requests)
+	}
+	call := backend.requests[1].Messages[1].ToolCalls[0]
+	if string(call.ProviderExtras) != string(signature) {
+		t.Fatalf("provider extras = %s, want %s", call.ProviderExtras, signature)
+	}
+	encoded, err := json.Marshal(call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "opaque-signature") {
+		t.Fatalf("opaque provider extras leaked through public JSON: %s", encoded)
+	}
+}
+
+func TestRuntimeReportsPartialUsageWhenStreamFails(t *testing.T) {
+	runtime, err := NewRuntime(partialUsageBackend{}, NewToolRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var terminal Event
+	result, runErr := runtime.Run(context.Background(), RunRequest{
+		RunID:        "partial-usage-run",
+		ModelRequest: ModelRequest{Model: "test-model", Messages: []Message{{Role: RoleUser, Content: "hello"}}},
+		Budget:       domain.RunBudget{MaxSteps: 1, MaxTokens: 100, MaxToolOutputBytes: 1000, MaxDurationSeconds: 2},
+		Sink: func(_ context.Context, event Event) error {
+			if event.Type == EventRunFailed {
+				terminal = event
+			}
+			return nil
+		},
+	})
+	if runErr == nil {
+		t.Fatal("stream failure was accepted")
+	}
+	want := Usage{InputTokens: 10, OutputTokens: 2, TotalTokens: 12}
+	if result.Usage != want || terminal.Usage != want {
+		t.Fatalf("result usage=%+v terminal usage=%+v, want %+v", result.Usage, terminal.Usage, want)
 	}
 }
 

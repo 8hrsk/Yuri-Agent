@@ -24,6 +24,9 @@ export function validateOnboardingProvider(settings: ProviderSettings, codex?: C
   if (settings.kind === 'codex-app-server') {
     return codex?.connected ? undefined : 'Завершите OAuth-вход в Codex App Server.'
   }
+  if (settings.kind === 'google-ai-studio' && settings.baseUrl.replace(/\/$/, '') !== 'https://generativelanguage.googleapis.com/v1beta/openai') {
+    return 'Google AI Studio использует фиксированный документированный endpoint.'
+  }
   if (!settings.baseUrl.trim()) return 'Укажите Base URL провайдера.'
   if (!settings.model.trim()) return 'Укажите модель провайдера.'
   return undefined

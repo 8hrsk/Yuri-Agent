@@ -248,6 +248,43 @@ func TestValidateRejectsRelativeAndDuplicateAllowedDirectories(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsGoogleAIStudioQuotaSettings(t *testing.T) {
+	value := Default(testPaths(t))
+	value.Providers = []ProviderConfig{{
+		ID: "google", Kind: ProviderGoogleAIStudio, DisplayName: "Google AI Studio",
+		BaseURL: DefaultGoogleAIStudioBaseURL, Model: "gemini-2.5-flash",
+		CredentialRef: "provider.google.api-key", Enabled: true,
+		QuotaMode:    ProviderQuotaFreeTier,
+		QuotaProfile: ProviderQuotaProfile{RPM: 10, TPM: 250000, RPD: 250, MaxConcurrent: 1, SafetyPercent: 80, InteractiveReservePercent: 25},
+	}}
+	if err := value.Validate(); err != nil {
+		t.Fatalf("Validate() rejected Google AI Studio provider: %v", err)
+	}
+}
+
+func TestValidateRejectsUnknownGoogleQuotaModeAndInvalidProfile(t *testing.T) {
+	base := ProviderConfig{ID: "google", Kind: ProviderGoogleAIStudio, BaseURL: DefaultGoogleAIStudioBaseURL, Model: "gemini-2.5-flash", CredentialRef: "provider.google.api-key", Enabled: true}
+	value := Default(testPaths(t))
+	base.QuotaMode = "unlimited"
+	value.Providers = []ProviderConfig{base}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "unsupported quota mode") {
+		t.Fatalf("Validate() error = %v, want unsupported quota mode", err)
+	}
+	base.QuotaMode = ProviderQuotaCustom
+	base.QuotaProfile.SafetyPercent = 101
+	value.Providers = []ProviderConfig{base}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "safety_percent") {
+		t.Fatalf("Validate() error = %v, want safety_percent", err)
+	}
+	base.QuotaMode = ProviderQuotaFreeTier
+	base.QuotaProfile = ProviderQuotaProfile{}
+	base.APIStyle = ProviderAPIStyleResponses
+	value.Providers = []ProviderConfig{base}
+	if err := value.Validate(); err == nil || !strings.Contains(err.Error(), "chat_completions") {
+		t.Fatalf("Validate() error = %v, want fixed chat_completions style", err)
+	}
+}
+
 func TestValidateRejectsRelativeDataDirectory(t *testing.T) {
 	value := Config{Version: 1, Locale: "ru-RU", LogLevel: "info", DataDirectory: "relative"}
 	if err := value.Validate(); err == nil {

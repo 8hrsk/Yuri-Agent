@@ -45,10 +45,15 @@ func disableProviders(providers []config.ProviderConfig) []config.ProviderConfig
 }
 
 func providerView(provider config.ProviderConfig) ProviderView {
+	style := normalizedOpenAIAPIStyle(provider.APIStyle, provider.BaseURL)
+	if provider.Kind == config.ProviderGoogleAIStudio {
+		style = config.ProviderAPIStyleChatCompletions
+	}
 	return ProviderView{
 		ID: provider.ID, Kind: provider.Kind, DisplayName: provider.DisplayName,
-		BaseURL: provider.BaseURL, Model: provider.Model, APIStyle: normalizedOpenAIAPIStyle(provider.APIStyle, provider.BaseURL),
+		BaseURL: provider.BaseURL, Model: provider.Model, APIStyle: style,
 		FavoriteModels: append([]string(nil), provider.FavoriteModels...), Binary: provider.Binary,
 		Enabled: provider.Enabled, HasSecret: provider.CredentialRef != "",
+		QuotaMode: provider.QuotaMode, QuotaProfile: provider.QuotaProfile,
 	}
 }

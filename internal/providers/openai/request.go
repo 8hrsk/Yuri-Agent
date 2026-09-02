@@ -121,9 +121,10 @@ type chatImageURL struct {
 }
 
 type chatCall struct {
-	ID       string           `json:"id"`
-	Type     string           `json:"type"`
-	Function chatCallFunction `json:"function"`
+	ID           string           `json:"id"`
+	Type         string           `json:"type"`
+	Function     chatCallFunction `json:"function"`
+	ExtraContent json.RawMessage  `json:"extra_content,omitempty"`
 }
 
 type chatCallFunction struct {
@@ -169,7 +170,10 @@ func chatMessages(messages []agent.Message) []chatMessage {
 			item.Content = parts
 		}
 		for _, call := range message.ToolCalls {
-			item.ToolCalls = append(item.ToolCalls, chatCall{ID: call.ID, Type: "function", Function: chatCallFunction{Name: call.Name, Arguments: string(call.Arguments)}})
+			item.ToolCalls = append(item.ToolCalls, chatCall{
+				ID: call.ID, Type: "function", Function: chatCallFunction{Name: call.Name, Arguments: string(call.Arguments)},
+				ExtraContent: append(json.RawMessage(nil), call.ProviderExtras...),
+			})
 		}
 		result = append(result, item)
 	}

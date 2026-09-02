@@ -3,8 +3,10 @@ package desktop
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/OrdoAI/yuri-agent/internal/config"
+	googleaistudio "github.com/OrdoAI/yuri-agent/internal/providers/googleaistudio"
 	openaiadapter "github.com/OrdoAI/yuri-agent/internal/providers/openai"
 )
 
@@ -19,7 +21,7 @@ func (b *Bridge) ListOpenAIModels(input OpenAIModelCatalogInput) ([]OpenAIModelV
 	var selected config.ProviderConfig
 	found := false
 	for _, provider := range providers {
-		if provider.Kind != config.ProviderOpenAICompatible {
+		if provider.Kind != config.ProviderOpenAICompatible && provider.Kind != config.ProviderGoogleAIStudio {
 			continue
 		}
 		if providerID == "" || provider.ID == providerID {
@@ -28,7 +30,7 @@ func (b *Bridge) ListOpenAIModels(input OpenAIModelCatalogInput) ([]OpenAIModelV
 		}
 	}
 	if !found {
-		return nil, errors.New("Сначала сохраните OpenAI-compatible endpoint и API key")
+		return nil, errors.New("Сначала сохраните provider и API key")
 	}
 	if b.keyring == nil {
 		return nil, errors.New("API key недоступен в системном keyring")
@@ -38,6 +40,31 @@ func (b *Bridge) ListOpenAIModels(input OpenAIModelCatalogInput) ([]OpenAIModelV
 	secret, err := b.keyring.Get(ctx, selected.CredentialRef)
 	if err != nil {
 		return nil, errors.New("API key недоступен в системном keyring")
+	}
+	if selected.Kind == config.ProviderGoogleAIStudio {
+		client, err := googleaistudio.New(googleaistudio.Config{APIKey: secret, Model: selected.Model, MaxResponseBytes: 16 * 1024 * 1024, Timeout: 30 * time.Second})
+		if err != nil {
+			return nil, errors.New(safeError(err.Error()))
+		}
+		models, err := client.ListModels(ctx)
+		if err != nil {
+			return nil, errors.New(safeError(err.Error()))
+		}
+		favorites := make(map[string]struct{}, len(selected.FavoriteModels))
+		for _, model := range selected.FavoriteModels {
+			favorites[model] = struct{}{}
+		}
+		views := make([]OpenAIModelView, 0, len(models))
+		for _, model := range models {
+			_, favorite := favorites[model.ID]
+			views = append(views, OpenAIModelView{ID: model.ID, Name: model.DisplayName, Description: model.Description,
+				ContextLength: int(model.InputTokenLimit), MaxCompletionTokens: int(model.OutputTokenLimit),
+				// The native catalog does not authoritatively report Free Tier,
+				// function-calling, or modality support for the caller's project.
+				// Leave those capability flags unknown instead of inventing them.
+				Free: false, InputModalities: []string{"text"}, OutputModalities: []string{"text"}, Favorite: favorite})
+		}
+		return views, nil
 	}
 	client, err := openaiadapter.New(openaiadapter.Config{
 		BaseURL: selected.BaseURL, APIKey: secret, Model: selected.Model,
@@ -80,8 +107,8 @@ func (b *Bridge) SetProviderModelFavorite(input SetProviderModelFavoriteInput) (
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	provider, found := configuredProvider(b.config.Providers, providerID)
-	if !found || provider.Kind != config.ProviderOpenAICompatible {
-		return ProviderView{}, errors.New("OpenAI-compatible provider not found")
+	if !found || (provider.Kind != config.ProviderOpenAICompatible && provider.Kind != config.ProviderGoogleAIStudio) {
+		return ProviderView{}, errors.New("provider not found")
 	}
 	favorites := make([]string, 0, len(provider.FavoriteModels)+1)
 	seen := false

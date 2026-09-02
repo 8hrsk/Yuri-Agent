@@ -107,11 +107,11 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 			if consumeErr == nil && closeErr != nil {
 				consumeErr = closeErr
 			}
+			result.Steps = step
+			result.Usage = result.Usage.Add(usage)
 			if consumeErr != nil {
 				return r.fail(runCtx, input, result, consumeErr)
 			}
-			result.Steps = step
-			result.Usage = result.Usage.Add(usage)
 			result.ToolCalls = append(result.ToolCalls, calls...)
 			if budget.MaxTokens > 0 && result.Usage.TotalTokens > budget.MaxTokens {
 				return r.fail(runCtx, input, result, fmt.Errorf("%w: token limit %d exceeded", ErrBudgetExceeded, budget.MaxTokens))
@@ -142,11 +142,11 @@ func (r *Runtime) Run(ctx context.Context, input RunRequest) (RunResult, error) 
 		if err == nil && closeErr != nil {
 			err = closeErr
 		}
+		result.Steps = step
+		result.Usage = result.Usage.Add(usage)
 		if err != nil {
 			return r.fail(runCtx, input, result, err)
 		}
-		result.Steps = step
-		result.Usage = result.Usage.Add(usage)
 		if budget.MaxTokens > 0 && result.Usage.TotalTokens > budget.MaxTokens {
 			return r.fail(runCtx, input, result, fmt.Errorf("%w: token limit %d exceeded", ErrBudgetExceeded, budget.MaxTokens))
 		}
@@ -271,6 +271,9 @@ func (r *Runtime) consumeInteractiveStream(
 			if event.ToolName != "" {
 				builder.name = event.ToolName
 			}
+			if len(event.ToolCallProviderExtras) > 0 {
+				builder.providerExtras = append(builder.providerExtras[:0], event.ToolCallProviderExtras...)
+			}
 			if event.Type == ModelEventToolCallDelta {
 				builder.arguments += event.ArgumentsDelta
 			} else if event.Arguments != "" {
@@ -372,6 +375,9 @@ func (r *Runtime) consumeStream(ctx context.Context, input RunRequest, stream Mo
 			if event.ToolName != "" {
 				builder.name = event.ToolName
 			}
+			if len(event.ToolCallProviderExtras) > 0 {
+				builder.providerExtras = append(builder.providerExtras[:0], event.ToolCallProviderExtras...)
+			}
 			if event.Arguments != "" {
 				builder.arguments = event.Arguments
 			}
@@ -390,6 +396,9 @@ func (r *Runtime) consumeStream(ctx context.Context, input RunRequest, stream Mo
 			if event.ToolName != "" {
 				builder.name = event.ToolName
 			}
+			if len(event.ToolCallProviderExtras) > 0 {
+				builder.providerExtras = append(builder.providerExtras[:0], event.ToolCallProviderExtras...)
+			}
 			builder.arguments += event.ArgumentsDelta
 		case ModelEventToolCallDone:
 			wasKnown := false
@@ -404,6 +413,9 @@ func (r *Runtime) consumeStream(ctx context.Context, input RunRequest, stream Mo
 			}
 			if event.ToolName != "" {
 				builder.name = event.ToolName
+			}
+			if len(event.ToolCallProviderExtras) > 0 {
+				builder.providerExtras = append(builder.providerExtras[:0], event.ToolCallProviderExtras...)
 			}
 			if event.Arguments != "" {
 				builder.arguments = event.Arguments
@@ -437,9 +449,10 @@ func (r *Runtime) consumeStream(ctx context.Context, input RunRequest, stream Mo
 }
 
 type toolCallBuilder struct {
-	id        string
-	name      string
-	arguments string
+	id             string
+	name           string
+	arguments      string
+	providerExtras json.RawMessage
 }
 
 func (b *toolCallBuilder) call() ToolCall {
@@ -447,7 +460,10 @@ func (b *toolCallBuilder) call() ToolCall {
 	if arguments == "" {
 		arguments = "{}"
 	}
-	return ToolCall{ID: b.id, Name: b.name, Arguments: json.RawMessage(arguments)}
+	return ToolCall{
+		ID: b.id, Name: b.name, Arguments: json.RawMessage(arguments),
+		ProviderExtras: append(json.RawMessage(nil), b.providerExtras...),
+	}
 }
 
 func normalizeCallID(id string, ordinal int) string {

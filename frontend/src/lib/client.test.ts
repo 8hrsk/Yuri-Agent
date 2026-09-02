@@ -399,6 +399,41 @@ describe('Yuri client contract', () => {
     }
   })
 
+  it('saves Google AI Studio credentials with a Free Tier quota envelope', async () => {
+    const calls: Array<{ name: string; input: unknown }> = []
+    const bridge = {
+      ListConversations: () => [],
+      SaveGoogleAIStudioProviderCredential: (input: unknown) => { calls.push({ name: 'credential', input }); return { id: 'google-ai-studio' } },
+      ListOpenAIModels: (input: unknown) => {
+        calls.push({ name: 'models', input })
+        return [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', context_length: 1048576, input_modalities: ['text'], output_modalities: ['text'] }]
+      },
+    }
+
+    await withWindow({ go: { main: { Bridge: bridge } } }, async () => {
+      const client = createYuriClient()
+      const settings = {
+        kind: 'google-ai-studio' as const,
+        providerId: 'google-ai-studio', displayName: 'Google AI Studio',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/', model: '',
+        apiStyle: 'chat_completions' as const, apiKeyConfigured: false, favoriteModels: [], timeoutSeconds: 90, streamResponses: true,
+        quotaMode: 'free-tier' as const,
+        quotaProfile: { rpm: 10, tpm: 250000, rpd: 250, maxConcurrent: 1, safetyPercent: 80, interactiveReservePercent: 25 },
+      }
+
+      await expect(client.connectOpenAIProvider(settings, 'AIza-secret')).resolves.toEqual([
+        expect.objectContaining({ id: 'gemini-2.5-flash', contextLength: 1048576 }),
+      ])
+      expect(calls).toEqual([
+        { name: 'credential', input: {
+          id: 'google-ai-studio', displayName: 'Google AI Studio', baseUrl: settings.baseUrl, apiKey: 'AIza-secret', quotaMode: 'free-tier',
+          quotaProfile: { rpm: 10, tpm: 250000, rpd: 250, maxConcurrent: 1, safetyPercent: 80, interactiveReservePercent: 25 },
+        } },
+        { name: 'models', input: { providerId: 'google-ai-studio', sort: '' } },
+      ])
+    })
+  })
+
   it('normalizes and forwards named-agent roster methods through Wails', async () => {
     const calls: Array<{ name: string; args: unknown[] }> = []
     const wireAgent = {

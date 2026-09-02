@@ -29,6 +29,8 @@ func (b *Bridge) GetOnboardingState() OnboardingView {
 		switch provider.Kind {
 		case config.ProviderOpenAICompatible:
 			configured = provider.Model != "" && provider.CredentialRef != ""
+		case config.ProviderGoogleAIStudio:
+			configured = provider.Model != "" && provider.CredentialRef != ""
 		case config.ProviderCodexAppServer:
 			configured = true
 		}
@@ -151,6 +153,111 @@ func (b *Bridge) saveOpenAIProviderLocked(ctx context.Context, provider config.P
 	return providerView(provider), nil
 }
 
+// SaveGoogleAIStudioProvider persists a Gemini API key and the owner-selected
+// model/quota envelope. New Google providers default to free-tier pacing.
+func (b *Bridge) SaveGoogleAIStudioProvider(input SaveGoogleAIStudioProviderInput) (ProviderView, error) {
+	input.ID = strings.TrimSpace(input.ID)
+	if input.ID == "" {
+		input.ID = "google-ai-studio"
+	}
+	if strings.TrimSpace(input.DisplayName) == "" {
+		input.DisplayName = "Google AI Studio"
+	}
+	if strings.TrimSpace(input.BaseURL) == "" {
+		input.BaseURL = config.DefaultGoogleAIStudioBaseURL
+	}
+	if input.QuotaMode == "" {
+		input.QuotaMode = config.ProviderQuotaFreeTier
+	}
+	ctx, cancel := b.context()
+	defer cancel()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	existing, _ := configuredProvider(b.config.Providers, input.ID)
+	provider := config.ProviderConfig{
+		ID: input.ID, Kind: config.ProviderGoogleAIStudio, DisplayName: strings.TrimSpace(input.DisplayName),
+		BaseURL: strings.TrimSpace(input.BaseURL), Model: strings.TrimSpace(input.Model),
+		CredentialRef: "provider." + input.ID + ".api-key", QuotaMode: input.QuotaMode,
+		QuotaProfile: input.QuotaProfile, FavoriteModels: append([]string(nil), existing.FavoriteModels...), Enabled: input.Enabled,
+	}
+	return b.saveGoogleAIStudioProviderLocked(ctx, provider, input.APIKey)
+}
+
+// SaveGoogleAIStudioProviderCredential stores key/endpoint/quota metadata and
+// preserves an existing model and activation state.
+func (b *Bridge) SaveGoogleAIStudioProviderCredential(input SaveGoogleAIStudioProviderCredentialInput) (ProviderView, error) {
+	input.ID = strings.TrimSpace(input.ID)
+	if input.ID == "" {
+		input.ID = "google-ai-studio"
+	}
+	if strings.TrimSpace(input.DisplayName) == "" {
+		input.DisplayName = "Google AI Studio"
+	}
+	if strings.TrimSpace(input.BaseURL) == "" {
+		input.BaseURL = config.DefaultGoogleAIStudioBaseURL
+	}
+	ctx, cancel := b.context()
+	defer cancel()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	existing, found := configuredProvider(b.config.Providers, input.ID)
+	if found && existing.Kind != config.ProviderGoogleAIStudio {
+		return ProviderView{}, fmt.Errorf("provider %q is not Google AI Studio", input.ID)
+	}
+	if input.QuotaMode == "" {
+		if found && existing.QuotaMode != "" {
+			input.QuotaMode = existing.QuotaMode
+			input.QuotaProfile = existing.QuotaProfile
+		} else {
+			input.QuotaMode = config.ProviderQuotaFreeTier
+		}
+	}
+	provider := config.ProviderConfig{
+		ID: input.ID, Kind: config.ProviderGoogleAIStudio, DisplayName: strings.TrimSpace(input.DisplayName),
+		BaseURL: strings.TrimSpace(input.BaseURL), CredentialRef: "provider." + input.ID + ".api-key",
+		QuotaMode: input.QuotaMode, QuotaProfile: input.QuotaProfile,
+	}
+	if found {
+		provider.Model, provider.Enabled = existing.Model, existing.Enabled
+	}
+	return b.saveGoogleAIStudioProviderLocked(ctx, provider, input.APIKey)
+}
+
+func (b *Bridge) saveGoogleAIStudioProviderLocked(ctx context.Context, provider config.ProviderConfig, apiKey string) (ProviderView, error) {
+	candidate := b.config
+	if provider.Enabled {
+		candidate.Providers = disableProviders(candidate.Providers)
+	}
+	candidate.Providers = upsertProvider(candidate.Providers, provider)
+	if err := candidate.Validate(); err != nil {
+		return ProviderView{}, err
+	}
+	if b.keyring == nil {
+		return ProviderView{}, errors.New("system keyring is unavailable")
+	}
+	oldSecret, oldError := b.keyring.Get(ctx, provider.CredentialRef)
+	if apiKey == "" {
+		if oldError != nil {
+			return ProviderView{}, errors.New("API key is required for a new provider")
+		}
+	} else if err := b.keyring.Put(ctx, provider.CredentialRef, apiKey); err != nil {
+		return ProviderView{}, err
+	}
+	if err := config.Save(b.paths, candidate); err != nil {
+		if apiKey != "" {
+			if oldError == nil {
+				_ = b.keyring.Put(context.Background(), provider.CredentialRef, oldSecret)
+			} else {
+				_ = b.keyring.Delete(context.Background(), provider.CredentialRef)
+			}
+		}
+		return ProviderView{}, err
+	}
+	b.config = candidate
+	b.invalidateGoogleSlowModesLocked(provider.ID)
+	return providerView(provider), nil
+}
+
 func (b *Bridge) SaveCodexProvider(input SaveCodexProviderInput) (ProviderView, error) {
 	if strings.TrimSpace(input.ID) == "" {
 		input.ID = "codex"
@@ -231,6 +338,19 @@ func (b *Bridge) CompleteOnboarding(input CompleteOnboardingInput) OnboardingRes
 		}); err != nil {
 			return OnboardingResult{Message: safeError(err.Error()), State: b.GetOnboardingState()}
 		}
+	case config.ProviderGoogleAIStudio:
+		providerID := strings.TrimSpace(settings.ProviderID)
+		if providerID == "" {
+			providerID = "google-ai-studio"
+		}
+		if _, err := b.SaveGoogleAIStudioProvider(SaveGoogleAIStudioProviderInput{
+			ID: providerID, DisplayName: "Google AI Studio", BaseURL: settings.BaseURL,
+			Model: settings.Model, APIKey: input.APIKey, QuotaMode: settings.QuotaMode,
+			QuotaProfile: settings.QuotaProfile, Enabled: true,
+		}); err != nil {
+			return OnboardingResult{Message: safeError(err.Error()), State: b.GetOnboardingState()}
+		}
+		settings.ProviderID = providerID
 	case config.ProviderAntigravity:
 		status := antigravity.Status()
 		return OnboardingResult{

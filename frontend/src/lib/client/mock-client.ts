@@ -81,7 +81,7 @@ import {
 import { cloneConversation, clonePeerDialogue } from './normalize-conversation'
 import { emptyPluginInspection } from './normalize-plugins'
 import { makeId, nowIso, sleep } from './primitives'
-import { defaultLimits, defaultOnboardingState, defaultProactivitySettings, defaultSettings, defaultWebSearchSettings } from './settings'
+import { defaultLimits, defaultOnboardingState, defaultProactivitySettings, defaultSettings, defaultWebSearchSettings, googleAIStudioSettings } from './settings'
 
 function starterPeerRelationship(): PeerRelationshipDetail {
   const now = Date.now()
@@ -441,19 +441,28 @@ class MockYuriClient implements YuriClient {
       openAI: settings.kind === 'openai-compatible'
         ? { ...settings, apiKeyConfigured: settings.apiKeyConfigured || Boolean(apiKey?.trim()), favoriteModels: [...settings.favoriteModels] }
         : this.provider.openAI,
+      googleAIStudio: settings.kind === 'google-ai-studio'
+        ? { ...googleAIStudioSettings, ...settings, apiKeyConfigured: settings.apiKeyConfigured || Boolean(apiKey?.trim()), favoriteModels: [...settings.favoriteModels] }
+        : this.provider.googleAIStudio,
     }
   }
 
   async connectOpenAIProvider(settings: ProviderSettings, apiKey?: string): Promise<OpenAIModel[]> {
     const connected = { ...settings, apiKeyConfigured: settings.apiKeyConfigured || Boolean(apiKey?.trim()) }
     if (!connected.apiKeyConfigured) throw new Error('API key обязателен для загрузки каталога.')
+    if (settings.kind === 'google-ai-studio') {
+      this.provider = { ...this.provider, settings: connected, googleAIStudio: connected }
+      return this.getOpenAIModels(connected.providerId ?? 'google-ai-studio')
+    }
     this.provider = { ...this.provider, openAI: connected }
     return this.getOpenAIModels(connected.providerId ?? 'openrouter')
   }
 
-  async getOpenAIModels(_providerId: string, sort: OpenAIModelSort = ''): Promise<OpenAIModel[]> {
-    const favorites = new Set(this.provider.openAI?.favoriteModels ?? [])
+  async getOpenAIModels(providerId: string, sort: OpenAIModelSort = ''): Promise<OpenAIModel[]> {
+    const google = providerId === 'google-ai-studio' || this.provider.googleAIStudio?.providerId === providerId
+    const favorites = new Set((google ? this.provider.googleAIStudio?.favoriteModels : this.provider.openAI?.favoriteModels) ?? [])
     const models: OpenAIModel[] = [
+      ...(google ? [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Быстрая Gemini-модель с Free Tier.', contextLength: 1_048_576, maxCompletionTokens: 65_536, free: false, supportsTools: true, supportsToolsKnown: true, supportsVision: true, supportsVisionKnown: true, supportsStructuredOutput: true, supportsStructuredOutputKnown: true, supportsJSONSchema: true, supportsJSONSchemaKnown: true, inputModalities: ['text', 'image'], outputModalities: ['text'], favorite: favorites.has('gemini-2.5-flash') }] : []),
       { id: 'openai/gpt-4.1-mini', name: 'GPT-4.1 Mini', description: 'Быстрая универсальная модель.', contextLength: 1_047_576, maxCompletionTokens: 32_768, promptPrice: '0.0000004', completionPrice: '0.0000016', free: false, supportsTools: true, supportsToolsKnown: true, supportsVision: true, supportsVisionKnown: true, supportsStructuredOutput: true, supportsStructuredOutputKnown: true, supportsJSONSchema: true, supportsJSONSchemaKnown: true, inputModalities: ['text', 'image'], outputModalities: ['text'], favorite: favorites.has('openai/gpt-4.1-mini') },
       { id: 'openrouter/free', name: 'OpenRouter Free Models Router', description: 'Маршрутизатор по доступным бесплатным моделям.', contextLength: 200_000, maxCompletionTokens: 16_384, promptPrice: '0', completionPrice: '0', free: true, supportsTools: true, supportsToolsKnown: true, supportsVision: false, supportsVisionKnown: true, supportsStructuredOutput: true, supportsStructuredOutputKnown: true, supportsJSONSchema: true, supportsJSONSchemaKnown: true, inputModalities: ['text'], outputModalities: ['text'], favorite: favorites.has('openrouter/free') },
       { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4', description: 'Сильная модель для рассуждений и текста.', contextLength: 200_000, maxCompletionTokens: 64_000, promptPrice: '0.000003', completionPrice: '0.000015', free: false, supportsTools: true, supportsToolsKnown: true, supportsVision: true, supportsVisionKnown: true, supportsStructuredOutput: true, supportsStructuredOutputKnown: true, supportsJSONSchema: true, supportsJSONSchemaKnown: true, inputModalities: ['text', 'image'], outputModalities: ['text'], favorite: favorites.has('anthropic/claude-sonnet-4') },
@@ -465,11 +474,14 @@ class MockYuriClient implements YuriClient {
   }
 
   async setOpenAIModelFavorite(_providerId: string, model: string, favorite: boolean): Promise<void> {
-    const settings = this.provider.openAI ?? { ...defaultSettings }
+    const isGoogle = _providerId === 'google-ai-studio' || this.provider.googleAIStudio?.providerId === _providerId
+    const settings = (isGoogle ? this.provider.googleAIStudio : this.provider.openAI) ?? { ...defaultSettings }
     const favorites = new Set(settings.favoriteModels)
     if (favorite) favorites.add(model)
     else favorites.delete(model)
-    this.provider = { ...this.provider, openAI: { ...settings, favoriteModels: [...favorites] } }
+    this.provider = isGoogle
+      ? { ...this.provider, googleAIStudio: { ...settings, favoriteModels: [...favorites] } }
+      : { ...this.provider, openAI: { ...settings, favoriteModels: [...favorites] } }
   }
 
   async getRunUsageStats(input: RunUsageStatsInput = {}): Promise<RunUsageStats> {

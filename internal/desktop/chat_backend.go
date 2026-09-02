@@ -11,6 +11,7 @@ import (
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 	"github.com/OrdoAI/yuri-agent/internal/providers/antigravity"
 	"github.com/OrdoAI/yuri-agent/internal/providers/codexapp"
+	googleaistudio "github.com/OrdoAI/yuri-agent/internal/providers/googleaistudio"
 	openaiadapter "github.com/OrdoAI/yuri-agent/internal/providers/openai"
 	"github.com/OrdoAI/yuri-agent/internal/security"
 )
@@ -113,10 +114,10 @@ func (b *Bridge) validateAgentModelRoute(providerID, model string) error {
 	if provider.Kind == config.ProviderAntigravity {
 		return antigravity.NewUnsupportedAuthModeError()
 	}
-	if provider.Kind == config.ProviderOpenAICompatible && model == "" && strings.TrimSpace(provider.Model) == "" {
-		return fmt.Errorf("%w: an OpenAI-compatible agent route requires a model", domain.ErrInvalidArgument)
+	if (provider.Kind == config.ProviderOpenAICompatible || provider.Kind == config.ProviderGoogleAIStudio) && model == "" && strings.TrimSpace(provider.Model) == "" {
+		return fmt.Errorf("%w: provider route requires a model", domain.ErrInvalidArgument)
 	}
-	if provider.Kind != config.ProviderOpenAICompatible && provider.Kind != config.ProviderCodexAppServer {
+	if provider.Kind != config.ProviderOpenAICompatible && provider.Kind != config.ProviderGoogleAIStudio && provider.Kind != config.ProviderCodexAppServer {
 		return fmt.Errorf("%w: unsupported provider kind %q", domain.ErrInvalidArgument, provider.Kind)
 	}
 	return nil
@@ -157,6 +158,20 @@ func (b *Bridge) chatBackendForRoute(ctx context.Context, providerID, modelOverr
 			return nil, "", err
 		}
 		return client, model, nil
+	case config.ProviderGoogleAIStudio:
+		secret, err := b.keyring.Get(ctx, selected.CredentialRef)
+		if err != nil {
+			return nil, "", errors.New("provider credential is unavailable in the system keyring")
+		}
+		client, err := b.newGoogleAIStudioClient(googleaistudio.Config{APIKey: secret, Model: model})
+		if err != nil {
+			return nil, "", err
+		}
+		backend, err := b.googleBackendWithSlowMode(ctx, *selected, model, client)
+		if err != nil {
+			return nil, "", err
+		}
+		return backend, model, nil
 	case config.ProviderCodexAppServer:
 		client, err := b.ensureCodex(ctx)
 		if err != nil {

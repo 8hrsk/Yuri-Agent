@@ -62,28 +62,57 @@ type ProviderKind string
 
 type ProviderAPIStyle string
 
+// ProviderQuotaMode controls local admission for providers whose upstream
+// project quota is shared by several callers. Empty is treated as off for
+// backwards compatibility. The Google AI Studio provider uses free-tier as
+// its conservative default in the UI, but the backend never invents a quota
+// ceiling when the owner has not entered one.
+type ProviderQuotaMode string
+
 const (
 	ProviderOpenAICompatible ProviderKind = "openai-compatible"
 	ProviderCodexAppServer   ProviderKind = "codex-app-server"
 	ProviderAntigravity      ProviderKind = "antigravity"
+	ProviderGoogleAIStudio   ProviderKind = "google-ai-studio"
+
+	ProviderQuotaOff      ProviderQuotaMode = "off"
+	ProviderQuotaFreeTier ProviderQuotaMode = "free-tier"
+	ProviderQuotaCustom   ProviderQuotaMode = "custom"
 
 	ProviderAPIStyleResponses       ProviderAPIStyle = "responses"
 	ProviderAPIStyleChatCompletions ProviderAPIStyle = "chat_completions"
 )
 
+const DefaultGoogleAIStudioBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+// ProviderQuotaProfile is a local pacing envelope. A zero RPM/TPM/RPD value
+// means that the corresponding upstream ceiling is unknown, not unlimited.
+// The slow-mode coordinator owns runtime accounting; this type only carries
+// durable owner settings across the config/desktop/frontend boundary.
+type ProviderQuotaProfile struct {
+	RPM                       int `json:"rpm,omitempty"`
+	TPM                       int `json:"tpm,omitempty"`
+	RPD                       int `json:"rpd,omitempty"`
+	MaxConcurrent             int `json:"max_concurrent,omitempty"`
+	SafetyPercent             int `json:"safety_percent,omitempty"`
+	InteractiveReservePercent int `json:"interactive_reserve_percent,omitempty"`
+}
+
 // ProviderConfig contains only non-secret metadata. CredentialRef addresses
 // a system-keyring item and is never an API key itself.
 type ProviderConfig struct {
-	ID             string           `json:"id"`
-	Kind           ProviderKind     `json:"kind"`
-	DisplayName    string           `json:"display_name"`
-	BaseURL        string           `json:"base_url,omitempty"`
-	Model          string           `json:"model,omitempty"`
-	APIStyle       ProviderAPIStyle `json:"api_style,omitempty"`
-	FavoriteModels []string         `json:"favorite_models,omitempty"`
-	CredentialRef  string           `json:"credential_ref,omitempty"`
-	Binary         string           `json:"binary,omitempty"`
-	Enabled        bool             `json:"enabled"`
+	ID             string               `json:"id"`
+	Kind           ProviderKind         `json:"kind"`
+	DisplayName    string               `json:"display_name"`
+	BaseURL        string               `json:"base_url,omitempty"`
+	Model          string               `json:"model,omitempty"`
+	APIStyle       ProviderAPIStyle     `json:"api_style,omitempty"`
+	FavoriteModels []string             `json:"favorite_models,omitempty"`
+	CredentialRef  string               `json:"credential_ref,omitempty"`
+	Binary         string               `json:"binary,omitempty"`
+	Enabled        bool                 `json:"enabled"`
+	QuotaMode      ProviderQuotaMode    `json:"quota_mode,omitempty"`
+	QuotaProfile   ProviderQuotaProfile `json:"quota_profile,omitempty"`
 }
 
 type VoiceConfig struct {
@@ -410,12 +439,46 @@ func (c Config) Validate() error {
 			if err := validateRemoteURL(provider.BaseURL); err != nil {
 				return fmt.Errorf("provider %q: %w", provider.ID, err)
 			}
+			if provider.QuotaMode != "" {
+				return fmt.Errorf("provider %q: quota mode is only supported by google-ai-studio", provider.ID)
+			}
 		case ProviderCodexAppServer:
 			if provider.CredentialRef != "" {
 				return fmt.Errorf("provider %q must not configure a credential_ref", provider.ID)
 			}
+			if provider.QuotaMode != "" {
+				return fmt.Errorf("provider %q: quota mode is only supported by google-ai-studio", provider.ID)
+			}
 		case ProviderAntigravity:
 			return fmt.Errorf("provider %q cannot be persisted: Antigravity OAuth is unavailable without an official integration contract", provider.ID)
+		case ProviderGoogleAIStudio:
+			if provider.CredentialRef == "" {
+				return fmt.Errorf("provider %q requires credential_ref", provider.ID)
+			}
+			if provider.Enabled && strings.TrimSpace(provider.Model) == "" {
+				return fmt.Errorf("enabled provider %q requires model", provider.ID)
+			}
+			if err := validateRemoteURL(provider.BaseURL); err != nil {
+				return fmt.Errorf("provider %q: %w", provider.ID, err)
+			}
+			if strings.TrimRight(provider.BaseURL, "/") != strings.TrimRight(DefaultGoogleAIStudioBaseURL, "/") {
+				return fmt.Errorf("provider %q: Google AI Studio base_url must use the documented endpoint", provider.ID)
+			}
+			if provider.APIStyle != "" && provider.APIStyle != ProviderAPIStyleChatCompletions {
+				return fmt.Errorf("provider %q: Google AI Studio requires chat_completions API style", provider.ID)
+			}
+			if err := provider.QuotaProfile.Validate(); err != nil {
+				return fmt.Errorf("provider %q: %w", provider.ID, err)
+			}
+			switch provider.QuotaMode {
+			case "", ProviderQuotaOff, ProviderQuotaFreeTier, ProviderQuotaCustom:
+			default:
+				return fmt.Errorf("provider %q has unsupported quota mode %q", provider.ID, provider.QuotaMode)
+			}
+			if provider.QuotaMode == ProviderQuotaCustom &&
+				(provider.QuotaProfile.RPM <= 0 && provider.QuotaProfile.TPM <= 0 && provider.QuotaProfile.RPD <= 0 || provider.QuotaProfile.MaxConcurrent <= 0) {
+				return fmt.Errorf("provider %q custom quota requires a known limit and max_concurrent > 0", provider.ID)
+			}
 		default:
 			return fmt.Errorf("provider %q has unsupported kind %q", provider.ID, provider.Kind)
 		}
@@ -434,6 +497,19 @@ func (c Config) Validate() error {
 	}
 	if err := c.Onboarding.Validate(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (p ProviderQuotaProfile) Validate() error {
+	if p.RPM < 0 || p.TPM < 0 || p.RPD < 0 || p.MaxConcurrent < 0 {
+		return errors.New("quota limits must be zero or positive")
+	}
+	if p.SafetyPercent < 0 || p.SafetyPercent > 100 {
+		return errors.New("quota safety_percent must be between 0 and 100")
+	}
+	if p.InteractiveReservePercent < 0 || p.InteractiveReservePercent > 99 {
+		return errors.New("quota interactive_reserve_percent must be between 0 and 99")
 	}
 	return nil
 }

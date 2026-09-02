@@ -13,6 +13,7 @@ import (
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 	"github.com/OrdoAI/yuri-agent/internal/executionbudget"
 	"github.com/OrdoAI/yuri-agent/internal/memory"
+	"github.com/OrdoAI/yuri-agent/internal/slowmode"
 	storage "github.com/OrdoAI/yuri-agent/internal/storage/sqlite"
 )
 
@@ -278,7 +279,10 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
 
-	modelRequest := agent.ModelRequest{Model: model, Messages: snapshot.Messages, ToolChoice: toolChoice, MaxOutputTokens: resolvedBudget.MaxOutputTokensPerStep}
+	modelRequest := agent.ModelRequest{
+		Model: model, Messages: snapshot.Messages, ToolChoice: toolChoice, MaxOutputTokens: resolvedBudget.MaxOutputTokensPerStep,
+		Metadata: map[string]string{slowmode.MetadataPriorityKey: slowModePriorityForRunKind(runKind)},
+	}
 	attemptSink := newPreOutputAttemptSink(emitter.Sink)
 	runtimeSink := agent.EventSink(attemptSink.Sink)
 	if runStartedEmitted {

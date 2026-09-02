@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
-import { openRouterSettings } from '../lib/client/settings'
+import { googleAIStudioSettings, openRouterSettings } from '../lib/client/settings'
 import type { CodexAccount, CodexModel, OpenAIModel, OpenAIModelSort, ProviderSettings, RunUsageStats, UsageLimits, WebSearchSettings } from '../lib/contracts'
 import { EncryptedBackupCard } from './EncryptedBackupCard'
 import { Icon } from './Icon'
@@ -53,6 +53,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
   const client = useMemo(() => createYuriClient(), [])
   const [settings, setSettings] = useState<ProviderSettings>(initialSettings)
   const [openAISettings, setOpenAISettings] = useState<ProviderSettings>(openRouterSettings)
+  const [googleSettings, setGoogleSettings] = useState<ProviderSettings>(googleAIStudioSettings)
   const [openAIModels, setOpenAIModels] = useState<OpenAIModel[]>([])
   const [modelSort, setModelSort] = useState<OpenAIModelSort>('')
   const [loadingModels, setLoadingModels] = useState(false)
@@ -81,6 +82,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
       if (!mounted) return
       setSettings(snapshot.settings)
       setOpenAISettings(snapshot.openAI ?? openRouterSettings)
+      setGoogleSettings(snapshot.googleAIStudio ?? googleAIStudioSettings)
       setCodex(snapshot.codex)
       setLimits(snapshot.codex.limits)
       setAllowedDirectories(directories.join('\n'))
@@ -118,6 +120,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
     setSettings((current) => {
       const next = { ...current, [key]: value }
       if (next.kind === 'openai-compatible') setOpenAISettings(next)
+      if (next.kind === 'google-ai-studio') setGoogleSettings(next)
       return next
     })
     setFeedback(undefined)
@@ -132,6 +135,13 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
     const configured = openAISettings.providerId === 'openrouter' ? openAISettings : openRouterSettings
     setSettings(configured)
     setOpenAISettings(configured)
+    setOpenAIModels([])
+    setApiKey('')
+    setFeedback(undefined)
+  }
+
+  const selectGoogleAIStudio = () => {
+    setSettings(googleSettings)
     setOpenAIModels([])
     setApiKey('')
     setFeedback(undefined)
@@ -159,7 +169,8 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
       const models = await client.connectOpenAIProvider(settings, apiKey.trim() || undefined)
       const connected = { ...settings, apiKeyConfigured: true }
       setSettings(connected)
-      setOpenAISettings(connected)
+      if (connected.kind === 'google-ai-studio') setGoogleSettings(connected)
+      else setOpenAISettings(connected)
       setOpenAIModels(models)
       setApiKey('')
       setFeedback({ kind: 'success', text: `Ключ сохранён в системном keyring. Доступно моделей: ${models.length}.` })
@@ -180,7 +191,8 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
         if (favorite) favorites.add(model.id)
         else favorites.delete(model.id)
         const next = { ...current, favoriteModels: [...favorites] }
-        setOpenAISettings(next)
+        if (next.kind === 'google-ai-studio') setGoogleSettings(next)
+        else setOpenAISettings(next)
         return next
       })
     } catch (cause) {
@@ -198,6 +210,7 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
       setSettings((current) => {
         const next = { ...current, apiKeyConfigured: current.apiKeyConfigured || Boolean(apiKey.trim()) }
         if (next.kind === 'openai-compatible') setOpenAISettings(next)
+        if (next.kind === 'google-ai-studio') setGoogleSettings(next)
         return next
       })
       setApiKey('')
@@ -303,6 +316,9 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
         <button aria-selected={settings.kind === 'codex-app-server'} className={settings.kind === 'codex-app-server' ? 'provider-tab provider-tab--active' : 'provider-tab'} onClick={() => setSettings((current) => ({ ...current, kind: 'codex-app-server', model: current.kind === 'codex-app-server' ? current.model : '' }))} role="tab" type="button">
           <span className="provider-tab__logo provider-tab__logo--codex">C</span><span><strong>Codex App Server</strong><small>ChatGPT OAuth · work limits</small></span>
         </button>
+        <button aria-selected={settings.kind === 'google-ai-studio'} className={settings.kind === 'google-ai-studio' ? 'provider-tab provider-tab--active' : 'provider-tab'} onClick={selectGoogleAIStudio} role="tab" type="button">
+          <span className="provider-tab__logo">G</span><span><strong>Google AI Studio</strong><small>Gemini API key · Free Tier slow mode</small></span>
+        </button>
         <button aria-selected={settings.kind === 'antigravity'} className={settings.kind === 'antigravity' ? 'provider-tab provider-tab--active' : 'provider-tab'} onClick={() => updateSettings('kind', 'antigravity')} role="tab" type="button">
           <span className="provider-tab__logo">A</span><span><strong>Antigravity</strong><small>OAuth unavailable</small></span>
         </button>
@@ -313,21 +329,22 @@ export function ProviderSettingsView({ onBackToChat }: ProviderSettingsViewProps
         <div className="settings-grid">
           <section aria-labelledby="provider-form-title" className="settings-card">
             <div className="settings-card__heading">
-              <div><span className="section-heading__overline">Endpoint</span><h2 id="provider-form-title">{settings.kind === 'openai-compatible' ? 'OpenAI-compatible API' : settings.kind === 'codex-app-server' ? 'Codex App Server' : 'Antigravity'}</h2></div>
+              <div><span className="section-heading__overline">Endpoint</span><h2 id="provider-form-title">{settings.kind === 'openai-compatible' ? 'OpenAI-compatible API' : settings.kind === 'google-ai-studio' ? 'Google AI Studio API' : settings.kind === 'codex-app-server' ? 'Codex App Server' : 'Antigravity'}</h2></div>
               <span className={`settings-status settings-status--${settings.kind === 'antigravity' || (settings.kind === 'codex-app-server' && !codex.connected) ? 'off' : 'on'}`}><i /> {settings.kind === 'antigravity' ? 'unsupported auth mode' : settings.kind === 'codex-app-server' ? (codex.connected ? 'account connected' : 'account required') : (settings.apiKeyConfigured ? 'key configured' : 'key not configured')}</span>
             </div>
-            {settings.kind === 'openai-compatible' ? (
+            {settings.kind === 'openai-compatible' || settings.kind === 'google-ai-studio' ? (
               <div className="settings-form">
-                <div className="openrouter-setup">
+                {settings.kind === 'openai-compatible' && <div className="openrouter-setup">
                   <div className="openrouter-setup__heading"><span><strong>OpenRouter</strong><br /><small>OpenAI-compatible Chat Completions · каталог моделей</small></span><span className={`settings-status settings-status--${settings.providerId === 'openrouter' ? 'on' : 'off'}`}><i /> {settings.providerId === 'openrouter' ? 'selected' : 'preset'}</span></div>
                   <div className="openrouter-setup__actions"><button className="button button--quiet" onClick={selectOpenRouter} type="button">Использовать OpenRouter</button></div>
-                </div>
-                <label><span>Base URL</span><input onChange={(event) => updateSettings('baseUrl', event.target.value)} spellCheck={false} type="url" value={settings.baseUrl} /></label>
-                <label><span>API style</span><select onChange={(event) => updateSettings('apiStyle', event.target.value as ProviderSettings['apiStyle'])} value={settings.apiStyle}><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
-                <label><span>API key <small>{settings.apiKeyConfigured ? '· сохранён в keyring' : '· не задан'}</small></span><input autoComplete="new-password" onChange={(event) => setApiKey(event.target.value)} placeholder={settings.apiKeyConfigured ? 'Оставьте пустым, чтобы сохранить текущий' : 'sk-or-v1-…'} type="password" value={apiKey} /></label>
+                </div>}
+                <label><span>Base URL</span><input disabled={settings.kind === 'google-ai-studio'} onChange={(event) => updateSettings('baseUrl', event.target.value)} spellCheck={false} type="url" value={settings.baseUrl} /></label>
+                <label><span>API style</span><select disabled={settings.kind === 'google-ai-studio'} onChange={(event) => updateSettings('apiStyle', event.target.value as ProviderSettings['apiStyle'])} value={settings.apiStyle}><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
+                <label><span>API key <small>{settings.apiKeyConfigured ? '· сохранён в keyring' : '· не задан'}</small></span><input autoComplete="new-password" onChange={(event) => setApiKey(event.target.value)} placeholder={settings.apiKeyConfigured ? 'Оставьте пустым, чтобы сохранить текущий' : settings.kind === 'google-ai-studio' ? 'AIza…' : 'sk-or-v1-…'} type="password" value={apiKey} /></label>
                 <button className="button button--quiet button--wide" disabled={loadingModels || (!apiKey.trim() && !settings.apiKeyConfigured)} onClick={() => void handleConnectOpenAI()} type="button"><Icon name="lock" width={14} height={14} /> {loadingModels ? 'Загружаю модели…' : settings.apiKeyConfigured ? 'Обновить ключ и каталог моделей' : 'Сохранить ключ и загрузить модели'}</button>
                 {(settings.apiKeyConfigured || openAIModels.length > 0) && <OpenAIModelPicker loading={loadingModels} models={openAIModels} onReload={(sort) => void handleLoadOpenAIModels(sort)} onSelect={(model) => updateSettings('model', model)} onToggleFavorite={(model) => void handleToggleModelFavorite(model)} sort={modelSort} value={settings.model} />}
-                <label><span>Model <small>· выбран из каталога или введён вручную</small></span><input onChange={(event) => updateSettings('model', event.target.value)} placeholder="openai/gpt-4.1-mini" spellCheck={false} value={settings.model} /></label>
+                <label><span>Model <small>· выбран из каталога или введён вручную</small></span><input onChange={(event) => updateSettings('model', event.target.value)} placeholder={settings.kind === 'google-ai-studio' ? 'gemini-2.5-flash' : 'openai/gpt-4.1-mini'} spellCheck={false} value={settings.model} /></label>
+                {settings.kind === 'google-ai-studio' && <section aria-label="Локальные лимиты Google AI Studio" className="settings-form__quota"><label><span>Quota mode</span><select onChange={(event) => updateSettings('quotaMode', event.target.value as ProviderSettings['quotaMode'])} value={settings.quotaMode ?? 'free-tier'}><option value="free-tier">Free Tier · slow mode</option><option value="custom">Custom limits</option><option value="off">Off</option></select></label><div className="settings-form__row"><label><span>RPM</span><input min={0} onChange={(event) => updateSettings('quotaProfile', { ...settings.quotaProfile, rpm: Number(event.target.value) || 0 })} type="number" value={settings.quotaProfile?.rpm ?? 0} /></label><label><span>TPM</span><input min={0} onChange={(event) => updateSettings('quotaProfile', { ...settings.quotaProfile, tpm: Number(event.target.value) || 0 })} type="number" value={settings.quotaProfile?.tpm ?? 0} /></label><label><span>RPD</span><input min={0} onChange={(event) => updateSettings('quotaProfile', { ...settings.quotaProfile, rpd: Number(event.target.value) || 0 })} type="number" value={settings.quotaProfile?.rpd ?? 0} /></label></div><small>Нули означают «неизвестно»; Free Tier использует single-flight и не притворяется точным остатком квоты.</small></section>}
                 <div className="settings-form__row">
                   <label><span>Timeout, sec</span><input inputMode="numeric" max={600} min={5} onChange={(event) => updateSettings('timeoutSeconds', Number(event.target.value) || 90)} type="number" value={settings.timeoutSeconds} /></label>
                   <label className="toggle-label"><span>Stream responses</span><button aria-checked={settings.streamResponses} className={`toggle${settings.streamResponses ? ' toggle--on' : ''}`} onClick={() => updateSettings('streamResponses', !settings.streamResponses)} role="switch" type="button"><i /></button></label>

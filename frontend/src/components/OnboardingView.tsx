@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { createYuriClient } from '../lib/client'
-import { openRouterSettings } from '../lib/client/settings'
+import { googleAIStudioSettings, openRouterSettings } from '../lib/client/settings'
 import { clearAgentDraft, loadAgentDraft, newAgentDraft } from '../lib/agents'
 import { isOnboardingComplete, onboardingStepIndex, onboardingSteps, validateOnboardingProvider, type OnboardingStep } from '../lib/onboarding'
 import type { AgentProfileInput, CodexAccount, CodexModel, OpenAIModel, OpenAIModelSort, ProviderSettings, YuriClient } from '../lib/contracts'
@@ -48,6 +48,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
   const [step, setStep] = useState<OnboardingStep>('welcome')
   const [settings, setSettings] = useState<ProviderSettings>(defaultSettings)
   const [openAISettings, setOpenAISettings] = useState<ProviderSettings>(defaultSettings)
+  const [googleSettings, setGoogleSettings] = useState<ProviderSettings>(googleAIStudioSettings)
   const [openAIModels, setOpenAIModels] = useState<OpenAIModel[]>([])
   const [modelSort, setModelSort] = useState<OpenAIModelSort>('')
   const [loadingModels, setLoadingModels] = useState(false)
@@ -70,6 +71,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
       ])
       setSettings(snapshot.settings)
       setOpenAISettings(snapshot.openAI ?? defaultSettings)
+      setGoogleSettings(snapshot.googleAIStudio ?? googleAIStudioSettings)
       setCodex(snapshot.codex)
       setCodexModels(snapshot.codex.connected ? await client.getCodexModels().catch(() => []) : [])
       if (isOnboardingComplete(onboarding)) {
@@ -92,6 +94,7 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
     setSettings((current) => {
       const next = { ...current, [key]: value }
       if (next.kind === 'openai-compatible') setOpenAISettings(next)
+      if (next.kind === 'google-ai-studio') setGoogleSettings(next)
       return next
     })
     setFeedback(undefined)
@@ -104,7 +107,8 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
       const models = await client.connectOpenAIProvider(settings, apiKey.trim() || undefined)
       const connected = { ...settings, apiKeyConfigured: true }
       setSettings(connected)
-      setOpenAISettings(connected)
+      if (connected.kind === 'google-ai-studio') setGoogleSettings(connected)
+      else setOpenAISettings(connected)
       setOpenAIModels(models)
       setApiKey('')
       setFeedback({ kind: 'success', text: `Ключ сохранён в системном keyring. Выберите одну из ${models.length} моделей.` })
@@ -271,17 +275,19 @@ export function OnboardingView({ client: providedClient, onComplete }: Onboardin
                     <div aria-label="Выбор провайдера" className="onboarding-provider-tabs" role="tablist">
                       <button aria-selected={settings.kind === 'openai-compatible'} className={settings.kind === 'openai-compatible' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => { setSettings(openAISettings); setFeedback(undefined) }} role="tab" type="button"><span className="provider-tab__logo">O</span><span><strong>OpenAI-compatible</strong><small>OpenRouter · API key</small></span></button>
                       <button aria-selected={settings.kind === 'codex-app-server'} className={settings.kind === 'codex-app-server' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => setSettings((current) => ({ ...current, kind: 'codex-app-server', model: current.kind === 'codex-app-server' ? current.model : '' }))} role="tab" type="button"><span className="provider-tab__logo provider-tab__logo--codex">C</span><span><strong>Codex App Server</strong><small>ChatGPT OAuth</small></span></button>
+                      <button aria-selected={settings.kind === 'google-ai-studio'} className={settings.kind === 'google-ai-studio' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => { setSettings(googleSettings); setFeedback(undefined) }} role="tab" type="button"><span className="provider-tab__logo">G</span><span><strong>Google AI Studio</strong><small>Gemini API key · Free Tier</small></span></button>
                       <button aria-selected={settings.kind === 'antigravity'} className={settings.kind === 'antigravity' ? 'onboarding-provider-tab onboarding-provider-tab--active' : 'onboarding-provider-tab'} onClick={() => updateSettings('kind', 'antigravity')} role="tab" type="button"><span className="provider-tab__logo">A</span><span><strong>Antigravity</strong><small>OAuth unavailable</small></span></button>
                     </div>
-                    {settings.kind === 'openai-compatible' ? (
+                    {settings.kind === 'openai-compatible' || settings.kind === 'google-ai-studio' ? (
                       <>
-                        <p className="onboarding-panel__hint">OpenRouter использует OpenAI-compatible Chat Completions API. Ключ передаётся только в защищённый provider bridge и сохраняется в системном keyring.</p>
+                        <p className="onboarding-panel__hint">{settings.kind === 'google-ai-studio' ? 'Google AI Studio использует Gemini OpenAI-compatible endpoint. Ключ передаётся только в защищённый provider bridge и сохраняется в системном keyring; Free Tier запросы сериализуются slow mode.' : 'OpenRouter использует OpenAI-compatible Chat Completions API. Ключ передаётся только в защищённый provider bridge и сохраняется в системном keyring.'}</p>
                         <form className="onboarding-form" onSubmit={(event) => { event.preventDefault(); void handleProbe() }}>
-                          <label htmlFor="onboarding-base-url"><span>Base URL</span><input autoComplete="url" id="onboarding-base-url" onChange={(event) => updateSettings('baseUrl', event.target.value)} spellCheck={false} type="url" value={settings.baseUrl} /></label>
-                          <label htmlFor="onboarding-api-key"><span>API key <small>{settings.apiKeyConfigured ? '· сохранён в keyring' : '· обязателен для каталога'}</small></span><input autoComplete="new-password" id="onboarding-api-key" onChange={(event) => setApiKey(event.target.value)} placeholder={settings.apiKeyConfigured ? 'Оставьте пустым, чтобы сохранить текущий' : 'sk-or-v1-…'} type="password" value={apiKey} /></label>
+                          <label htmlFor="onboarding-base-url"><span>Base URL</span><input autoComplete="url" disabled={settings.kind === 'google-ai-studio'} id="onboarding-base-url" onChange={(event) => updateSettings('baseUrl', event.target.value)} spellCheck={false} type="url" value={settings.baseUrl} /></label>
+                          <label htmlFor="onboarding-api-key"><span>API key <small>{settings.apiKeyConfigured ? '· сохранён в keyring' : '· обязателен для каталога'}</small></span><input autoComplete="new-password" id="onboarding-api-key" onChange={(event) => setApiKey(event.target.value)} placeholder={settings.apiKeyConfigured ? 'Оставьте пустым, чтобы сохранить текущий' : settings.kind === 'google-ai-studio' ? 'AIza…' : 'sk-or-v1-…'} type="password" value={apiKey} /></label>
                           <button className="button button--quiet button--wide" disabled={loadingModels || (!apiKey.trim() && !settings.apiKeyConfigured)} onClick={() => void handleConnectOpenAI()} type="button"><Icon name="lock" width={14} height={14} /> {loadingModels ? 'Загружаю модели…' : 'Сохранить ключ и загрузить модели'}</button>
                           {(settings.apiKeyConfigured || openAIModels.length > 0) && <OpenAIModelPicker loading={loadingModels} models={openAIModels} onReload={(sort) => void handleLoadOpenAIModels(sort)} onSelect={(model) => updateSettings('model', model)} onToggleFavorite={(model) => void handleToggleModelFavorite(model)} sort={modelSort} value={settings.model} />}
-                          <label htmlFor="onboarding-model"><span>Model <small>· из каталога или вручную</small></span><input autoComplete="off" id="onboarding-model" onChange={(event) => updateSettings('model', event.target.value)} placeholder="openai/gpt-4.1-mini" spellCheck={false} value={settings.model} /></label>
+                          <label htmlFor="onboarding-model"><span>Model <small>· из каталога или вручную</small></span><input autoComplete="off" id="onboarding-model" onChange={(event) => updateSettings('model', event.target.value)} placeholder={settings.kind === 'google-ai-studio' ? 'gemini-2.5-flash' : 'openai/gpt-4.1-mini'} spellCheck={false} value={settings.model} /></label>
+                          {settings.kind === 'google-ai-studio' && <label><span>Quota mode</span><select onChange={(event) => updateSettings('quotaMode', event.target.value as ProviderSettings['quotaMode'])} value={settings.quotaMode ?? 'free-tier'}><option value="free-tier">Free Tier · slow mode</option><option value="custom">Custom limits</option><option value="off">Off</option></select></label>}
                           <div className="onboarding-form__actions"><button className="button button--accent" disabled={busy === 'testing' || busy === 'oauth'} type="submit">{busy === 'testing' ? 'Сохраняю и проверяю…' : 'Сохранить и проверить'} <Icon name="arrow-up" width={14} height={14} /></button></div>
                         </form>
                       </>

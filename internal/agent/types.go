@@ -100,6 +100,11 @@ type ToolCall struct {
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
+	// ProviderExtras carries opaque, provider-issued tool-call metadata that
+	// must be echoed on a continuation request. It is deliberately excluded
+	// from Yuri's public/event JSON and is never interpreted by the runtime.
+	// Gemini 3 thought signatures are the first such use.
+	ProviderExtras json.RawMessage `json:"-"`
 }
 
 func (c ToolCall) Valid() bool {
@@ -276,8 +281,12 @@ type ModelEvent struct {
 	ToolName       string         `json:"tool_name,omitempty"`
 	Arguments      string         `json:"arguments,omitempty"`
 	ArgumentsDelta string         `json:"arguments_delta,omitempty"`
-	FinishReason   string         `json:"finish_reason,omitempty"`
-	Usage          Usage          `json:"usage,omitempty"`
+	// ToolCallProviderExtras is an opaque transport continuation token. The
+	// runtime keeps it attached to the tool call without exposing it as model
+	// reasoning or sending it to the desktop event stream.
+	ToolCallProviderExtras json.RawMessage `json:"-"`
+	FinishReason           string          `json:"finish_reason,omitempty"`
+	Usage                  Usage           `json:"usage,omitempty"`
 }
 
 // ModelStream is intentionally small so an official harness adapter can

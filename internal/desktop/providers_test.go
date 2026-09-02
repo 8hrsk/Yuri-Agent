@@ -20,6 +20,7 @@ import (
 	"github.com/OrdoAI/yuri-agent/internal/config"
 	"github.com/OrdoAI/yuri-agent/internal/providers/antigravity"
 	"github.com/OrdoAI/yuri-agent/internal/providers/codexapp"
+	googleaistudio "github.com/OrdoAI/yuri-agent/internal/providers/googleaistudio"
 	securitykeyring "github.com/OrdoAI/yuri-agent/internal/security/keyring"
 )
 
@@ -70,6 +71,72 @@ func TestSaveOpenAIProviderKeepsSecretOutOfConfig(t *testing.T) {
 	}
 	if strings.Contains(string(content), "sk-super-secret") {
 		t.Fatal("config leaked API key")
+	}
+}
+
+func TestSaveGoogleAIStudioProviderUsesFreeTierDefaultsAndKeyring(t *testing.T) {
+	paths := providerTestPaths(t)
+	backend := &providerTestKeyring{values: make(map[string]string)}
+	store, err := securitykeyring.NewWithBackend("test.google-ai-studio", backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge := &Bridge{paths: paths, config: config.Default(paths), keyring: store}
+	view, err := bridge.SaveGoogleAIStudioProvider(SaveGoogleAIStudioProviderInput{Model: "gemini-2.5-flash", APIKey: "AIza-secret", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Kind != config.ProviderGoogleAIStudio || view.QuotaMode != config.ProviderQuotaFreeTier || !view.HasSecret {
+		t.Fatalf("Google provider view = %#v", view)
+	}
+	if _, ok := backend.values["test.google-ai-studio:provider.google-ai-studio.api-key"]; !ok {
+		t.Fatal("Google API key was not written to keyring")
+	}
+	content, err := os.ReadFile(paths.ConfigFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), "AIza-secret") || !strings.Contains(string(content), "google-ai-studio") {
+		t.Fatalf("unsafe Google config: %s", content)
+	}
+}
+
+func TestProbeGoogleAIStudioUsesSavedKeyAndCompletesOnboarding(t *testing.T) {
+	paths := providerTestPaths(t)
+	keyringBackend := &providerTestKeyring{values: map[string]string{
+		"test.google-probe:provider.google.api-key": "AIza-probe-secret",
+	}}
+	store, err := securitykeyring.NewWithBackend("test.google-probe", keyringBackend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := config.ProviderConfig{
+		ID: "google", Kind: config.ProviderGoogleAIStudio, DisplayName: "Google AI Studio",
+		BaseURL: config.DefaultGoogleAIStudioBaseURL, Model: "gemini-2.5-flash",
+		CredentialRef: "provider.google.api-key", Enabled: true,
+		QuotaMode: config.ProviderQuotaFreeTier, QuotaProfile: config.ProviderQuotaProfile{MaxConcurrent: 1},
+	}
+	value := config.Default(paths)
+	value.Providers = []config.ProviderConfig{provider}
+	value.Onboarding.AgentConfigured = true
+	bridge := &Bridge{paths: paths, config: value, keyring: store}
+	bridge.googleClientFactory = func(got googleaistudio.Config) (googleAIStudioClient, error) {
+		if got.APIKey != "AIza-probe-secret" || got.Model != "gemini-2.5-flash" {
+			t.Fatalf("probe client config = %#v", got)
+		}
+		return &fakeGoogleClient{}, nil
+	}
+
+	result := bridge.ProbeProvider(ProviderProbeInput{ProviderID: "google", Kind: config.ProviderGoogleAIStudio})
+	if !result.OK || !result.Onboarding.ProviderTested || !result.Onboarding.Completed {
+		t.Fatalf("probe result = %#v", result)
+	}
+	content, err := os.ReadFile(paths.ConfigFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), "AIza-probe-secret") {
+		t.Fatal("Google key leaked into persisted config")
 	}
 }
 

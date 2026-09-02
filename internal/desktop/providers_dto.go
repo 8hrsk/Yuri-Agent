@@ -26,16 +26,18 @@ type OnboardingView struct {
 }
 
 type ProviderView struct {
-	ID             string                  `json:"id"`
-	Kind           config.ProviderKind     `json:"kind"`
-	DisplayName    string                  `json:"displayName"`
-	BaseURL        string                  `json:"baseUrl,omitempty"`
-	Model          string                  `json:"model,omitempty"`
-	APIStyle       config.ProviderAPIStyle `json:"apiStyle,omitempty"`
-	FavoriteModels []string                `json:"favoriteModels,omitempty"`
-	Binary         string                  `json:"binary,omitempty"`
-	Enabled        bool                    `json:"enabled"`
-	HasSecret      bool                    `json:"hasSecret"`
+	ID             string                      `json:"id"`
+	Kind           config.ProviderKind         `json:"kind"`
+	DisplayName    string                      `json:"displayName"`
+	BaseURL        string                      `json:"baseUrl,omitempty"`
+	Model          string                      `json:"model,omitempty"`
+	APIStyle       config.ProviderAPIStyle     `json:"apiStyle,omitempty"`
+	FavoriteModels []string                    `json:"favoriteModels,omitempty"`
+	Binary         string                      `json:"binary,omitempty"`
+	Enabled        bool                        `json:"enabled"`
+	HasSecret      bool                        `json:"hasSecret"`
+	QuotaMode      config.ProviderQuotaMode    `json:"quotaMode,omitempty"`
+	QuotaProfile   config.ProviderQuotaProfile `json:"quotaProfile,omitempty"`
 }
 
 type SaveOpenAIProviderInput struct {
@@ -57,6 +59,31 @@ type SaveOpenAIProviderCredentialInput struct {
 	BaseURL     string                  `json:"baseUrl"`
 	APIStyle    config.ProviderAPIStyle `json:"apiStyle,omitempty"`
 	APIKey      string                  `json:"apiKey"`
+}
+
+// SaveGoogleAIStudioProviderInput configures the documented Gemini OpenAI
+// compatibility endpoint. APIKey is accepted only for the immediate keyring
+// write and is never returned or persisted in config JSON.
+type SaveGoogleAIStudioProviderInput struct {
+	ID           string                      `json:"id"`
+	DisplayName  string                      `json:"displayName"`
+	BaseURL      string                      `json:"baseUrl"`
+	Model        string                      `json:"model"`
+	APIKey       string                      `json:"apiKey"`
+	QuotaMode    config.ProviderQuotaMode    `json:"quotaMode,omitempty"`
+	QuotaProfile config.ProviderQuotaProfile `json:"quotaProfile,omitempty"`
+	Enabled      bool                        `json:"enabled"`
+}
+
+// SaveGoogleAIStudioProviderCredentialInput stores a Google key before model
+// selection; an existing route remains active until the owner saves a model.
+type SaveGoogleAIStudioProviderCredentialInput struct {
+	ID           string                      `json:"id"`
+	DisplayName  string                      `json:"displayName"`
+	BaseURL      string                      `json:"baseUrl"`
+	QuotaMode    config.ProviderQuotaMode    `json:"quotaMode,omitempty"`
+	QuotaProfile config.ProviderQuotaProfile `json:"quotaProfile,omitempty"`
+	APIKey       string                      `json:"apiKey"`
 }
 
 type OpenAIModelCatalogInput struct {
@@ -126,14 +153,16 @@ type CodexModelView struct {
 }
 
 type ProviderSettingsInput struct {
-	ProviderID       string                  `json:"providerId,omitempty"`
-	Kind             config.ProviderKind     `json:"kind"`
-	BaseURL          string                  `json:"baseUrl"`
-	Model            string                  `json:"model"`
-	APIStyle         config.ProviderAPIStyle `json:"apiStyle,omitempty"`
-	TimeoutSeconds   int                     `json:"timeoutSeconds"`
-	StreamResponses  bool                    `json:"streamResponses"`
-	APIKeyConfigured bool                    `json:"apiKeyConfigured"`
+	ProviderID       string                      `json:"providerId,omitempty"`
+	Kind             config.ProviderKind         `json:"kind"`
+	BaseURL          string                      `json:"baseUrl"`
+	Model            string                      `json:"model"`
+	APIStyle         config.ProviderAPIStyle     `json:"apiStyle,omitempty"`
+	TimeoutSeconds   int                         `json:"timeoutSeconds"`
+	StreamResponses  bool                        `json:"streamResponses"`
+	APIKeyConfigured bool                        `json:"apiKeyConfigured"`
+	QuotaMode        config.ProviderQuotaMode    `json:"quotaMode,omitempty"`
+	QuotaProfile     config.ProviderQuotaProfile `json:"quotaProfile,omitempty"`
 }
 
 type ProviderTestResult struct {
