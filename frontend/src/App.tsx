@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { ChatView } from './components/ChatView'
 import { ActivityView } from './components/ActivityView'
+import { AgentDeleteDialog } from './components/AgentDeleteDialog'
 import { AgentProfileForm } from './components/AgentProfileForm'
 import { CollaborationView } from './components/CollaborationView'
 import { Icon } from './components/Icon'
 import { MemoryView } from './components/MemoryView'
+import { ModalShell } from './components/ModalShell'
 import { NotificationCenter } from './components/NotificationCenter'
 import { OnboardingView } from './components/OnboardingView'
 import { PluginView } from './components/PluginView'
@@ -38,6 +40,7 @@ function App() {
   const [agentBusy, setAgentBusy] = useState(false)
   const [agentError, setAgentError] = useState<string>()
   const [agentNotice, setAgentNotice] = useState<string>()
+  const [agentPendingDeletion, setAgentPendingDeletion] = useState<AgentProfile>()
   const [importedProfilePath, setImportedProfilePath] = useState<string>()
   const [modelRouteDirty, setModelRouteDirty] = useState(false)
   const [modelRouteDiscardVersion, setModelRouteDiscardVersion] = useState(0)
@@ -58,6 +61,7 @@ function App() {
   useEffect(() => {
     if (onboardingStatus !== 'ready') return
     let mounted = true
+    setAgentsStatus('loading')
     void Promise.all([client.listAgents(), client.getActiveAgent()]).then(([listedAgents, current]) => {
       if (!mounted) return
       const nextAgents = current && !listedAgents.some((agent) => agent.id === current.id)
@@ -191,6 +195,27 @@ function App() {
     }
   }
 
+  const handleDeleteAgent = async (agent: AgentProfile) => {
+    if (agentBusy) return
+    setAgentBusy(true)
+    setAgentError(undefined)
+    setAgentNotice(undefined)
+    try {
+      await client.deleteAgent(agent.id)
+      const remaining = await client.listAgents()
+      const nextActive = await client.getActiveAgent()
+      setAgents(remaining.map((agent) => ({ ...agent, active: agent.id === nextActive?.id })))
+      setActiveAgent(nextActive)
+      setAgentPendingDeletion(undefined)
+      if (!nextActive) setOnboardingStatus('required')
+      else setAgentNotice(`Агент ${agent.name} удалён. Исторические записи сохранены.`)
+    } catch (cause) {
+      setAgentError(cause instanceof Error ? cause.message : 'Не удалось удалить агента.')
+    } finally {
+      setAgentBusy(false)
+    }
+  }
+
   if (onboardingStatus === 'loading') {
     return <div className="onboarding-shell"><div className="onboarding-loading" role="status"><span className="onboarding-loading__pulse" /> Проверяю состояние первого запуска…</div></div>
   }
@@ -212,6 +237,7 @@ function App() {
         collapsed={sidebar.collapsed}
         connectionStatus={backend.status}
         onCreateAgent={openAgentForm}
+        onDeleteAgent={(agent) => { setAgentError(undefined); setAgentNotice(undefined); setAgentPendingDeletion(agent) }}
         onExportAgent={() => void handleExportAgent()}
         onImportAgent={() => void handleImportAgent()}
         onNavigate={navigateTo}
@@ -228,6 +254,17 @@ function App() {
         <div className="main-panel__scroll">
           {agentsStatus === 'loading' ? (
             <div className="onboarding-loading" role="status"><span className="onboarding-loading__pulse" /> Загружаю профиль агента…</div>
+          ) : !activeAgent ? (
+            <section className="empty-agent-workspace">
+              <span className="empty-agent-workspace__icon"><Icon name="personality" width={28} height={28} /></span>
+              <span className="section-heading__overline">AGENT ROSTER</span>
+              <h1>Создайте первого агента</h1>
+              <p>Здесь пока нет предустановленного персонажа. Имя, характер, модель и историю первого агента задаёте вы.</p>
+              <div>
+                <button className="button button--accent" onClick={openAgentForm} type="button"><Icon name="plus" width={15} height={15} /> Создать агента</button>
+                <button className="button button--quiet" onClick={() => void handleImportAgent()} type="button"><Icon name="file" width={15} height={15} /> Импортировать</button>
+              </div>
+            </section>
           ) : (
             <>
               {/*
@@ -280,20 +317,37 @@ function App() {
         </div>
         <footer className="statusbar">
           <span className="statusbar__left"><span className="statusbar__pulse" /> Local-first workspace</span>
-          <span className="statusbar__right">Yuri stage 8 · agent profiles <Icon name="spark" width={12} height={12} /></span>
         </footer>
       </main>
       {agentFormOpen && (
-        <div className="approval-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !agentBusy) closeAgentForm() }}>
-          <section aria-labelledby="agent-create-title" aria-modal="true" className="approval-dialog agent-dialog" role="dialog">
-            <div className="approval-dialog__mark"><Icon name="personality" width={22} height={22} /></div>
-            <span className="section-heading__overline">{importedProfilePath ? 'PORTABLE PROFILE REVIEW' : 'AGENT ROSTER'}</span>
-            <h2 id="agent-create-title">{importedProfilePath ? 'Проверить импортируемого агента' : 'Создать нового агента'}</h2>
-            <p>{importedProfilePath ? `Источник: ${importedProfilePath}. Переносится только owner profile; память, runtime histories, разрешения и secrets не импортируются.` : 'У каждого агента будет собственная личность, память и отношения. После создания он станет активным.'}</p>
-            <AgentProfileForm busy={agentBusy} onBack={closeAgentForm} onChange={setAgentDraft} onSubmit={() => void handleCreateAgent()} submitLabel={importedProfilePath ? 'Импортировать и выбрать' : 'Создать и выбрать'} value={agentDraft} />
-            {agentError && <div className="agent-dialog__error" role="alert">{agentError}</div>}
-          </section>
-        </div>
+        /*
+         * ModalShell instead of a hand-rolled backdrop: this dialog was the one
+         * modal in the app that ignored Escape and did not trap focus or mark
+         * the rest of the shell inert, so the only ways out were the backdrop
+         * and the Назад button.
+         */
+        <ModalShell
+          backdropClassName="approval-backdrop"
+          className="approval-dialog agent-dialog"
+          labelledBy="agent-create-title"
+          onEscape={() => { if (!agentBusy) closeAgentForm() }}
+        >
+          <div className="approval-dialog__mark"><Icon name="personality" width={22} height={22} /></div>
+          <span className="section-heading__overline">{importedProfilePath ? 'PORTABLE PROFILE REVIEW' : 'AGENT ROSTER'}</span>
+          <h2 id="agent-create-title">{importedProfilePath ? 'Проверить импортируемого агента' : 'Создать нового агента'}</h2>
+          <p>{importedProfilePath ? `Источник: ${importedProfilePath}. Переносится только owner profile; память, runtime histories, разрешения и secrets не импортируются.` : 'У каждого агента будет собственная личность, память и отношения. После создания он станет активным.'}</p>
+          <AgentProfileForm busy={agentBusy} onBack={closeAgentForm} onChange={setAgentDraft} onSubmit={() => void handleCreateAgent()} submitLabel={importedProfilePath ? 'Импортировать и выбрать' : 'Создать и выбрать'} value={agentDraft} />
+          {agentError && <div className="agent-dialog__error" role="alert">{agentError}</div>}
+        </ModalShell>
+      )}
+      {agentPendingDeletion && (
+        <AgentDeleteDialog
+          agent={agentPendingDeletion}
+          busy={agentBusy}
+          error={agentError}
+          onCancel={() => setAgentPendingDeletion(undefined)}
+          onConfirm={() => handleDeleteAgent(agentPendingDeletion)}
+        />
       )}
     </div>
   )

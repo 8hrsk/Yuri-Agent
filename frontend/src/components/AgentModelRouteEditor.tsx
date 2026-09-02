@@ -15,12 +15,19 @@ type AgentModelRouteEditorProps = {
   disabled?: boolean
   primaryAction?: ReactNode
   budgetAction?: ReactNode
+  /**
+   * Rendered at the foot of the fallback section. The owner of this component
+   * supplies the three save buttons, and each one belongs inside the section
+   * whose values it writes -- the fallback button used to be rendered by the
+   * parent, outside the card, so the three sat in three different places.
+   */
+  fallbackAction?: ReactNode
   onChange: (providerId: string, model: string) => void
   onFallbackChange: (enabled: boolean, providerId: string, model: string) => void
   onExecutionBudgetChange?: (preset: ExecutionBudgetPreset) => void
 }
 
-export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fallbackProviderId, fallbackModel, executionBudget = 'balanced', disabled, primaryAction, budgetAction, onChange, onFallbackChange, onExecutionBudgetChange }: AgentModelRouteEditorProps) {
+export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fallbackProviderId, fallbackModel, executionBudget = 'balanced', disabled, primaryAction, budgetAction, fallbackAction, onChange, onFallbackChange, onExecutionBudgetChange }: AgentModelRouteEditorProps) {
   const client = useMemo(() => createYuriClient(), [])
   const [providers, setProviders] = useState<ProviderOption[]>([])
   const [openAIModels, setOpenAIModels] = useState<OpenAIModel[]>([])
@@ -142,7 +149,7 @@ export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fall
         <option value="extended">Расширенный · сложные задачи</option>
       </select></label>
       <small>{executionBudget === 'efficient' ? 'До 4 шагов и 12 000 токенов в интерактивном run.' : executionBudget === 'extended' ? 'До 12 шагов и 64 000 токенов; модель может снизить потолок.' : 'До 8 шагов и 32 000 токенов в интерактивном run.'}</small>
-      {budgetAction}
+      {budgetAction && <div className="agent-model-route__section-action">{budgetAction}</div>}
     </section>
     <section aria-label="Резервный маршрут агента" className="agent-model-route__fallback">
       <div className="agent-model-route__fallback-heading"><div><span>FALLBACK ROUTE</span><h5>Резервный provider и модель</h5></div><span className={fallbackEnabled ? 'agent-model-route__fallback-status agent-model-route__fallback-status--on' : 'agent-model-route__fallback-status'}>{fallbackEnabled ? 'включён' : 'выключен'}</span></div>
@@ -165,6 +172,7 @@ export function AgentModelRouteEditor({ providerId, model, fallbackEnabled, fall
       </select></label>}
       {fallbackProviderId && fallbackSelected?.kind !== 'openai-compatible' && fallbackSelected?.kind !== 'codex-app-server' && <label><span>Fallback model ID</span><input aria-label="Fallback model ID" disabled={disabled} onChange={(event) => onFallbackChange(fallbackEnabled, fallbackProviderId, event.target.value)} spellCheck={false} value={fallbackModel} /></label>}
       {!fallbackProviderId && <small className="agent-model-route__fallback-hint">Сначала выберите отдельный fallback provider.</small>}
+      {fallbackAction && <div className="agent-model-route__section-action">{fallbackAction}</div>}
     </section>
     {error && <div className="agent-model-route__error" role="alert"><Icon name="warning" width={13} height={13} /> {error}</div>}
     {!loading && providers.length === 0 && <div className="agent-model-route__error"><Icon name="warning" width={13} height={13} /> Сначала настройте хотя бы один provider в Settings.</div>}

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 
+import yuriAppIcon from '../assets/yuri-app-icon.png'
 import { ConnectionBadge } from './ConnectionBadge'
 import { Icon, type IconName } from './Icon'
 import { navGroups, type NavId } from '../lib/navigation'
@@ -25,13 +26,14 @@ type SidebarProps = {
   onNavigate: (next: NavId) => void
   onSelectAgent: (agentId: string) => void
   onCreateAgent: () => void
+  onDeleteAgent: (agent: AgentProfile) => void
   onExportAgent: () => void
   onImportAgent: () => void
 }
 
 const iconName = (name: string): IconName => name as IconName
 
-export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agentError, agentNotice, collapsed = false, connectionStatus, onToggleCollapsed, onNavigate, onSelectAgent, onCreateAgent, onExportAgent, onImportAgent }: SidebarProps) {
+export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agentError, agentNotice, collapsed = false, connectionStatus, onToggleCollapsed, onNavigate, onSelectAgent, onCreateAgent, onDeleteAgent, onExportAgent, onImportAgent }: SidebarProps) {
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const agentName = activeAgent?.name ?? 'Агент'
   const initial = Array.from(agentName.trim())[0]?.toLocaleUpperCase('ru-RU') ?? 'A'
@@ -39,8 +41,7 @@ export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agen
     <aside className={`sidebar${collapsed ? ' sidebar--collapsed' : ''}`}>
       <div className="sidebar__brand">
         <div className="brand-mark" aria-hidden="true">
-          <span>Y</span>
-          <i />
+          <img alt="" src={yuriAppIcon} />
         </div>
         <div className="brand-copy">
           <span className="brand-copy__name">Yuri</span>
@@ -76,21 +77,25 @@ export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agen
         {agentMenuOpen && (
           <div aria-label="Выбор агента" className="sidebar__agent-menu" role="listbox">
             <div className="sidebar__agent-menu-heading"><span>Агенты</span><small>{agents.length}</small></div>
-            {agents.length === 0 && <span className="sidebar__agent-empty">Агенты ещё не загружены</span>}
+            {agents.length === 0 && <span className="sidebar__agent-empty">Агенты ещё не созданы</span>}
             {agents.map((agent) => (
-              <button
-                aria-selected={agent.id === activeAgent?.id}
-                className={`sidebar__agent-option${agent.id === activeAgent?.id ? ' sidebar__agent-option--active' : ''}`}
-                disabled={agentBusy}
-                key={agent.id}
-                onClick={() => { setAgentMenuOpen(false); onSelectAgent(agent.id) }}
-                role="option"
-                type="button"
-              >
-                <span className="sidebar__agent-option-initial">{Array.from(agent.name)[0]?.toLocaleUpperCase('ru-RU') ?? 'A'}</span>
-                <span><strong>{agent.name}</strong><small>{agent.gender}{agent.age ? ` · ${agent.age}` : ''}</small><small className="sidebar__agent-route">{modelRouteLabel(agent.providerId, agent.model)}</small></span>
-                {agent.id === activeAgent?.id && <Icon name="check" width={13} height={13} />}
-              </button>
+              <div className="sidebar__agent-row" key={agent.id}>
+                <button
+                  aria-selected={agent.id === activeAgent?.id}
+                  className={`sidebar__agent-option${agent.id === activeAgent?.id ? ' sidebar__agent-option--active' : ''}`}
+                  disabled={agentBusy}
+                  onClick={() => { setAgentMenuOpen(false); onSelectAgent(agent.id) }}
+                  role="option"
+                  type="button"
+                >
+                  <span className="sidebar__agent-option-initial">{Array.from(agent.name)[0]?.toLocaleUpperCase('ru-RU') ?? 'A'}</span>
+                  <span><strong>{agent.name}</strong><small>{agent.gender}{agent.age ? ` · ${agent.age}` : ''}</small><small className="sidebar__agent-route">{modelRouteLabel(agent.providerId, agent.model)}</small></span>
+                  {agent.id === activeAgent?.id && <Icon name="check" width={13} height={13} />}
+                </button>
+                <button aria-label={`Удалить агента ${agent.name}`} className="sidebar__agent-remove" disabled={agentBusy} onClick={() => onDeleteAgent(agent)} title={`Удалить агента ${agent.name}`} type="button">
+                  <Icon name="trash" width={13} height={13} />
+                </button>
+              </div>
             ))}
             <button className="sidebar__agent-create" disabled={agentBusy} onClick={() => { setAgentMenuOpen(false); onCreateAgent() }} type="button">
               <Icon name="plus" width={14} height={14} /> Создать агента
@@ -139,7 +144,6 @@ export function Sidebar({ activeId, activeAgent, agents, agentBusy = false, agen
 
       <div className="sidebar__footer">
         <ConnectionBadge compact label={connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'connecting' ? 'Connecting' : 'Shell mode'} status={connectionStatus} />
-        <span className="sidebar__footer-copy">Этап 8 · Agent profiles</span>
       </div>
     </aside>
   )

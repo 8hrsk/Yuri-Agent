@@ -185,7 +185,8 @@
 }
 
 .plugin-inspection__path,
-.plugin-install-path {
+.plugin-install-path,
+.plugin-inline-error {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -193,6 +194,16 @@
   color: #756f83;
   font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
   font-size: 8px;
+}
+
+/*
+ * The error line had no rule at all, so its warning icon sat on the text
+ * baseline and dipped below it, and the row was indistinguishable from the
+ * install path beneath it.
+ */
+.plugin-inline-error {
+  margin-top: 10px;
+  color: var(--rose);
 }
 
 .plugin-inspection__path {
@@ -204,9 +215,14 @@
 }
 
 .plugin-inspection__path svg,
-.plugin-install-path svg {
+.plugin-install-path svg,
+.plugin-inline-error svg {
   flex: 0 0 auto;
   color: #8d7ec7;
+}
+
+.plugin-inline-error svg {
+  color: var(--rose);
 }
 
 .plugin-inspection__path span {

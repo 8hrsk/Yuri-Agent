@@ -3,6 +3,8 @@ package desktop
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -196,6 +198,41 @@ func (b *Bridge) RenameConversation(input RenameConversationInput) (Conversation
 type RenameConversationInput struct {
 	ConversationID string `json:"conversationId"`
 	Title          string `json:"title"`
+}
+
+type DeleteConversationInput struct {
+	ConversationID string `json:"conversationId"`
+}
+
+func (b *Bridge) DeleteConversation(input DeleteConversationInput) error {
+	conversationID := domain.ID(strings.TrimSpace(input.ConversationID))
+	if conversationID.Empty() {
+		return fmt.Errorf("%w: conversation id is required", domain.ErrInvalidArgument)
+	}
+	ctx, cancel := b.context()
+	defer cancel()
+	metadata, err := b.repositories.Messages.AttachmentMetadataByConversation(ctx, conversationID)
+	if err != nil {
+		return err
+	}
+	if err := b.repositories.Conversations.Delete(ctx, conversationID, b.personaProfileID()); err != nil {
+		return err
+	}
+	for _, encoded := range metadata {
+		for _, attachment := range storedAttachments(encoded) {
+			referenced, referenceErr := b.repositories.Messages.AttachmentBlobReferenced(ctx, attachment.BlobKey)
+			if referenceErr != nil || referenced {
+				continue
+			}
+			path := filepath.Join(b.paths.BlobDirectory, filepath.FromSlash(attachment.BlobKey))
+			root := filepath.Clean(b.paths.BlobDirectory) + string(os.PathSeparator)
+			if strings.HasPrefix(filepath.Clean(path), root) {
+				_ = os.Remove(path)
+			}
+		}
+	}
+	b.emitConversationUpdated(conversationID)
+	return nil
 }
 
 // ListConversations is the no-argument form kept for callers bound before

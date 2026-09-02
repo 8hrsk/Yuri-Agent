@@ -3,6 +3,14 @@
 .chat-main__header-persona {
   display: flex;
   min-width: 0;
+
+  /*
+   * The 240px basis is what lets the header wrap: it is the width below which
+   * the avatar and title stop sharing a line with the model/affect chips, so
+   * the chips move to a second row instead of being clipped. See the note in
+   * view-chat.css beside .chat-main__header-title.
+   */
+  flex: 1 1 240px;
   align-items: center;
   gap: 11px;
 }

@@ -1,11 +1,17 @@
 /* Provider settings */
 
+/*
+ * Same measure and gutters as memory, plugins, tasks, activity and
+ * collaboration. Settings was the one view on its own column width (1040 vs
+ * 1180) and its own gutter ramp, so its content sat ~25px right of every other
+ * page and the heading jumped sideways when switching tabs.
+ */
 .settings-view {
   position: relative;
-  width: min(100%, 1040px);
+  width: min(100%, 1180px);
   min-height: 100%;
   margin: 0 auto;
-  padding: clamp(28px, 5vw, 64px) clamp(22px, 6vw, 86px) 65px;
+  padding: clamp(28px, 4vw, 54px) clamp(18px, 4vw, 58px) 65px;
 }
 
 .settings-view__topline {
@@ -56,9 +62,15 @@
   line-height: 1.7;
 }
 
+/*
+ * auto-fit rather than a fixed column count: the strip was written for two
+ * providers and there are now three, so Antigravity dropped onto a second row
+ * on its own with an empty cell beside it. Sizing from the tiles means adding a
+ * fourth provider will not break the row again.
+ */
 .provider-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 8px;
   margin-bottom: 10px;
 }
@@ -1093,13 +1105,15 @@
   }
 
   .tool-availability {
-    grid-template-columns: 1fr;
     gap: 8px;
     margin: 8px 15px 0;
   }
 
   .tool-availability__scope {
     justify-content: flex-start;
+
+    /* One block per line at this width, so no auto margin pulling it right. */
+    margin-left: 0;
   }
 
   .run-trace__status {

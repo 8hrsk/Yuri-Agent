@@ -120,14 +120,17 @@ func (b *Bridge) reflectOnPeerDialogue(ctx context.Context, backend agent.ModelB
 	} else if observerID != dialogue.PeerAgentID {
 		return false, domain.ErrNotPermitted
 	}
-	profiles, err := b.repositories.Agents.ListByIDs(ctx, []domain.ID{observerID, subjectID})
+	observer, err := b.repositories.Agents.Get(ctx, observerID)
 	if err != nil {
 		return false, err
 	}
-	observer, observerOK := profiles[observerID]
-	subject, subjectOK := profiles[subjectID]
-	if !observerOK || !subjectOK {
-		return false, domain.ErrNotFound
+	subject, err := b.repositories.Agents.GetIncludingDeleted(ctx, subjectID)
+	if err != nil {
+		return false, err
+	}
+	identityRoster, err := b.repositories.Agents.ListIncludingDeleted(ctx)
+	if err != nil {
+		return false, err
 	}
 	messages, err := b.repositories.PeerDialogueMessages.ListByDialogue(ctx, dialogue.ID, observerID)
 	if err != nil {
@@ -184,7 +187,7 @@ func (b *Bridge) reflectOnPeerDialogue(ctx context.Context, backend agent.ModelB
 	result, err := engine.Run(ctx, reflection.InputSnapshot{
 		ProfileID: observerID, RunID: runID, Trigger: reflection.TriggerPeerDialogue, CapturedAt: dialogue.FinishedAt,
 		ImmutablePolicy: immutablePolicySystemPrompt,
-		IdentitySeed:    agentIdentitySeed(observer, []domain.AgentProfile{observer, subject}, personalization.Identity.PreferredLanguage) + fmt.Sprintf("\nPeer subject must be agent_id=%s (%s).", subjectID, subject.Name),
+		IdentitySeed:    agentIdentitySeed(observer, identityRoster, personalization.Identity.PreferredLanguage) + fmt.Sprintf("\nPeer subject must be agent_id=%s (%s).", subjectID, subject.Name),
 		State: reflection.ReflectionState{
 			Version:      maxUint64(persona.Version, relationship.Version, affect.Version),
 			Persona:      reflection.MutablePersona{Version: persona.Version, Traits: copyFloatMap(persona.Traits), Prompt: persona.Prompt(), PinnedTraits: append([]string(nil), persona.PinnedTraits...), UpdatedAt: persona.UpdatedAt},

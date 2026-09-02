@@ -1,4 +1,4 @@
-import type { FormEvent, KeyboardEvent } from 'react'
+import { useLayoutEffect, useRef, type FormEvent, type KeyboardEvent } from 'react'
 
 import type { ChatAttachmentInput } from '../lib/contracts'
 import { ComposerToolbar } from './ComposerToolbar'
@@ -50,6 +50,23 @@ export function ChatComposer({
   speechSupported,
   transcribing,
 }: ChatComposerProps) {
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  /*
+   * Grow the field with its content instead of offering a resize grip.
+   *
+   * The grip was drawn in the textarea's bottom-right corner, which is exactly
+   * where the send button sits one row below, so the two overlapped. Auto-growth
+   * removes the grip and is what people expect from a message box anyway; the
+   * CSS caps the height and turns on scrolling past the cap.
+   */
+  useLayoutEffect(() => {
+    const input = inputRef.current
+    if (!input) return
+    input.style.height = 'auto'
+    input.style.height = `${input.scrollHeight}px`
+  }, [draft])
+
   return (
     <div className="composer-wrap composer-wrap--active">
       <form className="composer" onSubmit={onSubmit}>
@@ -64,6 +81,7 @@ export function ChatComposer({
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={onDraftKeyDown}
           placeholder="Напишите что-нибудь…"
+          ref={inputRef}
           rows={2}
           value={draft}
         />

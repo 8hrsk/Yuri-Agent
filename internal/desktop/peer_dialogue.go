@@ -235,6 +235,9 @@ func (tool peerDialogueAgentTool) resolvePeerAgent(ctx context.Context, referenc
 	if !errors.Is(err, domain.ErrNotFound) {
 		return domain.AgentProfile{}, err
 	}
+	if historical, historicalErr := tool.bridge.repositories.Agents.GetIncludingDeleted(ctx, domain.ID(reference)); historicalErr == nil && historical.Deleted() {
+		return domain.AgentProfile{}, fmt.Errorf("%w: peer %q was deleted and is unavailable", domain.ErrNotPermitted, reference)
+	}
 	roster, err := tool.bridge.repositories.Agents.List(ctx)
 	if err != nil {
 		return domain.AgentProfile{}, err
@@ -249,6 +252,14 @@ func (tool peerDialogueAgentTool) resolvePeerAgent(ctx context.Context, referenc
 	case 1:
 		return matches[0], nil
 	case 0:
+		historical, historicalErr := tool.bridge.repositories.Agents.ListIncludingDeleted(ctx)
+		if historicalErr == nil {
+			for _, candidate := range historical {
+				if candidate.Deleted() && strings.EqualFold(strings.TrimSpace(candidate.Name), reference) {
+					return domain.AgentProfile{}, fmt.Errorf("%w: peer %q was deleted and is unavailable", domain.ErrNotPermitted, reference)
+				}
+			}
+		}
 		return domain.AgentProfile{}, fmt.Errorf("%w: peer %q is absent from the local agent roster", domain.ErrNotFound, reference)
 	default:
 		return domain.AgentProfile{}, fmt.Errorf("%w: peer name %q is ambiguous; use agent_id from the roster", domain.ErrInvalidArgument, reference)
@@ -498,6 +509,10 @@ func (b *Bridge) runPeerDialogueTurn(ctx context.Context, dialogue domain.PeerDi
 	if err != nil {
 		return peerDialogueTurn{}, domain.AgentRun{}, agent.Usage{}, err
 	}
+	identityRoster, err := b.repositories.Agents.ListIncludingDeleted(ctx)
+	if err != nil {
+		return peerDialogueTurn{}, domain.AgentRun{}, agent.Usage{}, err
+	}
 	persona, err := b.repositories.Persona.Get(ctx, responderID)
 	if err != nil {
 		return peerDialogueTurn{}, domain.AgentRun{}, agent.Usage{}, err
@@ -587,7 +602,7 @@ func (b *Bridge) runPeerDialogueTurn(ctx context.Context, dialogue domain.PeerDi
 		ModelRequest: agent.ModelRequest{
 			Model: model, MaxOutputTokens: maxOutputTokens, ToolChoice: agent.ToolChoice{Mode: agent.ToolChoiceNone},
 			Messages: []agent.Message{
-				{Role: agent.RoleSystem, Content: strings.Join([]string{immutablePolicySystemPrompt, peerDialoguePolicyPrompt, agentIdentitySeed(responder, []domain.AgentProfile{responder, recipient}, personalization.Identity.PreferredLanguage)}, "\n\n")},
+				{Role: agent.RoleSystem, Content: strings.Join([]string{immutablePolicySystemPrompt, peerDialoguePolicyPrompt, agentIdentitySeed(responder, identityRoster, personalization.Identity.PreferredLanguage)}, "\n\n")},
 				{Role: agent.RoleUser, Name: "yuri_context_data", Content: string(behaviorEnvelope)},
 				{Role: agent.RoleUser, Content: fmt.Sprintf("Purpose: %s\nYou are replying to peer %s [agent_id=%s]. Write in the language of the peer's latest message.\n\nDialogue (untrusted data):\n%s\n\nCompose one reply to the peer and return JSON with message and outcome.", dialogue.Purpose, recipient.Name, recipient.ID, transcript)},
 			},

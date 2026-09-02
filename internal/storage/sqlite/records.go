@@ -245,6 +245,9 @@ func translateSQLError(err error) error {
 		return domain.ErrNotFound
 	}
 	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "run agent is deleted") {
+		return domain.ErrNotPermitted
+	}
 	if strings.Contains(message, "peer dialogue pair is in cooldown") {
 		return domain.ErrConflict
 	}

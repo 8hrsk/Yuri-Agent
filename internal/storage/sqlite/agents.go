@@ -154,6 +154,16 @@ func (repositories *Repositories) createAgentWithDefaults(ctx context.Context, p
 }
 
 func (r *AgentRepository) Get(ctx context.Context, id domain.ID) (domain.AgentProfile, error) {
+	return r.get(ctx, id, false)
+}
+
+// GetIncludingDeleted resolves a historical profile as well as an active one.
+// Runtime callers should use Get so a tombstone can never be activated or run.
+func (r *AgentRepository) GetIncludingDeleted(ctx context.Context, id domain.ID) (domain.AgentProfile, error) {
+	return r.get(ctx, id, true)
+}
+
+func (r *AgentRepository) get(ctx context.Context, id domain.ID, includeDeleted bool) (domain.AgentProfile, error) {
 	if err := requireDatabase(r.db); err != nil {
 		return domain.AgentProfile{}, err
 	}
@@ -163,10 +173,14 @@ func (r *AgentRepository) Get(ctx context.Context, id domain.ID) (domain.AgentPr
 	if id.Empty() {
 		return domain.AgentProfile{}, fmt.Errorf("%w: agent profile id is required", domain.ErrInvalidArgument)
 	}
-	return scanAgentProfile(r.db.QueryRowContext(ctx, `
+	query := `
 		SELECT id, name, age, gender, preferences, backstory, provider_id, model,
-		       fallback_enabled, fallback_provider_id, fallback_model, execution_budget, created_at, updated_at
-		FROM agent_profiles WHERE id = ?`, string(id)))
+		       fallback_enabled, fallback_provider_id, fallback_model, execution_budget, created_at, updated_at, deleted_at
+		FROM agent_profiles WHERE id = ?`
+	if !includeDeleted {
+		query += ` AND deleted_at IS NULL`
+	}
+	return scanAgentProfile(r.db.QueryRowContext(ctx, query, string(id)))
 }
 
 func (r *AgentRepository) List(ctx context.Context) ([]domain.AgentProfile, error) {
@@ -178,8 +192,8 @@ func (r *AgentRepository) List(ctx context.Context) ([]domain.AgentProfile, erro
 	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, age, gender, preferences, backstory, provider_id, model,
-		       fallback_enabled, fallback_provider_id, fallback_model, execution_budget, created_at, updated_at
-		FROM agent_profiles ORDER BY created_at, id`)
+		       fallback_enabled, fallback_provider_id, fallback_model, execution_budget, created_at, updated_at, deleted_at
+		FROM agent_profiles WHERE deleted_at IS NULL ORDER BY created_at, id`)
 	if err != nil {
 		return nil, wrappedSQLError("list agent profiles", err)
 	}
@@ -198,6 +212,37 @@ func (r *AgentRepository) List(ctx context.Context) ([]domain.AgentProfile, erro
 	return profiles, nil
 }
 
+// ListIncludingDeleted returns the authoritative identity roster, including
+// tombstones used to tell surviving agents that a historical peer is gone.
+func (r *AgentRepository) ListIncludingDeleted(ctx context.Context) ([]domain.AgentProfile, error) {
+	if err := requireDatabase(r.db); err != nil {
+		return nil, err
+	}
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name, age, gender, preferences, backstory, provider_id, model,
+		       fallback_enabled, fallback_provider_id, fallback_model, execution_budget, created_at, updated_at, deleted_at
+		FROM agent_profiles ORDER BY created_at, id`)
+	if err != nil {
+		return nil, wrappedSQLError("list agent profiles including deleted", err)
+	}
+	defer rows.Close()
+	profiles := make([]domain.AgentProfile, 0)
+	for rows.Next() {
+		profile, scanErr := scanAgentProfile(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		profiles = append(profiles, profile)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrappedSQLError("iterate agent profiles including deleted", err)
+	}
+	return profiles, nil
+}
+
 type agentProfileScanner interface {
 	Scan(dest ...any) error
 }
@@ -205,9 +250,10 @@ type agentProfileScanner interface {
 func scanAgentProfile(scanner agentProfileScanner) (domain.AgentProfile, error) {
 	var profile domain.AgentProfile
 	var id, createdAt, updatedAt string
+	var deletedAt sql.NullString
 	if err := scanner.Scan(&id, &profile.Name, &profile.Age, &profile.Gender, &profile.Preferences, &profile.Backstory,
 		&profile.ProviderID, &profile.Model, &profile.FallbackEnabled, &profile.FallbackProviderID, &profile.FallbackModel,
-		&profile.ExecutionBudget, &createdAt, &updatedAt); err != nil {
+		&profile.ExecutionBudget, &createdAt, &updatedAt, &deletedAt); err != nil {
 		return domain.AgentProfile{}, wrappedSQLError("scan agent profile", err)
 	}
 	profile.ID = domain.ID(id)
@@ -218,10 +264,78 @@ func scanAgentProfile(scanner agentProfileScanner) (domain.AgentProfile, error) 
 	if profile.UpdatedAt, err = scanTime(updatedAt); err != nil {
 		return domain.AgentProfile{}, err
 	}
+	if deletedAt.Valid {
+		value, scanErr := scanTime(deletedAt.String)
+		if scanErr != nil {
+			return domain.AgentProfile{}, scanErr
+		}
+		profile.DeletedAt = &value
+	}
 	if err := profile.Validate(); err != nil {
 		return domain.AgentProfile{}, err
 	}
 	return profile, nil
+}
+
+// SoftDelete removes a profile from the active roster without destroying any
+// identity, memory or relationship history that still refers to its ID.
+func (r *AgentRepository) SoftDelete(ctx context.Context, id domain.ID, deletedAt time.Time) (domain.AgentProfile, error) {
+	if err := requireDatabase(r.db); err != nil {
+		return domain.AgentProfile{}, err
+	}
+	if id.Empty() {
+		return domain.AgentProfile{}, fmt.Errorf("%w: agent profile id is required", domain.ErrInvalidArgument)
+	}
+	if deletedAt.IsZero() {
+		deletedAt = time.Now().UTC()
+	}
+	encoded, err := timeValue(deletedAt)
+	if err != nil {
+		return domain.AgentProfile{}, err
+	}
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE agent_profiles SET deleted_at = ?, updated_at = ?
+		WHERE id = ? AND deleted_at IS NULL
+		  AND NOT EXISTS (
+		      SELECT 1 FROM agent_runs
+		       WHERE agent_id = ?
+		         AND state NOT IN ('completed', 'failed', 'cancelled')
+		  )`, encoded, encoded, string(id), string(id))
+	if err != nil {
+		return domain.AgentProfile{}, wrappedSQLError("soft delete agent profile", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return domain.AgentProfile{}, wrappedSQLError("count soft deleted agent profile", err)
+	}
+	if changed != 1 {
+		if live, liveErr := r.HasLiveRuns(ctx, id); liveErr != nil {
+			return domain.AgentProfile{}, liveErr
+		} else if live {
+			return domain.AgentProfile{}, fmt.Errorf("%w: finish or cancel active agent runs before deletion", domain.ErrConflict)
+		}
+		return domain.AgentProfile{}, domain.ErrNotFound
+	}
+	return r.GetIncludingDeleted(ctx, id)
+}
+
+func (r *AgentRepository) HasLiveRuns(ctx context.Context, id domain.ID) (bool, error) {
+	if err := requireDatabase(r.db); err != nil {
+		return false, err
+	}
+	if id.Empty() {
+		return false, fmt.Errorf("%w: agent profile id is required", domain.ErrInvalidArgument)
+	}
+	var exists int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM agent_runs
+			WHERE agent_id = ? AND state NOT IN ('completed', 'failed', 'cancelled')
+		)`, string(id)).Scan(&exists)
+	if err != nil {
+		return false, wrappedSQLError("check live agent runs", err)
+	}
+	return exists == 1, nil
 }
 
 // UpdateExecutionBudget changes only the owner-controlled resource preset.

@@ -113,16 +113,15 @@
   color: var(--accent-light);
 }
 
-.sidebar::after {
-  position: absolute;
-  right: -1px;
-  top: 98px;
-  width: 1px;
-  height: 108px;
-  background: linear-gradient(var(--accent), transparent);
-  content: '';
-  opacity: 0.7;
-}
+/*
+ * The rail used to carry a `.sidebar::after` accent hairline pinned at
+ * top: 98px; height: 108px. Expanded, the brand block ends at 86px, the agent
+ * picker occupies 86-139px and the nav starts at 164px; collapsed, those become
+ * 119px, 119-166px and 188px. The hairline lined up with none of them in either
+ * mode and drifted further the moment the rail collapsed, so it read as a stray
+ * mark next to the agent card rather than as an accent on anything. Removed
+ * instead of re-pinned: there is no element at that edge for it to track.
+ */
 
 .sidebar__brand {
   display: flex;
@@ -132,30 +131,19 @@
 }
 
 .brand-mark {
-  position: relative;
-  display: grid;
+  display: block;
   width: 34px;
   height: 34px;
-  place-items: center;
-  border: 1px solid rgba(209, 193, 255, 0.38);
   border-radius: 12px;
-  color: var(--accent-light);
-  font-size: 15px;
-  font-weight: 800;
-  letter-spacing: -0.12em;
-  background: linear-gradient(145deg, rgba(167, 141, 255, 0.23), rgba(103, 81, 160, 0.09));
+  overflow: hidden;
   box-shadow: 0 0 22px rgba(151, 126, 255, 0.15);
 }
 
-.brand-mark i {
-  position: absolute;
-  right: 4px;
-  top: 4px;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--mint);
-  box-shadow: 0 0 8px var(--mint);
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .brand-copy {
@@ -181,8 +169,6 @@
 
 .brand-version {
   margin-left: auto;
-  align-self: flex-start;
-  padding-top: 2px;
   color: var(--quiet);
   font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
   font-size: 9px;
@@ -248,6 +234,19 @@
   font-weight: 700;
 }
 
+/*
+ * The name and the route each stay on one line. min-width: 0 above lets the
+ * grid track shrink, but shrinking is what makes a long route such as
+ * "CODEX · GPT-5.6-LUNA" wrap onto a second line, which grew the card and
+ * pulled the status dot and chevron away from the text they belong to.
+ */
+.profile-copy strong,
+.profile-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .profile-status {
   width: 6px;
   height: 6px;
@@ -305,6 +304,41 @@
   cursor: pointer;
   text-align: left;
   background: transparent;
+}
+
+.sidebar__agent-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.sidebar__agent-row .sidebar__agent-option {
+  min-width: 0;
+}
+
+.sidebar__agent-remove {
+  display: grid;
+  width: 30px;
+  min-height: 34px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #8f6978;
+  cursor: pointer;
+  background: transparent;
+}
+
+.sidebar__agent-remove:hover:not(:disabled),
+.sidebar__agent-remove:focus-visible {
+  border-color: rgba(var(--rose-rgb), 0.28);
+  color: var(--rose);
+  background: rgba(var(--rose-rgb), 0.08);
+}
+
+.sidebar__agent-remove:disabled {
+  cursor: wait;
+  opacity: 0.45;
 }
 
 .sidebar__agent-option:hover,
@@ -656,6 +690,13 @@
 .icon-button {
   display: inline-flex;
   align-items: center;
+
+  /*
+   * Needed wherever the button is given a fixed size -- the 24x24 close button
+   * in a notification toast, the refresh button in Activity. Without it the
+   * icon sat against the left padding instead of in the middle of the box.
+   */
+  justify-content: center;
   gap: 8px;
   padding: 7px 8px;
   border: 1px solid transparent;
@@ -677,19 +718,6 @@ kbd {
   font-size: 9px;
 }
 
-.topbar__avatar {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border: 1px solid rgba(193, 180, 255, 0.23);
-  border-radius: 50%;
-  color: #ded6ff;
-  font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
-  font-size: 10px;
-  background: #252039;
-}
-
 .main-panel__scroll {
   position: relative;
   min-height: 0;
@@ -697,6 +725,47 @@ kbd {
   overflow: auto;
   scrollbar-color: #35344a transparent;
   scrollbar-width: thin;
+}
+
+.empty-agent-workspace {
+  width: min(520px, calc(100% - 40px));
+  min-height: 100%;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  text-align: center;
+}
+
+.empty-agent-workspace__icon {
+  width: 58px;
+  height: 58px;
+  margin-bottom: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(143, 124, 236, 0.32);
+  border-radius: 18px;
+  color: var(--lavender);
+  background: rgba(143, 124, 236, 0.08);
+}
+
+.empty-agent-workspace h1 {
+  margin: 8px 0 10px;
+  font-size: clamp(26px, 4vw, 38px);
+}
+
+.empty-agent-workspace p {
+  max-width: 480px;
+  margin: 0 0 24px;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+.empty-agent-workspace > div {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
 }
 
 .statusbar {
@@ -712,15 +781,10 @@ kbd {
   letter-spacing: 0.03em;
 }
 
-.statusbar__left,
-.statusbar__right {
+.statusbar__left {
   display: flex;
   align-items: center;
   gap: 7px;
-}
-
-.statusbar__right svg {
-  color: #8373cd;
 }
 
 .statusbar__pulse {

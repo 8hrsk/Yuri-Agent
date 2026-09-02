@@ -31,8 +31,31 @@
   --accent-rgb: 185, 165, 255;
   --mint-rgb: 147, 231, 200;
   --rose-rgb: 255, 159, 185;
+  --line-rgb: 232, 230, 255;
 
   /* The near-invisible neutral fill used for inset cards and panels. */
   --surface-wash: rgba(255, 255, 255, 0.018);
+
+  /*
+   * Aliases for the second set of names the sheet grew.
+   *
+   * view-onboarding, view-collaboration, view-persona and view-settings were
+   * written against --text-primary / --text-secondary / --text-muted /
+   * --font-mono / --pink, which no one ever declared. An undeclared custom
+   * property is invalid at computed-value time, so those rules fell back to
+   * inherit and silently lost their colour and their monospace face: the
+   * MODEL ROUTE / EXECUTION BUDGET overlines rendered in the proportional UI
+   * font and .model-badge--unsupported rendered with no background at all.
+   *
+   * They are aliases rather than replacements because both spellings are now
+   * load-bearing across 40-odd call sites; the hue itself still has exactly
+   * one definition above.
+   */
+  --text-primary: var(--text);
+  --text-secondary: var(--muted);
+  --text-muted: var(--quiet);
+  --font-mono: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
+  --pink-rgb: var(--rose-rgb);
+  --pink: rgb(var(--rose-rgb));
 }
 

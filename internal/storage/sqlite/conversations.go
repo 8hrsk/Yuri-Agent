@@ -262,6 +262,48 @@ func (r *ConversationRepository) Unarchive(ctx context.Context, id domain.ID, at
 	return r.Save(ctx, conversation)
 }
 
+// Delete permanently removes one owner-scoped transcript. Durable run/audit
+// rows remain with a NULL conversation reference, while messages cascade.
+func (r *ConversationRepository) Delete(ctx context.Context, id, agentID domain.ID) error {
+	if err := requireDatabase(r.db); err != nil {
+		return err
+	}
+	if id.Empty() || agentID.Empty() {
+		return fmt.Errorf("%w: conversation id and agent id are required", domain.ErrInvalidArgument)
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return wrappedSQLError("begin delete conversation", err)
+	}
+	defer tx.Rollback()
+	var live int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM agent_runs
+			WHERE conversation_id = ? AND state NOT IN ('completed', 'failed', 'cancelled')
+		)`, string(id)).Scan(&live); err != nil {
+		return wrappedSQLError("check conversation runs before delete", err)
+	}
+	if live == 1 {
+		return fmt.Errorf("%w: finish or cancel the active conversation run before deletion", domain.ErrConflict)
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM conversations WHERE id = ? AND agent_id = ?`, string(id), string(agentID))
+	if err != nil {
+		return wrappedSQLError("delete conversation", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return wrappedSQLError("count deleted conversation", err)
+	}
+	if changed != 1 {
+		return domain.ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return wrappedSQLError("commit delete conversation", err)
+	}
+	return nil
+}
+
 // UpdateTitleIfDefault atomically replaces the placeholder title for the
 // named agent. The compare-and-set predicate is the boundary between the
 // asynchronous title worker and an owner rename: once either wins, a later

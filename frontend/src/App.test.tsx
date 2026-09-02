@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest'
 
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
 import { cloneAgentDraft, defaultAgentDraft } from './lib/agents'
@@ -48,6 +48,13 @@ const agent: AgentProfile = {
   updatedAt: '2026-08-29T09:00:00.000Z',
 }
 
+const peerAgent: AgentProfile = {
+  ...agent,
+  id: 'agent-2',
+  name: 'Мира',
+  active: false,
+}
+
 const approval: ApprovalRequest = {
   id: 'approval-1',
   toolCallId: 'call-1',
@@ -72,7 +79,7 @@ type RunHandle = { emit: EventSink; settle: (result: RunResult) => void }
  * two calls that matter under manual control: the active agent (M-37 hinges on
  * it resolving *after* the first render) and the conversation bootstrap.
  */
-function createHarness(options: { conversations?: Conversation[] } = {}) {
+function createHarness(options: { agents?: AgentProfile[]; conversations?: Conversation[] } = {}) {
   const stored: Conversation[] = [...(options.conversations ?? [])]
   const activeAgent = deferred<AgentProfile | undefined>()
   const createGate = deferred<void>()
@@ -103,7 +110,7 @@ function createHarness(options: { conversations?: Conversation[] } = {}) {
   clientStub = {
     mode: 'mock',
     getOnboardingState: async () => ({ completed: true, providerTested: true, agentConfigured: true }),
-    listAgents: async () => [agent],
+    listAgents: async () => options.agents ?? [agent],
     getActiveAgent: () => activeAgent.promise,
     listConversations,
     listMessages,
@@ -167,6 +174,8 @@ beforeEach(() => {
   })
 })
 
+afterEach(() => vi.restoreAllMocks())
+
 describe('cold start does not double-mount the chat (M-37)', () => {
   it('waits for the active agent before mounting the chat surface', async () => {
     const harness = createHarness()
@@ -190,6 +199,63 @@ describe('cold start does not double-mount the chat (M-37)', () => {
     await screen.findByRole('textbox', { name: 'Сообщение Юри' })
     expect(harness.createConversation).toHaveBeenCalledTimes(1)
     expect(screen.getAllByText('Новый диалог', { selector: '.conversation-item strong' })).toHaveLength(1)
+  })
+})
+
+describe('application shell cleanup', () => {
+  it('uses the application artwork and hides placeholder header controls and stage labels', async () => {
+    const harness = createHarness()
+    await bootChat(harness)
+
+    expect(document.querySelector('.brand-mark img')).toBeInTheDocument()
+    expect(screen.queryByText('User')).not.toBeInTheDocument()
+    expect(screen.queryByText('⌘K')).not.toBeInTheDocument()
+    expect(screen.queryByText(/ЭТАП 8 · AGENT PROFILES/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Yuri stage 8 · agent profiles/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('agent deletion confirmation', () => {
+  it('offers deletion on every roster row and requires the exact agent name', async () => {
+    const user = userEvent.setup()
+    const harness = createHarness({ agents: [agent, peerAgent] })
+    const deleteAgent = vi.fn(async () => undefined)
+    await bootChat(harness)
+    ;(clientStub as unknown as { deleteAgent: typeof deleteAgent }).deleteAgent = deleteAgent
+    ;(clientStub as unknown as { listAgents: () => Promise<AgentProfile[]> }).listAgents = async () => [agent]
+    ;(clientStub as unknown as { getActiveAgent: () => Promise<AgentProfile | undefined> }).getActiveAgent = async () => agent
+
+    await user.click(document.querySelector('.sidebar__profile') as HTMLElement)
+    expect(screen.queryByRole('button', { name: 'Удалить активного агента' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Удалить агента Юри' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Удалить агента Мира' }))
+
+    expect(screen.getByRole('heading', { name: 'Удалить агента «Мира»?' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Продолжить' }))
+    const nameInput = screen.getByRole('textbox', { name: 'Введите имя агента Мира' })
+    const deleteButton = screen.getByRole('button', { name: 'Удалить агента' })
+    expect(deleteButton).toBeDisabled()
+    await user.type(nameInput, 'Мира')
+    expect(deleteButton).toBeEnabled()
+    await user.click(deleteButton)
+
+    await waitFor(() => expect(deleteAgent).toHaveBeenCalledWith('agent-2'))
+  })
+
+  it('does not delete an agent when the typed name differs', async () => {
+    const user = userEvent.setup()
+    const harness = createHarness()
+    const deleteAgent = vi.fn(async () => undefined)
+    await bootChat(harness)
+    ;(clientStub as unknown as { deleteAgent: typeof deleteAgent }).deleteAgent = deleteAgent
+
+    await user.click(document.querySelector('.sidebar__profile') as HTMLElement)
+    await user.click(screen.getByRole('button', { name: 'Удалить агента Юри' }))
+    await user.click(screen.getByRole('button', { name: 'Продолжить' }))
+    await user.type(screen.getByRole('textbox', { name: 'Введите имя агента Юри' }), 'Мира')
+
+    expect(deleteAgent).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Удалить агента' })).toBeDisabled()
   })
 })
 

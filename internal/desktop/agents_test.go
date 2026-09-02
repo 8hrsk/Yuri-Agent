@@ -41,6 +41,20 @@ func newAgentTestBridge(t *testing.T) *Bridge {
 	return bridge
 }
 
+func TestEmptyRosterDoesNotCreateImplicitYuriAgent(t *testing.T) {
+	bridge := newAgentTestBridge(t)
+	if err := bridge.ensurePersonaState(context.Background()); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("ensurePersonaState() error = %v, want ErrNotFound", err)
+	}
+	profiles, err := bridge.repositories.Agents.ListIncludingDeleted(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) != 0 {
+		t.Fatalf("implicit profiles = %#v, want empty roster", profiles)
+	}
+}
+
 func TestActiveAgentCannotReusePeerConversation(t *testing.T) {
 	bridge := newAgentTestBridge(t)
 	first, err := bridge.CreateAgent(CreateAgentInput{Name: "Юри", Gender: "female"})
@@ -676,5 +690,73 @@ func TestAgentIdentitySeedFollowsUserLanguageWithOptionalFallback(t *testing.T) 
 	}
 	if strings.Contains(withFallback, "Отвечай по-русски") {
 		t.Fatalf("seed hard-codes Russian: %q", withFallback)
+	}
+}
+
+func TestDeleteAgentKeepsHistoricalTombstoneAndSelectsSurvivingAgent(t *testing.T) {
+	bridge := newAgentTestBridge(t)
+	first, err := bridge.CreateAgent(CreateAgentInput{Name: "Юри", Gender: "female"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := bridge.CreateAgent(CreateAgentInput{Name: "Мира", Gender: "female"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.DeleteAgent(DeleteAgentInput{ID: deleted.ID}); err != nil {
+		t.Fatal(err)
+	}
+	active, err := bridge.GetActiveAgent()
+	if err != nil || active.ID != first.ID {
+		t.Fatalf("active after delete = %#v err=%v", active, err)
+	}
+	roster, err := bridge.ListAgents()
+	if err != nil || len(roster) != 1 || roster[0].ID != first.ID {
+		t.Fatalf("active roster after delete = %#v err=%v", roster, err)
+	}
+	historical, err := bridge.repositories.Agents.GetIncludingDeleted(context.Background(), domain.ID(deleted.ID))
+	if err != nil || !historical.Deleted() {
+		t.Fatalf("historical tombstone = %#v err=%v", historical, err)
+	}
+	all, err := bridge.repositories.Agents.ListIncludingDeleted(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := bridge.repositories.Agents.Get(context.Background(), domain.ID(first.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := agentIdentitySeed(owner, all, "ru-RU")
+	if !strings.Contains(seed, "Deleted peers") || !strings.Contains(seed, "Мира") || !strings.Contains(seed, "unavailable") {
+		t.Fatalf("deleted peer missing from identity seed: %s", seed)
+	}
+	if _, err := bridge.SetActiveAgent(SelectAgentInput{ID: deleted.ID}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("SetActiveAgent(deleted) err=%v", err)
+	}
+}
+
+func TestDeleteLastAgentReturnsInstallationToAgentOnboarding(t *testing.T) {
+	bridge := newAgentTestBridge(t)
+	created, err := bridge.CreateAgent(CreateAgentInput{Name: "Лира", Gender: "female"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.DeleteAgent(DeleteAgentInput{ID: created.ID}); err != nil {
+		t.Fatal(err)
+	}
+	state := bridge.GetOnboardingState()
+	if state.AgentConfigured || state.Completed || state.ActiveAgentID != "" {
+		t.Fatalf("onboarding after deleting last agent = %#v", state)
+	}
+	active, err := bridge.ListAgents()
+	if err != nil || len(active) != 0 {
+		t.Fatalf("active roster = %#v, %v", active, err)
+	}
+	loaded, err := config.Load(bridge.paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Persona.ProfileID != "" || loaded.Onboarding.AgentConfigured || loaded.Onboarding.Completed {
+		t.Fatalf("persisted onboarding after deleting last agent = %#v", loaded.Onboarding)
 	}
 }

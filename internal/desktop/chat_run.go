@@ -78,6 +78,13 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	}
 	runContext, cancel := context.WithCancel(parent)
 	defer cancel()
+	// Resolve the live profile before creating a conversation or user message.
+	// Get intentionally excludes tombstones, so a stale UI cannot append new
+	// history to a deleted agent while failing only later during run creation.
+	profileForBudget, err := b.repositories.Agents.Get(runContext, agentID)
+	if err != nil {
+		return ChatRunResult{}, err
+	}
 
 	now := time.Now().UTC()
 	attachments, err := b.prepareChatAttachments(request.Attachments)
@@ -127,10 +134,6 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 		return ChatRunResult{}, err
 	}
 	run.Inference = routePlan.Primary
-	profileForBudget, err := b.repositories.Agents.Get(runContext, agentID)
-	if err != nil {
-		return ChatRunResult{}, err
-	}
 	resolvedBudget := mergeRequestedRunBudget(executionbudget.ResolveRun(profileForBudget.ExecutionBudget, runWorkload(runKind), executionbudget.ModelLimits{}), requestedBudget)
 	run.Budget = resolvedBudget.Budget
 	if err := b.repositories.Runs.Create(runContext, run); err != nil {
@@ -237,6 +240,10 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
 	}
+	identityRoster, err := b.repositories.Agents.ListIncludingDeleted(runContext)
+	if err != nil {
+		return b.failChatRun(runContext, &run, emitter, err), nil
+	}
 	persona, err := b.repositories.Persona.Get(runContext, profileID)
 	if err != nil {
 		return b.failChatRun(runContext, &run, emitter, err), nil
@@ -263,7 +270,7 @@ func (b *Bridge) sendMessageContextWithBudget(parent context.Context, request Ch
 	}
 	snapshot, err := assembler.Assemble(runContext, contextbuilder.Input{
 		AgentID: profileID, ConversationID: conversationID, Query: titleSeed,
-		ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, roster, personalization.Identity.PreferredLanguage),
+		ImmutablePolicy: immutablePolicySystemPrompt, IdentitySeed: agentIdentitySeed(profile, identityRoster, personalization.Identity.PreferredLanguage),
 		BackstorySummary: domain.BackstoryIdentitySummary(personalization.Backstory), BehavioralContext: compiledPersonality.BehavioralContext,
 		Transcript: currentTranscript,
 	})

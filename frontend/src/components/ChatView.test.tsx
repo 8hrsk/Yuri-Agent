@@ -127,6 +127,23 @@ describe('ChatView attachments', () => {
   })
 })
 
+describe('ChatView conversation deletion', () => {
+  it('deletes the selected transcript and opens a fresh conversation when it was the last one', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    const user = userEvent.setup()
+    const deleteConversation = vi.fn(async () => undefined)
+    const replacement = { ...conversationFixture(), id: 'conv-2', title: 'Новый диалог 2' }
+    createHarness({ deleteConversation, createConversation: vi.fn(async () => replacement) })
+    render(<ChatView agentName="Yuri" backend={backend} onOpenSettings={vi.fn()} />)
+
+    await screen.findByRole('heading', { name: 'Новый диалог' })
+    await user.click(screen.getByRole('button', { name: 'Удалить диалог' }))
+
+    await waitFor(() => expect(deleteConversation).toHaveBeenCalledWith('conv-1'))
+    expect(await screen.findByRole('heading', { name: 'Новый диалог 2' })).toBeInTheDocument()
+  })
+})
+
 describe('ChatView approval flow', () => {
   it('reports a rejected approval inside the dialog instead of hanging (H-11/M-49)', async () => {
     const user = userEvent.setup()

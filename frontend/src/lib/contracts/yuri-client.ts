@@ -56,12 +56,14 @@ export interface YuriClient {
   createConversation(title: string): Promise<Conversation>
   /** Explicit owner rename; this marks the title as user-owned on the backend. */
   renameConversation(conversationId: string, title: string): Promise<Conversation | undefined>
+  deleteConversation(conversationId: string): Promise<void>
   listChatTools(): Promise<ChatTool[]>
   listAgents(): Promise<AgentProfile[]>
   getActiveAgent(): Promise<AgentProfile | undefined>
   getActiveAgentPersonalization(): Promise<AgentPersonalizationProfile | undefined>
   updateActiveAgentPersonalization(input: AgentPersonalizationUpdate): Promise<AgentPersonalizationProfile>
   createAgent(input: AgentProfileInput): Promise<AgentProfile>
+  deleteAgent(agentId: string): Promise<void>
   exportActiveAgentProfile(): Promise<PortableAgentProfile | undefined>
   openPortableAgentProfile(): Promise<PortableAgentProfile | undefined>
   previewAgentPersonality(input: AgentProfileInput, scenario: PersonalityPreviewScenario): Promise<PersonalityPreview | undefined>

@@ -383,6 +383,28 @@ func TestPersonaConfigValidation(t *testing.T) {
 	}
 }
 
+func TestEmptyPersonaProfileIsValidOnlyWithoutConfiguredAgent(t *testing.T) {
+	paths := testPaths(t)
+	value := Default(paths)
+	value.Persona.ProfileID = ""
+	value.Onboarding.AgentConfigured = false
+	value.Onboarding.Completed = false
+	if err := Save(paths, value); err != nil {
+		t.Fatalf("Save() empty roster config: %v", err)
+	}
+	loaded, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Persona.ProfileID != "" {
+		t.Fatalf("Load() profile id = %q, want empty", loaded.Persona.ProfileID)
+	}
+	value.Onboarding.AgentConfigured = true
+	if err := value.Validate(); err == nil {
+		t.Fatal("configured agent without profile id was accepted")
+	}
+}
+
 func contains(value, substring string) bool {
 	return len(substring) > 0 && len(value) >= len(substring) && strings.Contains(value, substring)
 }

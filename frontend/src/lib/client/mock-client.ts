@@ -222,6 +222,10 @@ class MockYuriClient implements YuriClient {
     return cloneConversation(conversation)
   }
 
+  async deleteConversation(conversationId: string): Promise<void> {
+    if (!this.conversations.delete(conversationId)) throw new Error('Диалог не найден.')
+  }
+
   async listChatTools(): Promise<ChatTool[]> {
     return [
       {
@@ -248,7 +252,7 @@ class MockYuriClient implements YuriClient {
   }
 
   async listAgents(): Promise<AgentProfile[]> {
-    return [...this.agents.values()].map((agent) => ({ ...agent, backstory: agent.backstory, traits: { ...agent.traits }, active: agent.id === this.activeAgentId }))
+    return [...this.agents.values()].filter((agent) => !agent.deleted).map((agent) => ({ ...agent, backstory: agent.backstory, traits: { ...agent.traits }, active: agent.id === this.activeAgentId }))
   }
 
   async getActiveAgent(): Promise<AgentProfile | undefined> {
@@ -309,6 +313,19 @@ class MockYuriClient implements YuriClient {
       completed: this.onboarding.providerTested,
     }
     return { ...agent, backstory: agent.backstory, traits: { ...agent.traits } }
+  }
+
+  async deleteAgent(agentId: string): Promise<void> {
+    const agent = this.agents.get(agentId)
+    if (!agent || agent.deleted) throw new Error('Агент не найден.')
+    this.agents.set(agentId, { ...agent, active: false, deleted: true, deletedAt: nowIso() })
+    if (this.activeAgentId === agentId) this.activeAgentId = [...this.agents.values()].find((candidate) => !candidate.deleted)?.id
+    this.onboarding = {
+      ...this.onboarding,
+      agentConfigured: Boolean(this.activeAgentId),
+      activeAgentId: this.activeAgentId,
+      completed: Boolean(this.activeAgentId) && this.onboarding.providerTested,
+    }
   }
 
   async exportActiveAgentProfile(): Promise<PortableAgentProfile | undefined> {

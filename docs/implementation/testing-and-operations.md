@@ -60,6 +60,10 @@ macos-checksum, macos-verify и UI/voice launch smoke. Production OSS build
 credentials этот repository не управляет.
 
 CI workflow расположен в [.github/workflows/ci.yml](../../.github/workflows/ci.yml).
+Нативную Windows-проверку `dev` без GitHub Actions выполняет отдельный
+[polling runner](../WINDOWS_OFFLINE_RUNNER.md): Go/frontend suite, Wails
+`windows/amd64` artifact и интерактивные onboarding/voice smoke проходят на
+выделенном Windows PC.
 Для локальной диагностики предпочитайте минимальный затронутый test package,
 затем make check перед broad change.
 

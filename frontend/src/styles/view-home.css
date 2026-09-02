@@ -137,9 +137,15 @@
   display: block;
   width: 100%;
   min-height: 59px;
+
+  /* Past this the field scrolls rather than pushing the transcript up. */
+  max-height: 190px;
   padding: 15px 0 8px;
   border: 0;
-  resize: vertical;
+
+  /* ChatComposer sizes the field to its content; the native grip used to be
+   * drawn on top of the send button one row below. */
+  resize: none;
   color: #e1deed;
   font-size: 12px;
   line-height: 1.5;
@@ -156,12 +162,18 @@
 
 .composer__toolbar {
   min-height: 27px;
+
+  /* The hint and the button row move onto separate lines in a narrow panel
+   * instead of the hint breaking mid-phrase and pushing the buttons down. */
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .composer__note {
   color: #656276;
   font-family: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', monospace;
   font-size: 9px;
+  white-space: nowrap;
 }
 
 .composer__actions {
@@ -430,9 +442,7 @@
     min-height: 66px;
   }
 
-  .topbar__connection,
-  .topbar__actions kbd,
-  .topbar__avatar {
+  .topbar__connection {
     display: none;
   }
 
@@ -463,7 +473,4 @@
     padding: 0 18px;
   }
 
-  .statusbar__right {
-    display: none;
-  }
 }

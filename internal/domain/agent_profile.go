@@ -67,6 +67,7 @@ type AgentProfile struct {
 	ExecutionBudget    ExecutionBudgetPreset `json:"execution_budget,omitempty"`
 	CreatedAt          time.Time             `json:"created_at"`
 	UpdatedAt          time.Time             `json:"updated_at"`
+	DeletedAt          *time.Time            `json:"deleted_at,omitempty"`
 }
 
 func NewAgentProfile(id ID, name string, age int, gender, preferences string, now time.Time) (AgentProfile, error) {
@@ -143,8 +144,13 @@ func (p AgentProfile) Validate() error {
 	if p.CreatedAt.IsZero() || p.UpdatedAt.IsZero() || p.UpdatedAt.Before(p.CreatedAt) {
 		return fmt.Errorf("%w: invalid agent profile timestamps", ErrInvalidArgument)
 	}
+	if p.DeletedAt != nil && (p.DeletedAt.IsZero() || p.DeletedAt.Before(p.CreatedAt)) {
+		return fmt.Errorf("%w: invalid agent deletion timestamp", ErrInvalidArgument)
+	}
 	return nil
 }
+
+func (p AgentProfile) Deleted() bool { return p.DeletedAt != nil }
 
 // FallbackRoute returns the configured fallback only when the owner has
 // explicitly enabled it. Returning a separate boolean keeps the disabled

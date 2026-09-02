@@ -507,6 +507,7 @@ export function PersonaRelationshipView({ section, onActiveAgentChange, onModelR
         fallbackEnabled={fallbackRoute.enabled}
         fallbackModel={fallbackRoute.model}
         fallbackProviderId={fallbackRoute.providerId}
+        fallbackAction={<button className="button button--quiet" disabled={busy !== undefined || (fallbackRoute.enabled === (activeAgent.fallbackEnabled ?? false) && fallbackRoute.providerId === (activeAgent.fallbackProviderId ?? '') && fallbackRoute.model === (activeAgent.fallbackModel ?? ''))} onClick={() => void saveFallbackRoute()} type="button"><Icon name="check" width={14} height={14} /> {busy === 'fallback' ? 'Сохраняю…' : 'Сохранить резервный маршрут'}</button>}
         model={modelRoute.model}
         onChange={(providerId, model) => {
           setModelRoute({ providerId, model })
@@ -523,9 +524,6 @@ export function PersonaRelationshipView({ section, onActiveAgentChange, onModelR
         </div>}
         providerId={modelRoute.providerId}
       />
-      <div className="agent-route-panel__actions">
-        <button className="button button--quiet" disabled={busy !== undefined || (fallbackRoute.enabled === (activeAgent.fallbackEnabled ?? false) && fallbackRoute.providerId === (activeAgent.fallbackProviderId ?? '') && fallbackRoute.model === (activeAgent.fallbackModel ?? ''))} onClick={() => void saveFallbackRoute()} type="button"><Icon name="check" width={14} height={14} /> {busy === 'fallback' ? 'Сохраняю…' : 'Сохранить резервный маршрут'}</button>
-      </div>
     </section>}
 
     {!relationship && ownerSeed && <section className="owner-seed-summary" aria-labelledby="owner-seed-title">

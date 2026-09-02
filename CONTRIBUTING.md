@@ -26,7 +26,7 @@ make check
 
 Не добавляйте `node_modules`, build artifacts, SQLite databases, Keychain exports, provider tokens или диагностические dumps в git.
 
-CI проверяет Go и frontend на Linux, а также повторяет foundation tests и frontend build на macOS. Локальную desktop-упаковку выполняйте из `cmd/yuri` командой `wails build`.
+CI проверяет Go и frontend на Linux, а также повторяет foundation tests и frontend build на macOS. Независимый от GitHub Actions Windows polling runner описан в [`docs/WINDOWS_OFFLINE_RUNNER.md`](docs/WINDOWS_OFFLINE_RUNNER.md). Локальную desktop-упаковку выполняйте из `cmd/yuri` командой `wails build`.
 
 ## Правила изменений
 
