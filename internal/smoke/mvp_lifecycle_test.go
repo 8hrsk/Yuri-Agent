@@ -404,6 +404,9 @@ func TestMVPOfflineLifecycle(t *testing.T) {
 			t.Fatalf("create plugin bin directory: %v", err)
 		}
 		executable := filepath.Join(binDirectory, "yuri-reference")
+		if runtime.GOOS == "windows" {
+			executable += ".exe"
+		}
 		command := exec.Command("go", "build", "-o", executable, "./plugins/reference")
 		command.Dir = repositoryRoot
 		command.Env = append(os.Environ(), "CGO_ENABLED=0")
@@ -656,8 +659,10 @@ func (backend *promptInjectionBackend) Start(_ context.Context, request agent.Mo
 			return nil, errors.New("second model request has no messages")
 		}
 		toolMessage := request.Messages[len(request.Messages)-1]
-		backend.sawUntrustedToolMessage = toolMessage.Role == agent.RoleTool &&
-			toolMessage.ToolCallID == "read-untrusted" && strings.Contains(toolMessage.Content, backend.injection)
+		var readResult builtintools.ReadResult
+		decodeErr := json.Unmarshal([]byte(toolMessage.Content), &readResult)
+		backend.sawUntrustedToolMessage = decodeErr == nil && toolMessage.Role == agent.RoleTool &&
+			toolMessage.ToolCallID == "read-untrusted" && strings.Contains(readResult.Content, backend.injection)
 		if !backend.sawUntrustedToolMessage {
 			return nil, errors.New("untrusted file content was not preserved as tool-role data")
 		}

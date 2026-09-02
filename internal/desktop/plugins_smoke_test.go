@@ -119,7 +119,7 @@ func buildCrashPluginPackage(t *testing.T, root string) string {
 	if err := os.MkdirAll(packageDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	executable := filepath.Join(packageDirectory, "crash-plugin")
+	executable := testExecutablePath(filepath.Join(packageDirectory, "crash-plugin"))
 	command := exec.Command("go", "build", "-o", executable, "./testdata/crashplugin")
 	command.Dir = filepath.Dir(executableSourcePath(t))
 	command.Env = append(os.Environ(), "CGO_ENABLED=0")

@@ -599,6 +599,13 @@ func (m Manifest) ResolveExecutable(packageDir string) (string, error) {
 		return "", fmt.Errorf("%w: executable %q", ErrPathEscape, m.Executable)
 	}
 	executableReal, err := filepath.EvalSymlinks(joined)
+	if err != nil && runtime.GOOS == "windows" && filepath.Ext(joined) == "" {
+		// Go and common Windows build tools append .exe even when -o is given
+		// an extensionless name. Manifests stay portable by naming the same
+		// executable on every platform, so resolve that conventional suffix.
+		joined += ".exe"
+		executableReal, err = filepath.EvalSymlinks(joined)
+	}
 	if err != nil {
 		return "", fmt.Errorf("%w: resolve executable: %v", ErrExecutableInvalid, err)
 	}

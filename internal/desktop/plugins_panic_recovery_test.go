@@ -212,7 +212,7 @@ func buildEventPluginPackage(t *testing.T, root string) string {
 	if err := os.MkdirAll(packageDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	executable := filepath.Join(packageDirectory, "event-plugin")
+	executable := testExecutablePath(filepath.Join(packageDirectory, "event-plugin"))
 	command := exec.Command("go", "build", "-o", executable, "./testdata/eventplugin")
 	command.Dir = filepath.Dir(executableSourcePath(t))
 	command.Env = append(os.Environ(), "CGO_ENABLED=0")

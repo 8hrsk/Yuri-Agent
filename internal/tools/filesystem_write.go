@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/OrdoAI/yuri-agent/internal/domain"
@@ -352,6 +353,11 @@ func writeResult(operation, path, content string, replaced bool) WriteResult {
 }
 
 func syncDirectory(path string) error {
+	if runtime.GOOS == "windows" {
+		// os.File.Sync on an opened directory returns access denied on Windows.
+		// The temporary file itself has already been synced before the rename.
+		return nil
+	}
 	directory, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open parent directory: %w", err)

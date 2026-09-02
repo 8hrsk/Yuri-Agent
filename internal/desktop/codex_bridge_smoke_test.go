@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -124,7 +125,7 @@ func TestCodexBridgeAccountLifecycleSmoke(t *testing.T) {
 
 func buildFakeCodexAppServer(t *testing.T, root string) string {
 	t.Helper()
-	binary := filepath.Join(root, "fake-codex")
+	binary := testExecutablePath(filepath.Join(root, "fake-codex"))
 	command := exec.Command("go", "build", "-o", binary, "./testdata/fakecodex")
 	command.Dir = filepath.Dir(executableSourcePath(t))
 	command.Env = append(os.Environ(), "CGO_ENABLED=0")
@@ -132,6 +133,13 @@ func buildFakeCodexAppServer(t *testing.T, root string) string {
 		t.Fatalf("build fake Codex app-server: %v\n%s", err, output)
 	}
 	return binary
+}
+
+func testExecutablePath(path string) string {
+	if runtime.GOOS == "windows" {
+		return path + ".exe"
+	}
+	return path
 }
 
 func assertBytesDoNotContain(t *testing.T, name string, content []byte, canary string) {

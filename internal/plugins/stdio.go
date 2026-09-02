@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -422,17 +423,34 @@ func (c *Client) drainWrites(err error) {
 }
 
 func (c *Client) writeFrame(data []byte) error {
+	var deadlineExpired chan struct{}
+	var deadlineTimer *time.Timer
 	if c.config.WriteTimeout > 0 {
 		_ = c.stdin.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
+		// Windows anonymous pipes do not implement write deadlines. Closing the
+		// host end is safe here because any partial frame already makes the
+		// protocol session unusable, and it reliably releases a blocked write.
+		if runtime.GOOS == "windows" {
+			deadlineExpired = make(chan struct{})
+			deadlineTimer = time.AfterFunc(c.config.WriteTimeout, func() {
+				_ = c.stdin.Close()
+				close(deadlineExpired)
+			})
+		}
 	}
 	written, err := c.stdin.Write(data)
+	timedOut := false
+	if deadlineTimer != nil && !deadlineTimer.Stop() {
+		<-deadlineExpired
+		timedOut = true
+	}
 	if err == nil && written != len(data) {
 		err = io.ErrShortWrite
 	}
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, os.ErrDeadlineExceeded) {
+	if timedOut || errors.Is(err, os.ErrDeadlineExceeded) {
 		return fmt.Errorf("%w: stdin write timed out after %s; the plugin stopped reading its stdin", ErrPluginExited, c.config.WriteTimeout)
 	}
 	return fmt.Errorf("%w: write stdin: %v", ErrPluginExited, err)

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -165,7 +166,7 @@ func copyTestBinary(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	defer source.Close()
-	target := filepath.Join(dir, "reference-plugin")
+	target := testExecutablePath(filepath.Join(dir, "reference-plugin"))
 	destination, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
 		t.Fatal(err)
@@ -178,6 +179,13 @@ func copyTestBinary(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return target
+}
+
+func testExecutablePath(path string) string {
+	if runtime.GOOS == "windows" {
+		return path + ".exe"
+	}
+	return path
 }
 
 func testSupervisor(t *testing.T, extraEnv ...string) (*Supervisor, func()) {

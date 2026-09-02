@@ -31,7 +31,7 @@ func TestReferencePluginRunsThroughCoreSupervisor(t *testing.T) {
 	if err := os.MkdirAll(binDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	executable := filepath.Join(binDirectory, "yuri-reference")
+	executable := testExecutablePath(filepath.Join(binDirectory, "yuri-reference"))
 	command := exec.Command("go", "build", "-o", executable, "./plugins/reference")
 	command.Dir = repositoryRoot
 	if output, err := command.CombinedOutput(); err != nil {

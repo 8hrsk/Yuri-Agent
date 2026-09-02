@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -535,6 +536,12 @@ func syncFile(path string) error {
 }
 
 func syncDirectory(path string) error {
+	if runtime.GOOS == "windows" {
+		// Windows does not permit opening a directory for FlushFileBuffers via
+		// os.File.Sync. The preceding file sync still provides the available
+		// durability guarantee on that platform.
+		return nil
+	}
 	directory, err := os.Open(path)
 	if err != nil {
 		return err
