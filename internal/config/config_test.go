@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -95,7 +97,7 @@ func TestLoadLegacyConfigDefaultsToIncompleteOnboarding(t *testing.T) {
 	if err := os.MkdirAll(paths.ConfigDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	legacy := `{"version":1,"locale":"ru-RU","log_level":"info","data_directory":"` + paths.DataDirectory + `","providers":[{"id":"main","kind":"openai-compatible","display_name":"Main","base_url":"http://localhost:43111/v1","model":"model","credential_ref":"provider.main.api-key","enabled":true}]}`
+	legacy := `{"version":1,"locale":"ru-RU","log_level":"info","data_directory":` + strconv.Quote(paths.DataDirectory) + `,"providers":[{"id":"main","kind":"openai-compatible","display_name":"Main","base_url":"http://localhost:43111/v1","model":"model","credential_ref":"provider.main.api-key","enabled":true}]}`
 	if err := os.WriteFile(paths.ConfigFile, []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +115,7 @@ func TestLoadMigratesCompletedStageSevenOnboarding(t *testing.T) {
 	if err := os.MkdirAll(paths.ConfigDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	legacy := `{"version":1,"locale":"ru-RU","log_level":"info","data_directory":"` + paths.DataDirectory + `","onboarding":{"completed":true,"provider_tested":true}}`
+	legacy := `{"version":1,"locale":"ru-RU","log_level":"info","data_directory":` + strconv.Quote(paths.DataDirectory) + `,"onboarding":{"completed":true,"provider_tested":true}}`
 	if err := os.WriteFile(paths.ConfigFile, []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +133,7 @@ func TestLoadClearsLegacyCodexOAuthModel(t *testing.T) {
 	if err := os.MkdirAll(paths.ConfigDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	legacy := `{"version":1,"locale":"ru-RU","log_level":"info","data_directory":"` + paths.DataDirectory + `","providers":[{"id":"codex","kind":"codex-app-server","display_name":"Codex App Server","model":"gpt-5-codex","binary":"codex","enabled":true}]}`
+	legacy := `{"version":1,"locale":"ru-RU","log_level":"info","data_directory":` + strconv.Quote(paths.DataDirectory) + `,"providers":[{"id":"codex","kind":"codex-app-server","display_name":"Codex App Server","model":"gpt-5-codex","binary":"codex","enabled":true}]}`
 	if err := os.WriteFile(paths.ConfigFile, []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +179,7 @@ func TestLoadBackfillsStageFourProactivityDefaults(t *testing.T) {
 	if err := os.MkdirAll(paths.ConfigDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	legacy := `{"version":1,"locale":"ru-RU","log_level":"info","data_directory":"` + paths.DataDirectory + `"}`
+	legacy := `{"version":1,"locale":"ru-RU","log_level":"info","data_directory":` + strconv.Quote(paths.DataDirectory) + `}`
 	if err := os.WriteFile(paths.ConfigFile, []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +231,7 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat() error = %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("config permissions = %o, want 600", info.Mode().Perm())
 	}
 }

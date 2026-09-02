@@ -115,7 +115,11 @@ func isIntegrityPingError(err error) bool {
 }
 
 func sqliteFileDSN(path string, readOnly bool) string {
-	databaseURL := url.URL{Scheme: "file", Path: path}
+	urlPath := filepath.ToSlash(path)
+	if filepath.VolumeName(path) != "" {
+		urlPath = "/" + urlPath
+	}
+	databaseURL := url.URL{Scheme: "file", Path: urlPath}
 	query := databaseURL.Query()
 	if readOnly {
 		query.Set("mode", "ro")

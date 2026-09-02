@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -269,7 +270,7 @@ func checkRegularOwnerFile(path string) error {
 	}
 	// Source files may be readable by the owner only. We don't silently copy a
 	// group/world-readable source into a backup whose caller expects privacy.
-	if info.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		return fmt.Errorf("%w: source file is not owner-only", ErrUnsafePath)
 	}
 	return nil

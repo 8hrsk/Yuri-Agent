@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -45,7 +46,7 @@ func TestExportValidateAndRestoreRoundTrip(t *testing.T) {
 	}
 	if info, err := os.Stat(archivePath); err != nil {
 		t.Fatal(err)
-	} else if info.Mode().Perm() != 0o600 {
+	} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("archive permissions = %o", info.Mode().Perm())
 	}
 	beforeArchive, err := os.ReadFile(archivePath)
@@ -81,7 +82,7 @@ func TestExportValidateAndRestoreRoundTrip(t *testing.T) {
 	}
 	if info, err := os.Stat(result.DatabasePath); err != nil {
 		t.Fatal(err)
-	} else if info.Mode().Perm() != 0o600 {
+	} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("restored database permissions = %o", info.Mode().Perm())
 	}
 	if strings.Contains(string(result.ConfigMetadata), "credential_ref") || strings.Contains(string(result.ConfigMetadata), "keyring-ref") || strings.Contains(string(result.ConfigMetadata), "api_key") || strings.Contains(string(result.ConfigMetadata), "sk-test") || strings.Contains(string(result.ConfigMetadata), "unsafe-provider") || strings.Contains(string(result.ConfigMetadata), `"binary"`) {
@@ -272,5 +273,9 @@ func testDatabase(t *testing.T) (*sql.DB, string) {
 }
 
 func sqliteDSN(path string) string {
-	return (&url.URL{Scheme: "file", Path: path}).String()
+	urlPath := filepath.ToSlash(path)
+	if filepath.VolumeName(path) != "" {
+		urlPath = "/" + urlPath
+	}
+	return (&url.URL{Scheme: "file", Path: urlPath}).String()
 }

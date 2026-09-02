@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -30,7 +31,7 @@ func TestPortableAgentProfileExportsOnlyOwnerCreationContractAndRoundTrips(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("portable profile mode = %o", info.Mode().Perm())
 	}
 	data, err := os.ReadFile(path)
