@@ -1,0 +1,13 @@
+{
+  "repositoryUrl": "https://github.com/YOUR_ACCOUNT/Yuri-Agent.git",
+  "branch": "dev",
+  "pollSeconds": 60,
+  "retryFailedAfterMinutes": 30,
+  "workRoot": "C:\\YuriOfflineRunner",
+  "artifactRetention": 5,
+  "logRetention": 20,
+  "launchSmokeFlows": [
+    "onboarding",
+    "voice"
+  ]
+}

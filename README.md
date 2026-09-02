@@ -50,6 +50,9 @@ Engineering foundation, conversational vertical slice, storage/memory, plugin ru
 
 CI проверяет core, scheduler/proactivity, reflection/persona storage, Plugin SDK/reference plugin, frontend, macOS universal OSS artifact/checksum и отдельный Wails app launch/clean-shutdown smoke. Подробности упаковки находятся в [`docs/MACOS_RELEASE.md`](docs/MACOS_RELEASE.md).
 
+Для проверки каждого push в `dev` на собственной Windows-машине без GitHub
+Actions доступен polling runner: [`docs/WINDOWS_OFFLINE_RUNNER.md`](docs/WINDOWS_OFFLINE_RUNNER.md).
+
 Важно: Этап 3 изолирует сбой плагина отдельным процессом, но ещё не превращает сторонний executable в полностью недоверенный код. До OS sandbox и process hardening устанавливать следует только проверенные пакеты; unsigned package требует явного dev mode.
 
 ## Локальная проверка
