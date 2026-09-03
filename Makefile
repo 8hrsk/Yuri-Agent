@@ -15,7 +15,9 @@ WAILS_BIN ?= $(TOOLS_DIR)/wails
 MACOS_MIN_VERSION := 11.0.0
 MACOS_APP ?= $(ROOT_DIR)/cmd/yuri/build/bin/yuri.app
 MACOS_DIST_DIR ?= $(ROOT_DIR)/dist/macos
-YURI_VERSION ?= 0.7.0
+YURI_VERSION ?= $(shell tr -d '[:space:]' < $(ROOT_DIR)/VERSION)
+YURI_COMMIT ?= $(shell git -C $(ROOT_DIR) rev-parse HEAD)
+YURI_BUILD_DATE ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 MACOS_ARTIFACT ?= $(MACOS_DIST_DIR)/yuri-$(YURI_VERSION)-macos-universal.zip
 MACOS_CHECKSUM ?= $(MACOS_ARTIFACT).sha256
 MACOS_VALIDATOR ?= $(ROOT_DIR)/scripts/validate-macos-oss.sh
@@ -77,12 +79,18 @@ frontend-build:
 # not manage signing identities, notarization or distribution credentials.
 macos-build: wails-version
 	@test "$$(uname -s)" = Darwin || { echo "macos-build requires macOS" >&2; exit 1; }
-	@cd "$(ROOT_DIR)/cmd/yuri" && \
+	@config="$(ROOT_DIR)/cmd/yuri/wails.json"; \
+	backup="$$(mktemp "$${TMPDIR:-/tmp}/yuri-wails.XXXXXX")"; \
+	cp "$$config" "$$backup"; \
+	trap 'cp "$$backup" "$$config"; rm -f "$$backup"' EXIT HUP INT TERM; \
+	node "$(ROOT_DIR)/scripts/release/set-wails-version.mjs" "$$config" "$(YURI_VERSION)"; \
+	cd "$(ROOT_DIR)/cmd/yuri" && \
 	CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET="$(MACOS_MIN_VERSION)" \
 	CGO_CFLAGS="-mmacosx-version-min=$(MACOS_MIN_VERSION)" \
 	CGO_LDFLAGS="-mmacosx-version-min=$(MACOS_MIN_VERSION)" \
 	"$(WAILS_BIN)" build -clean -platform darwin/universal -trimpath \
-		-ldflags "-s -w" -m -nosyncgomod
+		-ldflags "-s -w -X github.com/OrdoAI/yuri-agent/internal/buildinfo.Version=$(YURI_VERSION) -X github.com/OrdoAI/yuri-agent/internal/buildinfo.Commit=$(YURI_COMMIT) -X github.com/OrdoAI/yuri-agent/internal/buildinfo.Date=$(YURI_BUILD_DATE)" \
+		-m -nosyncgomod
 macos-validate: macos-build
 	@"$(MACOS_VALIDATOR)" --app "$(MACOS_APP)" --version "$(YURI_VERSION)"
 

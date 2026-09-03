@@ -1,6 +1,6 @@
 # macOS OSS build
 
-macOS — целевая и тестируемая ОС MVP. Репозиторий собирает universal app (`arm64` + `x86_64`) для macOS 11 и новее. Единственный автоматизированный путь — проверяемый OSS-артефакт GitHub Actions: universal `.app`, zip-архив и SHA-256 manifest. Workflow сохраняет их только как CI artifact с ограниченным сроком хранения.
+macOS — целевая и тестируемая ОС MVP. Репозиторий собирает universal app (`arm64` + `x86_64`) для macOS 11 и новее. Ветка `dev` создаёт проверяемый CI artifact с ограниченным сроком хранения, а push в `main` запускает self-hosted release workflow и публикует версионированный архив в GitHub Releases.
 
 Этот артефакт предназначен для CI, разработки и ручного тестирования. Проект не управляет signing identities, notarization или внешним каналом распространения. Внешние credentials, сертификаты и публикация за пределами CI artifact не используются.
 
@@ -9,7 +9,7 @@ macOS — целевая и тестируемая ОС MVP. Репозитор�
 Требования: Xcode Command Line Tools, Go и Node версий из `go.mod`/CI. Wails CLI не берётся из `PATH` или `@latest`: `make wails-install` устанавливает ровно `v2.15.0` в `.tools/`.
 
 ```text
-make macos-smoke YURI_VERSION=0.7.0
+make macos-smoke
 ```
 
 Команда:
@@ -22,7 +22,7 @@ make macos-smoke YURI_VERSION=0.7.0
 
 ## Граница CI
 
-Job `macos-foundation` в `.github/workflows/ci.yml` запускает тот же `make macos-smoke`, а затем загружает `dist/macos/*.zip` и `dist/macos/*.sha256` через `actions/upload-artifact`. Это единственное автоматическое сохранение артефактов. CI artifact не является установщиком, обновляющим каналом или обещанием совместимости за пределами проверенной macOS universal сборки.
+Job `macos-foundation` в `.github/workflows/ci.yml` запускает тот же `make macos-smoke`, а затем загружает `dist/macos/*.zip` и `dist/macos/*.sha256` через `actions/upload-artifact`. Release workflow `.github/workflows/release.yml` отдельно собирает архив с версией, рассчитанной из SemVer-тегов, объединяет его с Windows/Linux-пакетами и публикует GitHub Release. Оба workflow используют только self-hosted runner-ы репозитория.
 
 ## Wails launch и UI smoke
 

@@ -3,7 +3,6 @@ name: CI
 on:
   push:
     branches: [dev]
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -16,7 +15,7 @@ concurrency:
 jobs:
   hygiene:
     name: Repository hygiene
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -28,7 +27,7 @@ jobs:
 
   go:
     name: Go foundation
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -67,7 +66,7 @@ jobs:
 
   lint:
     name: Go lint and vulnerability scan
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -90,7 +89,7 @@ jobs:
 
   frontend:
     name: Frontend foundation
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -132,7 +131,7 @@ jobs:
         run: npm run build
 
   windows-foundation:
-    name: Windows x64 OSS artifact
+    name: Windows x64 and arm64 OSS artifacts
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 60
@@ -172,23 +171,37 @@ jobs:
       - name: Test and build on Windows
         shell: powershell
         run: |
+          $version = (Get-Content -LiteralPath ".\VERSION" -Raw).Trim()
+          $artifactDirectory = Join-Path $env:RUNNER_TEMP "yuri-windows-artifact"
           & ".\scripts\windows-runner\Invoke-YuriWindowsPipeline.ps1" `
             -RepositoryRoot $env:GITHUB_WORKSPACE `
-            -ArtifactDirectory (Join-Path $env:RUNNER_TEMP "yuri-windows-artifact") `
+            -ArtifactDirectory $artifactDirectory `
             -ToolsDirectory (Join-Path $env:RUNNER_TOOL_CACHE "yuri-wails") `
+            -Architecture amd64 `
+            -ArtifactBaseName "yuri-$version-windows-amd64" `
+            -Version $version `
+            -LaunchSmokeFlows @()
+          & ".\scripts\windows-runner\Invoke-YuriWindowsPipeline.ps1" `
+            -RepositoryRoot $env:GITHUB_WORKSPACE `
+            -ArtifactDirectory $artifactDirectory `
+            -ToolsDirectory (Join-Path $env:RUNNER_TOOL_CACHE "yuri-wails") `
+            -Architecture arm64 `
+            -ArtifactBaseName "yuri-$version-windows-arm64" `
+            -Version $version `
+            -SkipChecks `
             -LaunchSmokeFlows @()
 
       - name: Upload Windows executable, checksum, and build metadata
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: yuri-windows-x64-oss-${{ github.sha }}
+          name: yuri-windows-x64-arm64-oss-${{ github.sha }}
           path: ${{ runner.temp }}\yuri-windows-artifact\*
           if-no-files-found: error
           retention-days: 7
 
   macos-foundation:
     name: macOS universal OSS artifact
-    runs-on: macos-latest
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -222,7 +235,7 @@ jobs:
         run: npm run build
 
       - name: Build, validate, launch, and interact with universal OSS app
-        run: make macos-smoke macos-launch-smoke macos-ui-smoke macos-voice-smoke YURI_VERSION=0.7.0 MACOS_LAUNCH_TIMEOUT=90
+        run: make macos-smoke macos-launch-smoke macos-ui-smoke macos-voice-smoke MACOS_LAUNCH_TIMEOUT=90
 
       - name: Upload universal OSS archive and checksum as CI artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

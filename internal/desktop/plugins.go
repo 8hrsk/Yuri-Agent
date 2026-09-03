@@ -1,13 +1,13 @@
 package desktop
 
 import (
+	"github.com/OrdoAI/yuri-agent/internal/buildinfo"
 	"github.com/OrdoAI/yuri-agent/internal/domain"
 )
 
-const (
-	pluginCoreVersion      = "0.4.0"
-	maxPluginManifestBytes = 1024 * 1024
-)
+var pluginCoreVersion = buildinfo.Version
+
+const maxPluginManifestBytes = 1024 * 1024
 
 type PluginPermissionDTO struct {
 	Capability  string   `json:"capability"`

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OrdoAI/yuri-agent/internal/buildinfo"
 	"github.com/OrdoAI/yuri-agent/internal/config"
 	"github.com/OrdoAI/yuri-agent/internal/observability"
 	"github.com/OrdoAI/yuri-agent/internal/plugins"
@@ -203,7 +204,7 @@ func (b *Bridge) Shutdown(ctx context.Context) {
 
 // Health is the lightweight bridge smoke endpoint.
 func (b *Bridge) Health() Status {
-	return Status{State: "ready", Version: "0.7.0-stage7", Platform: runtime.GOOS + "/" + runtime.GOARCH}
+	return Status{State: "ready", Version: buildinfo.Version, Platform: runtime.GOOS + "/" + runtime.GOARCH}
 }
 
 func (b *Bridge) context() (context.Context, context.CancelFunc) {

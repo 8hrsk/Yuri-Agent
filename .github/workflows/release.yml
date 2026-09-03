@@ -1,0 +1,206 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Select release version
+    runs-on: [self-hosted, macOS, ARM64]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Derive SemVer
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(scripts/release/next-version.sh "$GITHUB_WORKSPACE")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Release version: $version"
+
+  macos:
+    name: Build macOS universal
+    needs: version
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build and verify macOS release
+        run: scripts/release/build-unix.sh darwin universal "${{ needs.version.outputs.version }}" dist/release .tools
+
+      - name: Upload macOS release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-macos-${{ needs.version.outputs.version }}
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 3
+
+  linux:
+    name: Build experimental Linux
+    needs: version
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build and verify Linux releases on macOS host
+        run: |
+          set -euo pipefail
+          scripts/release/build-unix.sh linux amd64 "${{ needs.version.outputs.version }}" dist/release .tools
+          scripts/release/build-unix.sh linux arm64 "${{ needs.version.outputs.version }}" dist/release .tools
+
+      - name: Upload Linux release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-linux-${{ needs.version.outputs.version }}
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 3
+
+  windows:
+    name: Build Windows x64 and arm64
+    needs: version
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build and verify Windows releases
+        shell: powershell
+        run: |
+          $version = "${{ needs.version.outputs.version }}"
+          $buildDate = [datetime]::UtcNow.ToString("o")
+          & ".\scripts\windows-runner\Invoke-YuriWindowsPipeline.ps1" `
+            -RepositoryRoot $env:GITHUB_WORKSPACE `
+            -ArtifactDirectory (Join-Path $env:RUNNER_TEMP "yuri-windows-release") `
+            -ToolsDirectory (Join-Path $env:RUNNER_TOOL_CACHE "yuri-wails") `
+            -Architecture amd64 `
+            -ArtifactBaseName "yuri-$version-windows-amd64" `
+            -Version $version `
+            -Commit $env:GITHUB_SHA `
+            -BuildDate $buildDate `
+            -LaunchSmokeFlows @()
+          & ".\scripts\windows-runner\Invoke-YuriWindowsPipeline.ps1" `
+            -RepositoryRoot $env:GITHUB_WORKSPACE `
+            -ArtifactDirectory (Join-Path $env:RUNNER_TEMP "yuri-windows-release") `
+            -ToolsDirectory (Join-Path $env:RUNNER_TOOL_CACHE "yuri-wails") `
+            -Architecture arm64 `
+            -ArtifactBaseName "yuri-$version-windows-arm64" `
+            -Version $version `
+            -Commit $env:GITHUB_SHA `
+            -BuildDate $buildDate `
+            -SkipChecks `
+            -LaunchSmokeFlows @()
+
+      - name: Upload Windows release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-windows-${{ needs.version.outputs.version }}
+          path: ${{ runner.temp }}\yuri-windows-release\*
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    name: Tag and publish GitHub Release
+    needs: [version, macos, linux, windows]
+    runs-on: [self-hosted, macOS, ARM64]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Download release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*-${{ needs.version.outputs.version }}
+          path: dist/release
+          merge-multiple: true
+
+      - name: Verify checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=0
+          for checksum in dist/release/*.sha256; do
+            [ -f "$checksum" ] || continue
+            artifact="${checksum%.sha256}"
+            scripts/checksum-artifact.sh --verify "$artifact" "$checksum"
+            found=$((found + 1))
+          done
+          [ "$found" -eq 5 ] || { echo "expected 5 checksum manifests, found $found" >&2; exit 1; }
+
+      - name: Create tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$RELEASE_TAG" "$GITHUB_SHA" -m "Yuri $RELEASE_VERSION"
+            git push origin "$RELEASE_TAG"
+          fi
+          notice='Linux packages are experimental and may be unstable. They are built as native ELF binaries in Linux containers hosted on the self-hosted macOS runner.'
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/release/* --clobber
+            gh release edit "$RELEASE_TAG" --draft=false --latest --title "Yuri $RELEASE_VERSION"
+          else
+            gh release create "$RELEASE_TAG" dist/release/* \
+              --verify-tag \
+              --title "Yuri $RELEASE_VERSION" \
+              --generate-notes \
+              --notes "$notice"
+          fi

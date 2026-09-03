@@ -1,0 +1,13 @@
+.git
+.github
+.tools
+bin
+dist
+cmd/yuri/build/bin
+frontend/node_modules
+frontend/coverage
+frontend/dist
+frontend/wailsjs
+*.db
+*.db-shm
+*.db-wal

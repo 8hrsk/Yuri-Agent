@@ -9,6 +9,20 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ToolsDirectory,
 
+    [ValidateSet("amd64", "arm64")]
+    [string]$Architecture = "amd64",
+
+    [string]$ArtifactBaseName = "yuri",
+
+    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')]
+    [string]$Version = "0.7.0",
+
+    [string]$Commit = "unknown",
+
+    [string]$BuildDate = ([datetime]::UtcNow.ToString("o")),
+
+    [switch]$SkipChecks,
+
     [string[]]$LaunchSmokeFlows = @("onboarding", "voice")
 )
 
@@ -91,19 +105,21 @@ if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^22\.') {
 }
 
 Invoke-InDirectory $repository {
-    Invoke-Native $git @("show", "--check", "--format=", "HEAD") "Check commit whitespace"
-    Invoke-Native $go @("mod", "download") "Download Go modules"
-    Test-GoFormatting $gofmt
-    Invoke-Native $go (@("vet") + $goPackages) "Go vet"
-    Invoke-Native $go (@("test", "-count=1", "-timeout=15m") + $goPackages) "Go tests"
+    if (-not $SkipChecks) {
+        Invoke-Native $git @("show", "--check", "--format=", "HEAD") "Check commit whitespace"
+        Invoke-Native $go @("mod", "download") "Download Go modules"
+        Test-GoFormatting $gofmt
+        Invoke-Native $go (@("vet") + $goPackages) "Go vet"
+        Invoke-Native $go (@("test", "-count=1", "-timeout=15m") + $goPackages) "Go tests"
 
-    Invoke-Native $npm @("--prefix", "frontend", "ci", "--no-audit", "--no-fund") "Install frontend dependencies"
-    Invoke-Native $npm @("--prefix", "frontend", "run", "lint") "Frontend ESLint"
-    Invoke-Native $npm @("--prefix", "frontend", "run", "lint:css") "Frontend stylesheet lint"
-    Invoke-Native $npm @("--prefix", "frontend", "run", "lint:contract") "Go/TypeScript bridge contract"
-    Invoke-Native $npm @("--prefix", "frontend", "run", "typecheck") "Frontend typecheck"
-    Invoke-Native $npm @("--prefix", "frontend", "test", "--", "--run") "Frontend tests"
-    Invoke-Native $npm @("--prefix", "frontend", "run", "build") "Frontend production build"
+        Invoke-Native $npm @("--prefix", "frontend", "ci", "--no-audit", "--no-fund") "Install frontend dependencies"
+        Invoke-Native $npm @("--prefix", "frontend", "run", "lint") "Frontend ESLint"
+        Invoke-Native $npm @("--prefix", "frontend", "run", "lint:css") "Frontend stylesheet lint"
+        Invoke-Native $npm @("--prefix", "frontend", "run", "lint:contract") "Go/TypeScript bridge contract"
+        Invoke-Native $npm @("--prefix", "frontend", "run", "typecheck") "Frontend typecheck"
+        Invoke-Native $npm @("--prefix", "frontend", "test", "--", "--run") "Frontend tests"
+        Invoke-Native $npm @("--prefix", "frontend", "run", "build") "Frontend production build"
+    }
 
     New-Item -ItemType Directory -Path $ToolsDirectory -Force | Out-Null
     $wails = Join-Path $ToolsDirectory "wails.exe"
@@ -122,14 +138,30 @@ Invoke-InDirectory $repository {
             $env:GOBIN = $previousGoBin
         }
     }
-    Invoke-Native $wails @("doctor") "Wails environment diagnostics"
+    if (-not $SkipChecks) {
+        Invoke-Native $wails @("doctor") "Wails environment diagnostics"
+    }
 
     $desktopRoot = Join-Path $repository "cmd\yuri"
-    Invoke-InDirectory $desktopRoot {
-        Invoke-Native $wails @(
-            "build", "-clean", "-platform", "windows/amd64", "-trimpath",
-            "-ldflags", "-s -w", "-nosyncgomod"
-        ) "Build Windows Wails application"
+    $wailsConfig = Join-Path $desktopRoot "wails.json"
+    $originalWailsConfig = [System.IO.File]::ReadAllText($wailsConfig)
+    try {
+        $config = $originalWailsConfig | ConvertFrom-Json
+        $config.info.productVersion = $Version
+        $updatedConfig = $config | ConvertTo-Json -Depth 20
+        [System.IO.File]::WriteAllText($wailsConfig, "$updatedConfig`n", [System.Text.UTF8Encoding]::new($false))
+        $ldflags = "-s -w -X github.com/OrdoAI/yuri-agent/internal/buildinfo.Version=$Version " +
+            "-X github.com/OrdoAI/yuri-agent/internal/buildinfo.Commit=$Commit " +
+            "-X github.com/OrdoAI/yuri-agent/internal/buildinfo.Date=$BuildDate"
+        Invoke-InDirectory $desktopRoot {
+            Invoke-Native $wails @(
+                "build", "-clean", "-platform", "windows/$Architecture", "-trimpath",
+                "-ldflags", $ldflags, "-nosyncgomod", "-s"
+            ) "Build Windows Wails application"
+        }
+    }
+    finally {
+        [System.IO.File]::WriteAllText($wailsConfig, $originalWailsConfig, [System.Text.UTF8Encoding]::new($false))
     }
 }
 
@@ -147,19 +179,24 @@ foreach ($flow in $LaunchSmokeFlows) {
 }
 
 New-Item -ItemType Directory -Path $ArtifactDirectory -Force | Out-Null
-$artifact = Join-Path $ArtifactDirectory "yuri.exe"
+$artifact = Join-Path $ArtifactDirectory "$ArtifactBaseName.exe"
 Copy-Item -LiteralPath $builtExecutable -Destination $artifact -Force
 $checksum = (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
-Set-Content -LiteralPath (Join-Path $ArtifactDirectory "yuri.exe.sha256") `
-    -Value "$checksum  yuri.exe" -Encoding ASCII
+Set-Content -LiteralPath (Join-Path $ArtifactDirectory "$ArtifactBaseName.exe.sha256") `
+    -Value "$checksum  $ArtifactBaseName.exe" -Encoding ASCII
+
+$metadataName = if ($ArtifactBaseName -eq "yuri") { "build.json" } else { "$ArtifactBaseName.json" }
 
 $metadata = [ordered]@{
-    builtAtUtc = [datetime]::UtcNow.ToString("o")
-    platform = "windows/amd64"
+    version = $Version
+    commit = $Commit
+    builtAtUtc = $BuildDate
+    platform = "windows/$Architecture"
     goVersion = $goVersion
     nodeVersion = $nodeVersion
     wailsVersion = $wailsVersion
+    artifact = "$ArtifactBaseName.exe"
     sha256 = $checksum
 }
-$metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ArtifactDirectory "build.json") -Encoding UTF8
+$metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ArtifactDirectory $metadataName) -Encoding UTF8
 Write-Host "`nWindows pipeline passed. Artifact: $artifact"

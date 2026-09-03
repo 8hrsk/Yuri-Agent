@@ -12,7 +12,7 @@
 
 Yuri is a personal AI workspace designed for a single owner. It combines a desktop chat experience with durable local memory, configurable agent identities, background tasks, voice interaction, plugins, and controlled collaboration between multiple named agents.
 
-The project is macOS-first. Its domain and application layers are kept portable so Windows and Linux support can be added later.
+The project is macOS-first. Release builds are also produced for Windows and, on an experimental basis, Linux.
 
 ## Project idea
 
@@ -45,17 +45,25 @@ See the [product specification](docs/PRODUCT_SPEC.md), [architecture](docs/ARCHI
 
 Prebuilt packages, when available, are published on the [GitHub Releases page](https://github.com/8hrsk/Yuri-Agent/releases).
 
-1. Download the latest macOS archive and its `.sha256` file.
+1. Download the package for your operating system and its matching `.sha256` file.
 2. Verify the archive before opening it:
 
    ```bash
    shasum -a 256 -c yuri-<version>-macos-universal.zip.sha256
    ```
 
-3. Unzip the archive and move `yuri.app` to `Applications`.
+3. Unpack the macOS/Linux archive or use the Windows executable.
 4. Open Yuri and complete the onboarding flow to create an agent and connect a supported model provider.
 
-The current open-source macOS build targets macOS 11 or newer and contains both Apple Silicon and Intel architectures. Unless a release explicitly says otherwise, community artifacts are not signed or notarized. Review the release notes and checksum before running them. More details are available in the [macOS release guide](docs/MACOS_RELEASE.md).
+The current open-source macOS build targets macOS 11 or newer and contains both Apple Silicon and Intel architectures. Windows packages are published for x64 and arm64. Unless a release explicitly says otherwise, community artifacts are not signed or notarized. Review the release notes and checksum before running them. More details are available in the [macOS release guide](docs/MACOS_RELEASE.md).
+
+> **Linux builds are experimental and may be unstable.** They are produced as native ELF binaries inside Linux containers running on the self-hosted macOS build host. Test them in a non-critical environment and keep a backup of the local Yuri profile.
+
+## Versions and releases
+
+Yuri uses stable [Semantic Versioning](https://semver.org/) tags in the form `vMAJOR.MINOR.PATCH`. Every push to `main` starts the self-hosted release workflow and publishes a GitHub Release after all macOS, Windows, and Linux packages and checksums have been built successfully.
+
+The initial release line is defined by `VERSION`. After a release exists, conventional commit messages select the automatic increment: `feat:` increments the minor version, `BREAKING CHANGE:` or `type!:` increments the major version, and every other change increments the patch version. Raising `VERSION` above the latest tag explicitly starts a newer release line. The release version is embedded into the application and used in artifact names.
 
 ## Build from source
 
@@ -66,6 +74,7 @@ The current open-source macOS build targets macOS 11 or newer and contains both 
 - Go 1.25
 - Node.js 22 and npm
 - GNU Make
+- Docker Desktop with buildx (only for Linux release builds on macOS)
 
 Clone and verify the project:
 
@@ -89,7 +98,7 @@ open cmd/yuri/build/bin/yuri.app
 make macos-smoke YURI_VERSION=0.7.0
 ```
 
-The archive and checksum are written to `dist/macos/`.
+The archive and checksum are written to `dist/macos/`. The release workflow itself runs exclusively on the repository's self-hosted macOS and Windows runners; pull-request code is not executed on those machines.
 
 For development with hot reload:
 
