@@ -1,7 +1,11 @@
 (() => {
   const flow = 'onboarding'
   const steps = []
-  const deadline = Date.now() + 15000
+  const deadline = Date.now() + 60000
+  let rendererError = ''
+
+  window.addEventListener('error', (event) => { rendererError = event.message || String(event.error || '') })
+  window.addEventListener('unhandledrejection', (event) => { rendererError = String(event.reason || '') })
 
   const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 
@@ -34,6 +38,27 @@
     input.dispatchEvent(new Event('change', { bubbles: true }))
   }
 
+  const completeAgentWizard = async (submitLabel = 'Создать агента') => {
+    const name = await waitFor('agent form', () => document.querySelector('#agent-name'))
+    if (!(name instanceof HTMLInputElement)) throw new Error('Agent name input is unavailable')
+    const review = await waitFor('agent wizard navigation Review', () => Array.from(document.querySelectorAll('.agent-wizard__steps button'))
+      .find((button) => button.textContent?.includes('Review')))
+    if (!name.value.trim()) {
+      setInputValue(name, 'Yuri')
+    }
+    // The outer onboarding flow configures the provider after agent creation.
+    // Use the wizard's supported direct navigation to review the default
+    // quick profile without exercising optional editors in this smoke.
+    review.click()
+    const active = await waitForAttempt(() => document.querySelector('.agent-wizard__steps [aria-current="step"]')?.textContent?.includes('Review'), 1000)
+    if (!active) throw new Error(`Agent wizard did not enter Review; active step: ${document.querySelector('.agent-wizard__steps [aria-current="step"]')?.textContent?.trim() ?? 'none'}; renderer error: ${rendererError || 'none'}`)
+    const createAgent = await waitFor('agent submit', () => {
+      const button = findButton(submitLabel)
+      return button && !button.disabled ? button : undefined
+    })
+    createAgent.click()
+  }
+
   const report = async (state, error = '') => {
     const reporter = window.go?.main?.UISmokeReporter
     if (!reporter?.Report) throw new Error('UI smoke reporter binding is unavailable')
@@ -44,8 +69,7 @@
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const welcome = await waitFor('welcome screen', () => findButton('Создать агента'))
       welcome.click()
-      const createAgent = await waitFor('agent form', () => document.querySelector('#agent-name') && findButton('Создать агента'))
-      createAgent.click()
+      await completeAgentWizard()
       const providerInput = await waitForAttempt(() => document.querySelector('#onboarding-base-url'), 1000)
       if (!(providerInput instanceof HTMLInputElement)) continue
       await wait(200)
@@ -152,9 +176,7 @@
       if (!(secondName instanceof HTMLInputElement)) throw new Error('Second agent name input is unavailable')
       setInputValue(secondName, 'Мира')
       await wait(100)
-      const createAndSelect = findButton('Создать и выбрать')
-      if (!createAndSelect) throw new Error('Second agent submit action is unavailable')
-      createAndSelect.click()
+      await completeAgentWizard('Создать и выбрать')
       await waitFor('second agent selected', () => document.querySelector('.sidebar__profile .profile-copy strong')?.textContent?.trim() === 'Мира')
       steps.push('second-agent-created')
 

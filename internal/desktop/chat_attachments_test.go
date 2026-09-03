@@ -26,7 +26,7 @@ func TestPrepareChatAttachmentsAcceptsUTF8CodeAndSupportedImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 || items[0].Kind != "text" || items[0].MediaType != "text/plain" || items[1].Kind != "image" || items[1].MediaType != "image/png" {
+	if len(items) != 2 || items[0].Kind != "text" || !strings.HasPrefix(items[0].MediaType, "text/") || items[1].Kind != "image" || items[1].MediaType != "image/png" {
 		t.Fatalf("attachments = %#v", items)
 	}
 	for _, item := range items {

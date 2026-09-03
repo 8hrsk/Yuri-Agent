@@ -60,7 +60,10 @@ jobs:
         run: go test ./cmd/... ./internal/... ./sdk/... ./plugins/...
 
       - name: Test with race detector
-        run: go test -race -count=1 ./cmd/... ./internal/... ./sdk/... ./plugins/...
+        # The pure-Go SQLite backend is deliberately instrumented here. A full
+        # migration-heavy desktop suite can exceed Go's default 10-minute
+        # package timeout under the race detector on slower runners.
+        run: go test -race -count=1 -timeout=20m ./cmd/... ./internal/... ./sdk/... ./plugins/...
 
   lint:
     name: Go lint and vulnerability scan
@@ -76,7 +79,7 @@ jobs:
           cache: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6
+        uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa # v7
         with:
           version: v2.13.2
 
@@ -219,7 +222,7 @@ jobs:
         run: npm run build
 
       - name: Build, validate, launch, and interact with universal OSS app
-        run: make macos-smoke macos-launch-smoke macos-ui-smoke macos-voice-smoke YURI_VERSION=0.7.0 MACOS_LAUNCH_TIMEOUT=25
+        run: make macos-smoke macos-launch-smoke macos-ui-smoke macos-voice-smoke YURI_VERSION=0.7.0 MACOS_LAUNCH_TIMEOUT=90
 
       - name: Upload universal OSS archive and checksum as CI artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

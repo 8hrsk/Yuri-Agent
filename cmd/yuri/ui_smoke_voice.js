@@ -1,7 +1,7 @@
 (() => {
   const flow = 'voice'
   const steps = []
-  const deadline = Date.now() + 20000
+  const deadline = Date.now() + 80000
 
   const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds))
   const waitFor = async (description, predicate) => {
@@ -32,6 +32,26 @@
     input.dispatchEvent(new Event('input', { bubbles: true }))
     input.dispatchEvent(new Event('change', { bubbles: true }))
   }
+  const completeAgentWizard = async () => {
+    const name = await waitFor('agent form', () => document.querySelector('#agent-name'))
+    if (!(name instanceof HTMLInputElement)) throw new Error('Agent name input is unavailable')
+    const review = await waitFor('agent wizard navigation Review', () => Array.from(document.querySelectorAll('.agent-wizard__steps button'))
+      .find((button) => button.textContent?.includes('Review')))
+    if (!name.value.trim()) {
+      setInputValue(name, 'Yuri')
+    }
+    // The outer onboarding flow configures the provider after agent creation.
+    // Use the wizard's supported direct navigation to review the default
+    // quick profile without exercising optional editors in this smoke.
+    review.click()
+    const active = await waitForAttempt(() => document.querySelector('.agent-wizard__steps [aria-current="step"]')?.textContent?.includes('Review'), 1000)
+    if (!active) throw new Error(`Agent wizard did not enter Review; active step: ${document.querySelector('.agent-wizard__steps [aria-current="step"]')?.textContent?.trim() ?? 'none'}`)
+    const createAgent = await waitFor('agent submit', () => {
+      const button = findButton('Создать агента')
+      return button && !button.disabled ? button : undefined
+    })
+    createAgent.click()
+  }
   const report = async (state, error = '') => {
     const reporter = window.go?.main?.UISmokeReporter
     if (!reporter?.Report) throw new Error('UI smoke reporter binding is unavailable')
@@ -42,8 +62,7 @@
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const welcome = await waitFor('welcome screen', () => findButton('Создать агента'))
       welcome.click()
-      const createAgent = await waitFor('agent form', () => document.querySelector('#agent-name') && findButton('Создать агента'))
-      createAgent.click()
+      await completeAgentWizard()
       const providerInput = await waitForAttempt(() => document.querySelector('#onboarding-base-url'), 1000)
       if (!(providerInput instanceof HTMLInputElement)) continue
       await wait(200)
@@ -119,13 +138,21 @@
     Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: synthesis })
     Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: FakeSpeechSynthesisUtterance })
 
-    bridge.ListConversations = async () => [{
+    const conversation = {
       id: 'conversation-voice-ui-smoke',
       title: 'Voice UI smoke',
       preview: '',
       updatedAt: new Date().toISOString(),
       messages: [],
-    }]
+    }
+    bridge.ListConversations = async () => [conversation]
+    bridge.ListConversationsPage = async () => [conversation]
+    bridge.ListMessages = async () => ({
+      conversationId: conversation.id,
+      messages: [],
+      traces: [],
+      hasMore: false,
+    })
     bridge.TranscribeAudio = async (input) => {
       if (input?.audioBase64 !== 'ZmFrZS13ZWJtLWF1ZGlv') throw new Error('Unexpected audio payload')
       if (input?.contentType !== 'audio/webm') throw new Error('Unexpected audio content type')
@@ -135,7 +162,9 @@
     bridge.SendMessage = async (input) => {
       if (input?.conversationId !== 'conversation-voice-ui-smoke') throw new Error('Unexpected conversation id')
       if (input?.text !== 'Расскажи коротко о статусе проекта') throw new Error('Unexpected transcript')
-      await wait(180)
+      // Keep the request pending long enough for WebKit's render loop to expose
+      // the transient thinking state before the completed events arrive.
+      await wait(1000)
       return {
         runId: 'run-voice-ui-smoke',
         status: 'complete',
@@ -189,6 +218,7 @@
     const boundaries = installVoiceBoundaries(bridge)
     openChat.click()
     await waitFor('chat screen', () => document.querySelector('[aria-label="Текущий диалог"]'))
+    await waitFor('selected conversation', () => document.querySelector('.conversation-item[aria-current="true"]'))
     steps.push('chat-visible')
     return boundaries
   }

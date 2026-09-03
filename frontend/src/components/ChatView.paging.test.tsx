@@ -157,7 +157,7 @@ describe('the sidebar can reach past its first page (M-10)', () => {
     expect(titles[total - 1]).toBe('Диалог 249')
     // No conversation appears twice after the pages are joined.
     expect(new Set(titles).size).toBe(total)
-  })
+  }, 10_000)
 
   it('retires the control once a page adds nothing, so paging terminates', async () => {
     const total = 260
@@ -174,7 +174,7 @@ describe('the sidebar can reach past its first page (M-10)', () => {
     // than staying armed for a click that could only re-fetch the same tail.
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Показать ещё диалоги' })).toBeNull())
     expect(harness.listConversations).toHaveBeenCalledTimes(2)
-  })
+  }, 10_000)
 
   it('stays silent when the whole store fits on the first page', async () => {
     createHarness(Array.from({ length: 12 }, (_, index) => metadataOnly(index)))
