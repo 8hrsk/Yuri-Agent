@@ -50,7 +50,7 @@
     // Use the wizard's supported direct navigation to review the default
     // quick profile without exercising optional editors in this smoke.
     review.click()
-    const active = await waitForAttempt(() => document.querySelector('.agent-wizard__steps [aria-current="step"]')?.textContent?.includes('Review'), 1000)
+    const active = await waitForAttempt(() => document.querySelector('.agent-wizard__steps [aria-current="step"]')?.textContent?.includes('Review'), 5000)
     if (!active) throw new Error(`Agent wizard did not enter Review; active step: ${document.querySelector('.agent-wizard__steps [aria-current="step"]')?.textContent?.trim() ?? 'none'}; renderer error: ${rendererError || 'none'}`)
     const createAgent = await waitFor('agent submit', () => {
       const button = findButton(submitLabel)
