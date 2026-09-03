@@ -39,7 +39,8 @@ func assertGolden(t *testing.T, name, got string) {
 	if err != nil {
 		t.Fatalf("read golden %s: %v (regenerate with -update-golden)", path, err)
 	}
-	if string(want) != got {
+	wantText := strings.ReplaceAll(string(want), "\r\n", "\n")
+	if wantText != got {
 		t.Errorf("golden %s mismatch\n--- want ---\n%s\n--- got ---\n%s", path, want, got)
 	}
 }

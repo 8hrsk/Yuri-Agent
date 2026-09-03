@@ -60,7 +60,10 @@ func TestOpenRejectsTruncatedDatabase(t *testing.T) {
 
 func TestOpenCleansSuccessfulMigrationBackup(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "yuri.sqlite3")
-	createLegacyDatabase(t, path, 4)
+	legacy := createLegacyDatabase(t, path, 4)
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	database, err := Open(context.Background(), path)
 	if err != nil {

@@ -213,7 +213,7 @@ func ReadBackupMetadata(backupPath string) (BackupMetadata, error) {
 	if err != nil {
 		return BackupMetadata{}, fmt.Errorf("inspect backup metadata: %w", err)
 	}
-	if !info.Mode().IsRegular() || info.Mode()&0o077 != 0 {
+	if !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode()&0o077 != 0) {
 		return BackupMetadata{}, errors.New("backup metadata is not owner-only")
 	}
 	content, err := os.ReadFile(metadataPath)
