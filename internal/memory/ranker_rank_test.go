@@ -68,7 +68,7 @@ func formatRank(results []RecallResult) string {
 	fmt.Fprintf(&builder, "results=%d\n", len(results))
 	for _, result := range results {
 		fmt.Fprintf(&builder,
-			"%s score=%.17g lexical=%.17g vector=%.17g recency=%.17g salience=%.17g affective=%.17g dormant=%t snippet=%q sources=%d\n",
+			"%s score=%.12g lexical=%.12g vector=%.12g recency=%.12g salience=%.12g affective=%.12g dormant=%t snippet=%q sources=%d\n",
 			result.Memory.ID, result.Score, result.LexicalScore, result.VectorScore, result.RecencyScore,
 			result.SalienceScore, result.AffectiveScore, result.Dormant, result.Evidence.Snippet, len(result.Evidence.Sources))
 	}

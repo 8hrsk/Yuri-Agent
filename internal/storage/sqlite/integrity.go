@@ -321,6 +321,15 @@ func createBackup(ctx context.Context, database *sql.DB, databasePath string, pe
 		return BackupMetadata{}, err
 	}
 
+	if err := verifySnapshot(ctx, temporaryPath); err != nil {
+		return BackupMetadata{}, fmt.Errorf("verify sqlite backup snapshot: %w", err)
+	}
+	// Verification opens the SQLite file through the driver. Re-sync and
+	// inspect it afterwards so metadata describes the fully finalized bytes on
+	// platforms where that open can update file-level bookkeeping.
+	if err := syncFile(temporaryPath); err != nil {
+		return BackupMetadata{}, fmt.Errorf("sync verified sqlite backup snapshot: %w", err)
+	}
 	fileInfo, err := os.Stat(temporaryPath)
 	if err != nil {
 		return BackupMetadata{}, fmt.Errorf("stat sqlite backup snapshot: %w", err)
@@ -331,9 +340,6 @@ func createBackup(ctx context.Context, database *sql.DB, databasePath string, pe
 	checksum, err := checksumFile(ctx, temporaryPath)
 	if err != nil {
 		return BackupMetadata{}, fmt.Errorf("checksum sqlite backup snapshot: %w", err)
-	}
-	if err := verifySnapshot(ctx, temporaryPath); err != nil {
-		return BackupMetadata{}, fmt.Errorf("verify sqlite backup snapshot: %w", err)
 	}
 
 	createdAt := time.Now().UTC()

@@ -1,11 +1,11 @@
 results=10
 clamped-high score=1 lexical=1 vector=1 recency=1 salience=1 affective=1 dormant=false snippet="" sources=0
-dup-higher score=0.90090376044497411 lexical=0.94999999999999996 vector=0.90000000000000002 recency=0.99935840296649325 salience=0.81000000000000005 affective=0.67999999999999994 dormant=false snippet="выигравший фрагмент" sources=0
-dup-lower score=0.70988239354874449 lexical=0.69999999999999996 vector=0.59999999999999998 recency=0.99588262365829738 salience=0.72000000000000008 affective=0.53000000000000003 dormant=false snippet="первый фрагмент" sources=0
-tie-a score=0.54444947169700764 lexical=0.5 vector=0.5 recency=0.96966314464671799 salience=0.40000000000000002 affective=0.38 dormant=false snippet="" sources=0
-tie-b score=0.54444947169700764 lexical=0.5 vector=0.5 recency=0.96966314464671799 salience=0.40000000000000002 affective=0.38 dormant=false snippet="" sources=0
-tie-c score=0.54444947169700764 lexical=0.5 vector=0.5 recency=0.96966314464671799 salience=0.40000000000000002 affective=0.38 dormant=false snippet="" sources=0
-dup-equal score=0.38771541529773917 lexical=0.29999999999999999 vector=0.29999999999999999 recency=0.99810276865159464 salience=0.23999999999999999 affective=0.19999999999999998 dormant=false snippet="первое равное" sources=0
-dormant-1 score=0.37829028055169794 lexical=0.40000000000000002 vector=0.20000000000000001 recency=0.66193520367798597 salience=0.41999999999999998 affective=0.29999999999999999 dormant=true snippet="" sources=0
-future-1 score=0.33000000000000002 lexical=0.25 vector=0.25 recency=1 salience=0.14999999999999999 affective=0 dormant=false snippet="" sources=0
-clamped-low score=0.17298816600627878 lexical=0 vector=0 recency=0.67325444004185853 salience=0.36000000000000004 affective=0 dormant=false snippet="" sources=0
+dup-higher score=0.900903760445 lexical=0.95 vector=0.9 recency=0.999358402966 salience=0.81 affective=0.68 dormant=false snippet="выигравший фрагмент" sources=0
+dup-lower score=0.709882393549 lexical=0.7 vector=0.6 recency=0.995882623658 salience=0.72 affective=0.53 dormant=false snippet="первый фрагмент" sources=0
+tie-a score=0.544449471697 lexical=0.5 vector=0.5 recency=0.969663144647 salience=0.4 affective=0.38 dormant=false snippet="" sources=0
+tie-b score=0.544449471697 lexical=0.5 vector=0.5 recency=0.969663144647 salience=0.4 affective=0.38 dormant=false snippet="" sources=0
+tie-c score=0.544449471697 lexical=0.5 vector=0.5 recency=0.969663144647 salience=0.4 affective=0.38 dormant=false snippet="" sources=0
+dup-equal score=0.387715415298 lexical=0.3 vector=0.3 recency=0.998102768652 salience=0.24 affective=0.2 dormant=false snippet="первое равное" sources=0
+dormant-1 score=0.378290280552 lexical=0.4 vector=0.2 recency=0.661935203678 salience=0.42 affective=0.3 dormant=true snippet="" sources=0
+future-1 score=0.33 lexical=0.25 vector=0.25 recency=1 salience=0.15 affective=0 dormant=false snippet="" sources=0
+clamped-low score=0.172988166006 lexical=0 vector=0 recency=0.673254440042 salience=0.36 affective=0 dormant=false snippet="" sources=0
