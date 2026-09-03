@@ -531,8 +531,7 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 		}
 		return err
 	}
-	select {
-	case resultResponse, ok := <-channel:
+	handleResponse := func(resultResponse response, ok bool) error {
 		if !ok {
 			if err := c.Err(); err != nil {
 				return err
@@ -552,6 +551,10 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 			return fmt.Errorf("%w: decode %s result: %v", ErrInvalidProtocol, method, err)
 		}
 		return nil
+	}
+	select {
+	case resultResponse, ok := <-channel:
+		return handleResponse(resultResponse, ok)
 	case <-ctx.Done():
 		c.removePending(id)
 		// Graceful cancellation first: killing the process group is an
@@ -559,6 +562,16 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 		c.CancelRequest(id)
 		return ctx.Err()
 	case <-c.done:
+		// waitProcess does not close done until readStdout has drained every
+		// protocol frame. A short-lived plugin may therefore make both done and
+		// this response ready at once (shutdown is the common case). Prefer the
+		// response the plugin actually sent instead of randomly reporting its
+		// subsequent clean exit from this select.
+		select {
+		case resultResponse, ok := <-channel:
+			return handleResponse(resultResponse, ok)
+		default:
+		}
 		if err := c.Err(); err != nil {
 			return err
 		}
