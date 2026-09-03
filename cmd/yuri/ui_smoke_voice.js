@@ -59,15 +59,22 @@
   }
 
   const enterStableProviderStep = async () => {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const welcome = await waitFor('welcome screen', () => findButton('Создать агента'))
-      welcome.click()
-      await completeAgentWizard()
-      const providerInput = await waitForAttempt(() => document.querySelector('#onboarding-base-url'), 1000)
-      if (!(providerInput instanceof HTMLInputElement)) continue
-      await wait(200)
-      const stableInput = document.querySelector('#onboarding-base-url')
-      if (stableInput instanceof HTMLInputElement) return stableInput
+    while (Date.now() < deadline) {
+      const providerInput = document.querySelector('#onboarding-base-url')
+      if (providerInput instanceof HTMLInputElement) {
+        await wait(200)
+        const stableInput = document.querySelector('#onboarding-base-url')
+        if (stableInput instanceof HTMLInputElement) return stableInput
+        continue
+      }
+      if (document.querySelector('#agent-name')) {
+        await completeAgentWizard()
+        await wait(300)
+        continue
+      }
+      const createAgent = findButton('Создать агента')
+      if (createAgent && !createAgent.disabled) createAgent.click()
+      await wait(300)
     }
     throw new Error('Provider screen did not become stable')
   }
