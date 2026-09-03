@@ -93,7 +93,7 @@ func TestFilesystemReadRequestsAccessAndResumesSameCall(t *testing.T) {
 				finished <- runErr
 			}()
 
-			approvalID := waitForFilesystemApproval(t, bridge)
+			approvalID := waitForFilesystemApproval(t, bridge, emitter)
 			var approvalView *ApprovalView
 			for _, event := range emitter.Events() {
 				if event.Approval != nil {

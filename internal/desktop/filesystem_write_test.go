@@ -139,7 +139,7 @@ func TestFilesystemWriteApprovalAuditFlow(t *testing.T) {
 				finished <- runErr
 			}()
 
-			approvalID := waitForFilesystemApproval(t, bridge)
+			approvalID := waitForFilesystemApproval(t, bridge, emitter)
 			if err := bridge.ResolveApproval(approvalDecisionInput{ApprovalID: approvalID, Decision: test.decision}); err != nil {
 				t.Fatal(err)
 			}
@@ -230,18 +230,26 @@ func TestFilesystemWriteApprovalAuditFlow(t *testing.T) {
 	}
 }
 
-func waitForFilesystemApproval(t *testing.T, bridge *Bridge) string {
+func waitForFilesystemApproval(t *testing.T, bridge *Bridge, emitter *chatEmitter) string {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
+		approvalID := ""
 		bridge.mu.RLock()
 		for id := range bridge.approvals {
-			bridge.mu.RUnlock()
-			return id
+			approvalID = id
+			break
 		}
 		bridge.mu.RUnlock()
+		if approvalID != "" {
+			for _, event := range emitter.Events() {
+				if event.Approval != nil && event.Approval.ID == approvalID {
+					return approvalID
+				}
+			}
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("approval was not registered")
+	t.Fatal("approval was not registered and emitted")
 	return ""
 }
