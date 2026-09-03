@@ -255,7 +255,7 @@ func VerifyBackup(ctx context.Context, backupPath string) (BackupMetadata, error
 	if err != nil {
 		return BackupMetadata{}, fmt.Errorf("stat backup: %w", err)
 	}
-	if !info.Mode().IsRegular() || info.Mode()&0o077 != 0 || info.Size() != metadata.Size {
+	if !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode()&0o077 != 0) || info.Size() != metadata.Size {
 		return BackupMetadata{}, errors.New("backup size does not match metadata")
 	}
 	checksum, err := checksumFile(ctx, backupPath)

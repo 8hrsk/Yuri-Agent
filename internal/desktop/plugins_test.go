@@ -105,7 +105,12 @@ func TestPluginPackageInspectionAndInstallRequireDevMode(t *testing.T) {
 		t.Fatalf("listed plugins = %#v, %v", listed, err)
 	}
 	events, err := repositories.Audit.List(context.Background(), 10)
-	if err != nil || len(events) != 4 || events[3].Action != "plugin.install" {
+	actions := make(map[string]int, len(events))
+	for _, event := range events {
+		actions[event.Action]++
+	}
+	if err != nil || len(events) != 4 || actions["plugin.install"] != 1 || actions["plugin.enable"] != 1 ||
+		actions["plugin.stop"] != 1 || actions["plugin.disable"] != 1 {
 		t.Fatalf("audit events = %#v, %v", events, err)
 	}
 	if err := bridge.UninstallPlugin(PluginIDRequest{ID: manifest.ID}); err != nil {
