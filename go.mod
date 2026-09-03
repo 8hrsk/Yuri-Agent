@@ -1,6 +1,6 @@
 module github.com/OrdoAI/yuri-agent
 
-go 1.25.0
+go 1.25.13
 
 require (
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
