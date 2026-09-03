@@ -24,7 +24,11 @@ digest_for() {
 if [ "$mode" = verify ]; then
   [ -f "$checksum_file" ] || { echo "checksum file not found: $checksum_file" >&2; exit 1; }
   manifest=$(awk '
-    NF { lines++; if (NF != 2) malformed=1; else { digest=$1; name=$2 } }
+    NF {
+      lines++
+      if (NF != 2) malformed=1
+      else { digest=$1; name=$2; sub(/\r$/, "", name) }
+    }
     END {
       if (lines != 1 || malformed || digest == "" || name == "") exit 1
       printf "%s\n%s\n", digest, name

@@ -182,8 +182,8 @@ New-Item -ItemType Directory -Path $ArtifactDirectory -Force | Out-Null
 $artifact = Join-Path $ArtifactDirectory "$ArtifactBaseName.exe"
 Copy-Item -LiteralPath $builtExecutable -Destination $artifact -Force
 $checksum = (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
-Set-Content -LiteralPath (Join-Path $ArtifactDirectory "$ArtifactBaseName.exe.sha256") `
-    -Value "$checksum  $ArtifactBaseName.exe" -Encoding ASCII
+$checksumPath = Join-Path $ArtifactDirectory "$ArtifactBaseName.exe.sha256"
+[System.IO.File]::WriteAllText($checksumPath, "$checksum  $ArtifactBaseName.exe`n", [System.Text.Encoding]::ASCII)
 
 $metadataName = if ($ArtifactBaseName -eq "yuri") { "build.json" } else { "$ArtifactBaseName.json" }
 
